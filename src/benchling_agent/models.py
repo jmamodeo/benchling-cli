@@ -1,3 +1,6 @@
+"""Pydantic models shared by the CLI, MCP server and planner: the JSON envelope,
+environment config, entry snapshots and change-plan/journal records."""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -12,6 +15,8 @@ T = TypeVar("T")
 
 
 class ErrorDetail(BaseModel):
+    """Serializable form of a BenchlingAgentError carried in a failed Envelope."""
+
     code: str
     message: str
     retryable: bool = False
@@ -29,29 +34,36 @@ class Envelope(BaseModel, Generic[T]):
 
     @classmethod
     def success(cls, data: T, **meta: Any) -> Envelope[T]:
+        """Build an ok=True envelope wrapping data; extra kwargs become meta."""
         return cls(ok=True, data=data, meta=meta)
 
     @classmethod
-    def failure(
-        cls, error: BenchlingAgentError, **meta: Any
-    ) -> Envelope[dict[str, Any]]:
-        return cast(Envelope[dict[str, Any]], cls(
-            ok=False,
-            error=ErrorDetail(
-                code=error.code,
-                message=error.message,
-                retryable=error.retryable,
-                details=error.details,
+    def failure(cls, error: BenchlingAgentError, **meta: Any) -> Envelope[dict[str, Any]]:
+        """Build an ok=False envelope from an error; no data is included."""
+        return cast(
+            Envelope[dict[str, Any]],
+            cls(
+                ok=False,
+                error=ErrorDetail(
+                    code=error.code,
+                    message=error.message,
+                    retryable=error.retryable,
+                    details=error.details,
+                ),
+                meta=meta,
             ),
-            meta=meta,
-        ))
+        )
 
 
 class AuthMethod(str, Enum):
+    """Supported ways of obtaining an API token."""
+
     CLIENT_CREDENTIALS = "client_credentials"
 
 
-class Profile(BaseModel):
+class Environment(BaseModel):
+    """A named tenant configuration; holds no secrets, only the tenant URL and auth method."""
+
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
@@ -63,6 +75,7 @@ class Profile(BaseModel):
     @field_validator("tenant_url")
     @classmethod
     def strip_url_path(cls, value: HttpUrl) -> HttpUrl:
+        """Require a bare https://host URL; reject credentials, paths, queries and fragments."""
         if value.scheme != "https":
             raise ValueError("tenant_url must use HTTPS")
         if value.username or value.password:
@@ -74,19 +87,24 @@ class Profile(BaseModel):
     @field_validator("client_id")
     @classmethod
     def strip_client_id(cls, value: str | None) -> str | None:
+        """Trim whitespace; blank values become None."""
         return value.strip() if value else None
 
     @property
     def base_url(self) -> str:
+        """Tenant URL without a trailing slash."""
         return str(self.tenant_url).rstrip("/")
 
 
 class TokenBundle(BaseModel):
+    """An access token with its expiry."""
+
     access_token: str
     expires_at: datetime
     token_type: str = "Bearer"
 
     def usable(self, skew_seconds: int = 60) -> bool:
+        """True if the token stays valid for more than skew_seconds; naive expiries are treated as UTC."""
         now = datetime.now(UTC)
         expires = self.expires_at
         if expires.tzinfo is None:
@@ -95,12 +113,19 @@ class TokenBundle(BaseModel):
 
 
 class CompletenessIssue(BaseModel):
+    """A reason part of an entry snapshot could not be retrieved."""
+
     scope: str
     reason: str
     details: dict[str, Any] = Field(default_factory=dict)
 
 
 class EntrySnapshot(BaseModel):
+    """Structured entry content pinned to one version_id.
+
+    completeness is "partial" when issues lists anything that was not retrieved.
+    """
+
     model_config = ConfigDict(populate_by_name=True)
 
     entry: dict[str, Any]
@@ -120,6 +145,8 @@ class EntrySnapshot(BaseModel):
 
 
 class PlanFamily(str, Enum):
+    """Kinds of change a plan can describe; each has its own planner."""
+
     DOCUMENT = "document"
     TABLE = "table"
     FIELDS = "fields"
@@ -127,6 +154,8 @@ class PlanFamily(str, Enum):
 
 
 class PlanStatus(str, Enum):
+    """Lifecycle of a plan; UNKNOWN means the outcome of an apply could not be confirmed."""
+
     PENDING = "pending"
     APPLYING = "applying"
     SUCCEEDED = "succeeded"
@@ -136,12 +165,17 @@ class PlanStatus(str, Enum):
 
 
 class ChangePlan(BaseModel):
+    """Immutable preview of a change: before/after/diff plus preconditions checked at apply time.
+
+    checksum guards against tampering with a stored plan.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     schema_version: Literal["1.0"] = "1.0"
     id: str
     created_at: datetime
-    profile: str
+    env: str
     tenant_url: str
     entry_id: str
     family: PlanFamily
@@ -156,6 +190,8 @@ class ChangePlan(BaseModel):
 
 
 class JournalEvent(BaseModel):
+    """One timestamped stage transition recorded while applying a plan."""
+
     at: datetime
     stage: str
     status: str
@@ -163,6 +199,8 @@ class JournalEvent(BaseModel):
 
 
 class ChangeJournal(BaseModel):
+    """Append-only apply history for a plan, with its overall status and final result."""
+
     plan_id: str
     status: PlanStatus = PlanStatus.PENDING
     events: list[JournalEvent] = Field(default_factory=list)

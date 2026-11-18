@@ -1,3 +1,5 @@
+"""Unstructured table edit planning."""
+
 from __future__ import annotations
 
 from copy import deepcopy
@@ -15,6 +17,8 @@ from .base import PlannerBase, PlanParts
 
 
 class TablePlanning(PlannerBase):
+    """Planning and applying of unstructured table edits."""
+
     async def _plan_table(self, entry_id: str, request: dict[str, Any]) -> PlanParts:
         part_id = request.get("table_part_id")
         if not isinstance(part_id, str):
@@ -24,7 +28,11 @@ class TablePlanning(PlannerBase):
         content = deepcopy(table.get("content") or {})
         if "UnstructuredTable" not in str(content.get("__typename", "")):
             raise UnsupportedError("Only unstructured tables can be edited")
-        before = {"table_part_id": part_id, "version_id": table.get("versionId"), "content": content}
+        before = {
+            "table_part_id": part_id,
+            "version_id": table.get("versionId"),
+            "content": content,
+        }
         after_content = deepcopy(content)
         operation = request.get("operation")
         if operation == "set_cells":
@@ -106,13 +114,19 @@ class TablePlanning(PlannerBase):
                 cell.pop("evaluatedValue", None)
         after_content["isEvaluated"] = False
         self._validate_table_content(after_content)
-        after = {"table_part_id": part_id, "version_id": "changes_on_apply", "content": after_content}
+        after = {
+            "table_part_id": part_id,
+            "version_id": "changes_on_apply",
+            "content": after_content,
+        }
         return (
             before,
             after,
             {"table_version": table.get("versionId"), "entry_id": entry_id},
             ["server-enforced document version check", "complete table replacement"],
-            ["API table edits clear evaluated values until Benchling evaluates the table in the browser"],
+            [
+                "API table edits clear evaluated values until Benchling evaluates the table in the browser"
+            ],
         )
 
     async def _apply_table(self, plan: ChangePlan, journal: ChangeJournal) -> dict[str, Any]:
@@ -129,10 +143,7 @@ class TablePlanning(PlannerBase):
 
     def _normalize_row(self, row: Any, expected_columns: int) -> dict[str, Any]:
         if isinstance(row, list):
-            cells = [
-                {"inputValue": {"type": "text_value", "value": str(value)}}
-                for value in row
-            ]
+            cells = [{"inputValue": {"type": "text_value", "value": str(value)}} for value in row]
             row = {"cells": cells}
         if not isinstance(row, dict) or not isinstance(row.get("cells"), list):
             raise ValidationError("Each table row must contain cells")
@@ -303,9 +314,7 @@ class TablePlanning(PlannerBase):
                     if key in cell:
                         value = cell[key]
                         output_cell[key] = (
-                            self._select(value, allowed)
-                            if isinstance(value, dict)
-                            else value
+                            self._select(value, allowed) if isinstance(value, dict) else value
                         )
                 if "selectorId" in cell:
                     output_cell["selectorId"] = cell["selectorId"]

@@ -27,7 +27,7 @@ async def test_plan_is_persisted_with_stable_checksum_and_diff(runtime) -> None:
     loaded = runtime.repository.load_plan(planned.id)
     assert loaded.checksum == planned.checksum != ""
     assert loaded.diff
-    assert loaded.profile == "sandbox"
+    assert loaded.env == "sandbox"
     assert loaded.tenant_url == "https://your-tenant-dev.benchling.com"
     assert runtime.repository.load_journal(planned.id).status.value == "pending"
 
@@ -63,9 +63,7 @@ async def test_unknown_plan_id_is_rejected(runtime) -> None:
         await runtime.planner.apply("a" * 32)
 
 
-async def test_plan_cannot_be_used_from_another_environment(
-    runtime, fake, monkeypatch
-) -> None:
+async def test_plan_cannot_be_used_from_another_environment(runtime, fake, monkeypatch) -> None:
     monkeypatch.setenv("BENCHLING_OTHER_API_ENDPOINT", "https://other-tenant.benchling.com")
     monkeypatch.setenv("BENCHLING_OTHER_CLIENT_ID", "client")
     monkeypatch.setenv("BENCHLING_OTHER_CLIENT_SECRET", "secret")
@@ -73,11 +71,11 @@ async def test_plan_cannot_be_used_from_another_environment(
     try:
         planned = await delete_plan(runtime)
         for call in (other.planner.apply, other.planner.status):
-            with pytest.raises(ValidationError, match="different profile or tenant") as caught:
+            with pytest.raises(ValidationError, match="different environment or tenant") as caught:
                 await call(planned.id)
             assert caught.value.details == {
-                "plan_profile": "sandbox",
-                "active_profile": "other",
+                "plan_env": "sandbox",
+                "active_env": "other",
             }
         assert fake.writes() == []
         assert runtime.repository.load_journal(planned.id).status.value == "pending"

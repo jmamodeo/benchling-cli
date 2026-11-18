@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "benchling-agent"
-version = "0.1.2"
+dynamic = ["version"]
 description = "Agent-friendly Benchling CLI and local MCP server"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -62,6 +62,9 @@ benchling = "benchling_agent.cli:main"
 [tool.setuptools]
 package-dir = { "" = "src" }
 
+[tool.setuptools.dynamic]
+version = { attr = "benchling_agent.__version__" }
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
@@ -82,10 +85,13 @@ asyncio_default_fixture_loop_scope = "function"
 line-length = 100
 target-version = "py311"
 
+[tool.ruff.format]
+quote-style = "double"
+
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 ignore = [
-  "E501",  # long lines are tolerated; formatter is not enforced
+  "E501",  # the formatter wraps code; long strings and comments are tolerated
   "B008",  # typer uses call expressions in argument defaults
   "B905",  # zip() strictness would change behavior
   "UP042", # str-mixin enums are part of the public API

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import httpx
 import pytest
-from conftest import make_profile
+from conftest import make_environment
 
 from benchling_agent.auth import AuthManager
 from benchling_agent.config import ConfigStore
@@ -25,8 +25,8 @@ def test_config_store_owns_only_plan_journal_and_lock_dirs(tmp_path) -> None:
 def test_missing_secret_is_an_authentication_error() -> None:
     auth = auth_for(lambda request: pytest.fail("no token request expected"), secrets={})
     with pytest.raises(AuthenticationError):
-        auth.headers(make_profile())
-    assert auth.status(make_profile())["configured"] is False
+        auth.headers(make_environment())
+    assert auth.status(make_environment())["configured"] is False
 
 
 @pytest.mark.parametrize(
@@ -39,4 +39,4 @@ def test_missing_secret_is_an_authentication_error() -> None:
 def test_bad_token_responses_are_rejected(payload, error) -> None:
     auth = auth_for(lambda request: httpx.Response(200, json=payload))
     with pytest.raises(error):
-        auth.headers(make_profile())
+        auth.headers(make_environment())

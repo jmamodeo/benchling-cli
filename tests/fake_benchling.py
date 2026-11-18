@@ -88,30 +88,90 @@ def default_table_content() -> dict[str, Any]:
 def field_definitions() -> list[dict[str, Any]]:
     base = {"derivationType": "DIRECT"}
     return [
-        {**base, "id": "tsf_temp", "systemName": "temperature", "name": "Temperature",
-         "__typename": "IntegerFieldDefinition", "isRequired": True, "numericMin": 0,
-         "numericMax": 100},
+        {
+            **base,
+            "id": "tsf_temp",
+            "systemName": "temperature",
+            "name": "Temperature",
+            "__typename": "IntegerFieldDefinition",
+            "isRequired": True,
+            "numericMin": 0,
+            "numericMax": 100,
+        },
         {**base, "id": "tsf_notes", "systemName": "notes", "name": "Notes", "type": "text"},
-        {**base, "id": "tsf_ratio", "systemName": "ratio", "name": "Ratio",
-         "__typename": "FloatFieldDefinition", "numericMin": 0.5},
-        {**base, "id": "tsf_flag", "systemName": "flag", "name": "Flag",
-         "__typename": "BooleanFieldDefinition"},
-        {**base, "id": "tsf_day", "systemName": "run_date", "name": "Run date",
-         "__typename": "DateFieldDefinition"},
-        {**base, "id": "tsf_start", "systemName": "started_at", "name": "Started at",
-         "__typename": "DateTimeFieldDefinition"},
-        {**base, "id": "tsf_tags", "systemName": "tags", "name": "Tags",
-         "__typename": "TextFieldDefinition", "isMulti": True},
-        {**base, "id": "tsf_meta", "systemName": "meta", "name": "Meta",
-         "__typename": "JsonFieldDefinition"},
-        {**base, "id": "tsf_link", "systemName": "sample_link", "name": "Sample link",
-         "__typename": "EntityLinkFieldDefinition"},
-        {**base, "id": "tsf_weird", "systemName": "weird", "name": "Weird",
-         "__typename": "MysteryFieldDefinition"},
-        {"id": "tsf_calc", "systemName": "calculated", "name": "Calculated",
-         "__typename": "IntegerFieldDefinition", "derivationType": "CALCULATED"},
-        {**base, "id": "tsf_old", "systemName": "old", "name": "Old",
-         "__typename": "TextFieldDefinition", "archived": True},
+        {
+            **base,
+            "id": "tsf_ratio",
+            "systemName": "ratio",
+            "name": "Ratio",
+            "__typename": "FloatFieldDefinition",
+            "numericMin": 0.5,
+        },
+        {
+            **base,
+            "id": "tsf_flag",
+            "systemName": "flag",
+            "name": "Flag",
+            "__typename": "BooleanFieldDefinition",
+        },
+        {
+            **base,
+            "id": "tsf_day",
+            "systemName": "run_date",
+            "name": "Run date",
+            "__typename": "DateFieldDefinition",
+        },
+        {
+            **base,
+            "id": "tsf_start",
+            "systemName": "started_at",
+            "name": "Started at",
+            "__typename": "DateTimeFieldDefinition",
+        },
+        {
+            **base,
+            "id": "tsf_tags",
+            "systemName": "tags",
+            "name": "Tags",
+            "__typename": "TextFieldDefinition",
+            "isMulti": True,
+        },
+        {
+            **base,
+            "id": "tsf_meta",
+            "systemName": "meta",
+            "name": "Meta",
+            "__typename": "JsonFieldDefinition",
+        },
+        {
+            **base,
+            "id": "tsf_link",
+            "systemName": "sample_link",
+            "name": "Sample link",
+            "__typename": "EntityLinkFieldDefinition",
+        },
+        {
+            **base,
+            "id": "tsf_weird",
+            "systemName": "weird",
+            "name": "Weird",
+            "__typename": "MysteryFieldDefinition",
+        },
+        {
+            "id": "tsf_calc",
+            "systemName": "calculated",
+            "name": "Calculated",
+            "__typename": "IntegerFieldDefinition",
+            "derivationType": "CALCULATED",
+        },
+        {
+            **base,
+            "id": "tsf_old",
+            "systemName": "old",
+            "name": "Old",
+            "__typename": "TextFieldDefinition",
+            "archived": True,
+        },
     ]
 
 
@@ -148,11 +208,21 @@ class FakeBenchling:
         self.field_defs = {
             "entsch_abc123": field_definitions(),
             "assaysch_abc123": [
-                {"id": "assayfield_ct", "systemName": "ct", "name": "Ct",
-                 "__typename": "IntegerFieldDefinition", "isRequired": True,
-                 "derivationType": "DIRECT"},
-                {"id": "assayfield_note", "systemName": "note", "name": "Note",
-                 "__typename": "TextFieldDefinition", "derivationType": "DIRECT"},
+                {
+                    "id": "assayfield_ct",
+                    "systemName": "ct",
+                    "name": "Ct",
+                    "__typename": "IntegerFieldDefinition",
+                    "isRequired": True,
+                    "derivationType": "DIRECT",
+                },
+                {
+                    "id": "assayfield_note",
+                    "systemName": "note",
+                    "name": "Note",
+                    "__typename": "TextFieldDefinition",
+                    "derivationType": "DIRECT",
+                },
             ],
         }
         self.result_table_schema = "assaysch_abc123"
@@ -236,9 +306,7 @@ class FakeBenchling:
 
     def _list_entries_v2(self, call: Call) -> tuple[int, dict[str, Any]]:
         wanted = [item for item in call.params.get("displayIds", "").split(",") if item]
-        entries = [
-            {"id": ENTRY_ID, "displayId": self.display_id, "name": self.entry_name}
-        ]
+        entries = [{"id": ENTRY_ID, "displayId": self.display_id, "name": self.entry_name}]
         return 200, {"entries": [e for e in entries if not wanted or e["displayId"] in wanted]}
 
     def _page(
@@ -264,7 +332,8 @@ class FakeBenchling:
         if "schemaFields" in body:
             for system_name, wrapper in body["schemaFields"].items():
                 definition = next(
-                    item for item in self.field_defs["entsch_abc123"]
+                    item
+                    for item in self.field_defs["entsch_abc123"]
                     if item["systemName"] == system_name
                 )
                 self.entry_fields[definition["name"]] = wrapper["value"]

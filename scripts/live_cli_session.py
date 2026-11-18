@@ -6,6 +6,7 @@ Optional `artifact` saves the generated CLI output under ignored work/live-test.
 Optional `select` limits displayed data keys, leaving the artifact unchanged.
 The session invokes the real CLI for every operation, including plan/apply.
 """
+
 from __future__ import annotations
 
 import getpass
@@ -17,6 +18,7 @@ from pathlib import Path
 
 
 def main() -> None:
+    """Relay JSON command lines from stdin to the real CLI, printing one JSON result per line."""
     root = Path(__file__).resolve().parents[1]
     output_dir = root / "work" / "live-test"
     output_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -30,7 +32,9 @@ def main() -> None:
         args = request["args"]
         if not isinstance(args, list) or not all(isinstance(item, str) for item in args):
             raise ValueError("args must be a list of strings")
-        result = subprocess.run([str(executable), *args], env=env, cwd=root, text=True, capture_output=True)
+        result = subprocess.run(
+            [str(executable), *args], env=env, cwd=root, text=True, capture_output=True
+        )
         payload = json.loads(result.stdout) if result.stdout.strip() else None
         artifact = request.get("artifact")
         if artifact:
@@ -42,7 +46,19 @@ def main() -> None:
         selected = request.get("select")
         if selected and payload and isinstance(payload.get("data"), dict):
             payload["data"] = {key: payload["data"].get(key) for key in selected}
-        print(json.dumps({"args": args, "exit_code": result.returncode, "output": payload, "stderr": result.stderr, "artifact": artifact}, ensure_ascii=False), flush=True)
+        print(
+            json.dumps(
+                {
+                    "args": args,
+                    "exit_code": result.returncode,
+                    "output": payload,
+                    "stderr": result.stderr,
+                    "artifact": artifact,
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
 
 
 if __name__ == "__main__":

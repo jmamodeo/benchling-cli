@@ -1,3 +1,5 @@
+"""Local application directories for plans, journals and locks."""
+
 from __future__ import annotations
 
 import os
@@ -6,6 +8,7 @@ from pathlib import Path
 
 
 def application_home() -> Path:
+    """Return the per-user config root; BENCHLING_AGENT_HOME overrides the platform default."""
     override = os.getenv("BENCHLING_AGENT_HOME")
     if override:
         return Path(override).expanduser().resolve()
@@ -19,22 +22,28 @@ def application_home() -> Path:
 
 
 class ConfigStore:
+    """Locates the on-disk state directories under a single root."""
+
     def __init__(self, root: Path | None = None) -> None:
         self.root = root or application_home()
 
     @property
     def plans_dir(self) -> Path:
+        """Directory holding saved change plans."""
         return self.root / "plans"
 
     @property
     def journals_dir(self) -> Path:
+        """Directory holding write-execution journals."""
         return self.root / "journals"
 
     @property
     def locks_dir(self) -> Path:
+        """Directory holding lock files."""
         return self.root / "locks"
 
     def ensure(self) -> None:
+        """Create all directories owner-only (0700); chmod failures are ignored."""
         for directory in (
             self.root,
             self.plans_dir,

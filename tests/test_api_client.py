@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import httpx
 import pytest
-from conftest import make_api, make_profile
+from conftest import make_api, make_environment
 
 from benchling_agent import api as api_module
 from benchling_agent.api import BenchlingAPI
@@ -201,13 +201,13 @@ async def test_paginate_rejects_malformed_pages(payload, message) -> None:
 
 
 async def test_owned_http_client_is_closed_but_injected_one_is_not() -> None:
-    profile = make_profile()
-    auth = AuthManager({profile.name: "secret"})
-    owned = BenchlingAPI(profile, auth)
+    environment = make_environment()
+    auth = AuthManager({environment.name: "secret"})
+    owned = BenchlingAPI(environment, auth)
     await owned.close()
     assert owned.http.is_closed
     injected = httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200)))
-    shared = BenchlingAPI(profile, auth, http=injected)
+    shared = BenchlingAPI(environment, auth, http=injected)
     await shared.close()
     assert not injected.is_closed
     await injected.aclose()

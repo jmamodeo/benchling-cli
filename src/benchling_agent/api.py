@@ -1,3 +1,5 @@
+"""Async Benchling HTTP client."""
+
 from __future__ import annotations
 
 import asyncio
@@ -17,7 +19,7 @@ from .errors import (
     UpstreamError,
     ValidationError,
 )
-from .models import Profile
+from .models import Environment
 from .tls import verified_context
 
 
@@ -26,19 +28,20 @@ class BenchlingAPI:
 
     def __init__(
         self,
-        profile: Profile,
+        environment: Environment,
         auth: AuthManager,
         *,
         http: httpx.AsyncClient | None = None,
         max_read_attempts: int = 3,
     ) -> None:
-        self.profile = profile
+        self.environment = environment
         self.auth = auth
         self.http = http or httpx.AsyncClient(timeout=30.0, verify=verified_context())
         self._owns_http = http is None
         self.max_read_attempts = max_read_attempts
 
     async def close(self) -> None:
+        """Close the HTTP client only if this instance created it."""
         if self._owns_http:
             await self.http.aclose()
 
@@ -52,12 +55,19 @@ class BenchlingAPI:
         json: Any = None,
         early_access: bool | None = None,
     ) -> dict[str, Any]:
+        """Send one request and return the decoded JSON object.
+
+        Only GET is retried. A non-GET with no confirmed response raises
+        PartialCompletionError because the write may have been applied.
+        """
         method = method.upper()
         if not path.startswith("/"):
             raise ValidationError("API path must start with '/'")
-        base = f"{self.profile.base_url}/api/v{version}"
-        headers = {"Accept": "application/json", **self.auth.headers(self.profile)}
-        if version == 3 and (self.profile.early_access if early_access is None else early_access):
+        base = f"{self.environment.base_url}/api/v{version}"
+        headers = {"Accept": "application/json", **self.auth.headers(self.environment)}
+        if version == 3 and (
+            self.environment.early_access if early_access is None else early_access
+        ):
             headers["EARLY-ACCESS"] = "true"
         attempts = self.max_read_attempts if method == "GET" else 1
         response: httpx.Response | None = None
@@ -96,6 +106,10 @@ class BenchlingAPI:
         item_key: str = "items",
         max_items: int | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
+        """Yield items across nextToken pages, stopping at max_items.
+
+        Raises UpstreamError on a malformed page or a repeated token.
+        """
         query = dict(params or {})
         yielded = 0
         seen_tokens: set[str] = set()
@@ -168,13 +182,9 @@ class BenchlingAPI:
         if response.status_code == 404:
             raise NotFoundError("Benchling resource was not found", details=details)
         if response.status_code == 409:
-            raise ConflictError(
-                "The Benchling resource changed since it was read", details=details
-            )
+            raise ConflictError("The Benchling resource changed since it was read", details=details)
         if response.status_code == 429:
-            raise UpstreamError(
-                "Benchling rate limit exceeded", details=details, retryable=True
-            )
+            raise UpstreamError("Benchling rate limit exceeded", details=details, retryable=True)
         if response.status_code >= 500 and method != "GET":
             raise PartialCompletionError(
                 "Benchling returned a server error after receiving a write request; completion is unknown",

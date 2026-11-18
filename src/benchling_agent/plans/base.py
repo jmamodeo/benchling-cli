@@ -1,3 +1,5 @@
+"""Shared base class for the per-family planners."""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -21,6 +23,8 @@ PlanParts = tuple[dict[str, Any], dict[str, Any], dict[str, Any], list[str], lis
 
 
 class PlannerBase:
+    """Holds the service, API and repository that every planner mixin relies on."""
+
     def __init__(
         self,
         service: BenchlingService,

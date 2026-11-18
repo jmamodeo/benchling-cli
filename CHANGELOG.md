@@ -6,6 +6,22 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** the concept formerly called a "profile" is now consistently an "environment". The JSON envelope key `meta.profile` is now `meta.env`, the `auth status` and `doctor` data key `profile` is now `env`, and saved change plans store `env` instead of `profile`. Plans created by 0.1.x are not readable by this version; preview them again.
+- The package version is defined once, in `benchling_agent.__version__`; `pyproject.toml` reads it.
+- The code base is formatted with `ruff format`, enforced in CI, and public modules, classes and functions have docstrings.
+
+### Added
+
+- `benchling --version`.
+
+### Removed
+
+- **Breaking:** the hidden `--profile`/`-p` option and the hidden `profiles` command group. `--env`/`-e` and `envs` are the only way to select and list environments.
+- **Breaking:** the `login` and `logout` commands, which only printed an unsupported-capability error. Authentication is environment-variable only and is documented in the README.
+- **Breaking:** `entry get --api-version`, a raw Benchling V2 diagnostic passthrough. `entry get` always returns the typed V3 snapshot.
+
 ## [0.1.2] - 2026-11-18
 
 ### Added

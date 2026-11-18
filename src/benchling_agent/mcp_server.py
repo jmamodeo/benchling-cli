@@ -1,3 +1,5 @@
+"""MCP server exposing Benchling read tools and gated write tools."""
+
 from __future__ import annotations
 
 import asyncio
@@ -20,9 +22,7 @@ if TYPE_CHECKING:
     from mcp.types import ToolAnnotations
 
 
-def _page_table(
-    table: dict[str, Any], row_offset: int, row_limit: int
-) -> dict[str, Any]:
+def _page_table(table: dict[str, Any], row_offset: int, row_limit: int) -> dict[str, Any]:
     content = part_content(table)
     rows = content.get("rows", [])
     page = rows[row_offset : row_offset + row_limit]
@@ -31,9 +31,7 @@ def _page_table(
         "offset": row_offset,
         "returned": len(page),
         "total": len(rows),
-        "next_offset": (
-            row_offset + len(page) if row_offset + len(page) < len(rows) else None
-        ),
+        "next_offset": (row_offset + len(page) if row_offset + len(page) < len(rows) else None),
     }
     return table
 
@@ -63,6 +61,7 @@ def build_mcp_server(
     *,
     writable_envs: set[str] | frozenset[str] = frozenset(),
 ) -> MCPServer:
+    """Create the MCP server; apply_changes works only for envs in writable_envs."""
     try:
         from mcp.server.mcpserver import MCPServer
     except ImportError:  # pragma: no cover - compatibility with MCP 1.x
@@ -78,13 +77,13 @@ def build_mcp_server(
     )
 
     def meta(active: Runtime | None) -> dict[str, Any]:
+        """Envelope metadata identifying the env and tenant, empty if no runtime resolved."""
         if active is None:
             return {}
-        return {"profile": active.profile.name, "tenant_url": active.profile.base_url}
+        return {"env": active.environment.name, "tenant_url": active.environment.base_url}
 
-    async def safe(
-        env: str, call: Callable[[Runtime], Coroutine[Any, Any, Any]]
-    ) -> Envelope[Any]:
+    async def safe(env: str, call: Callable[[Runtime], Coroutine[Any, Any, Any]]) -> Envelope[Any]:
+        """Run call against env's runtime, converting every exception into a failure envelope."""
         active: Runtime | None = None
         try:
             active = pool.get(env)
@@ -136,10 +135,12 @@ def build_mcp_server(
         table_row_limit: int = 250,
     ) -> Envelope[Any]:
         """Fetch entry metadata or a paged complete snapshot of available structured data."""
+
         async def call(rt: Runtime) -> dict[str, Any]:
-            if min(part_offset, result_offset, table_row_offset) < 0 or min(
-                part_limit, result_limit, table_row_limit
-            ) < 1:
+            if (
+                min(part_offset, result_offset, table_row_offset) < 0
+                or min(part_limit, result_limit, table_row_limit) < 1
+            ):
                 raise ValidationError("Offsets must be nonnegative and limits must be positive")
             data = await rt.service.get_entry(reference, full=full)
             if not full:
@@ -161,13 +162,17 @@ def build_mcp_server(
                     "offset": part_offset,
                     "returned": len(parts),
                     "total": len(all_parts),
-                    "next_offset": part_offset + len(parts) if part_offset + len(parts) < len(all_parts) else None,
+                    "next_offset": part_offset + len(parts)
+                    if part_offset + len(parts) < len(all_parts)
+                    else None,
                 },
                 "results": {
                     "offset": result_offset,
                     "returned": len(results),
                     "total": len(all_results),
-                    "next_offset": result_offset + len(results) if result_offset + len(results) < len(all_results) else None,
+                    "next_offset": result_offset + len(results)
+                    if result_offset + len(results) < len(all_results)
+                    else None,
                 },
                 "table_rows": {
                     "offset": table_row_offset,
@@ -194,13 +199,10 @@ def build_mcp_server(
         table_row_limit: int = 250,
     ) -> Envelope[Any]:
         """Retrieve a section by stable part ID or a unique section title."""
+
         async def call(rt: Runtime) -> dict[str, Any]:
-            if min(part_offset, table_row_offset) < 0 or min(
-                part_limit, table_row_limit
-            ) < 1:
-                raise ValidationError(
-                    "Offsets must be nonnegative and limits must be positive"
-                )
+            if min(part_offset, table_row_offset) < 0 or min(part_limit, table_row_limit) < 1:
+                raise ValidationError("Offsets must be nonnegative and limits must be positive")
             data = await rt.service.get_section(reference, section)
             parts = data["parts"]
             page = parts[part_offset : part_offset + part_limit]
@@ -217,9 +219,7 @@ def build_mcp_server(
                     "returned": len(page),
                     "total": len(parts),
                     "next_offset": (
-                        part_offset + len(page)
-                        if part_offset + len(page) < len(parts)
-                        else None
+                        part_offset + len(page) if part_offset + len(page) < len(parts) else None
                     ),
                 },
                 "table_rows": {
@@ -240,6 +240,7 @@ def build_mcp_server(
         row_limit: int = 250,
     ) -> Envelope[Any]:
         """Retrieve one stable document part and its available detail."""
+
         async def call(rt: Runtime) -> dict[str, Any]:
             if row_offset < 0 or row_limit < 1:
                 raise ValidationError("row_offset must be nonnegative and row_limit positive")
@@ -255,6 +256,7 @@ def build_mcp_server(
         env: str, part_id: str, row_offset: int = 0, row_limit: int = 250
     ) -> Envelope[Any]:
         """Retrieve a page of an unstructured table by document-part ID."""
+
         async def call(rt: Runtime) -> dict[str, Any]:
             if row_offset < 0 or row_limit < 1:
                 raise ValidationError("row_offset must be nonnegative and row_limit positive")
@@ -268,6 +270,7 @@ def build_mcp_server(
         env: str, schema_id: str, field_offset: int = 0, field_limit: int = 250
     ) -> Envelope[Any]:
         """Retrieve an entry or result schema and a page of field definitions."""
+
         async def call(rt: Runtime) -> dict[str, Any]:
             if field_offset < 0 or field_limit < 1:
                 raise ValidationError("field_offset must be nonnegative and field_limit positive")
@@ -280,9 +283,7 @@ def build_mcp_server(
                 "returned": len(page),
                 "total": len(fields),
                 "next_offset": (
-                    field_offset + len(page)
-                    if field_offset + len(page) < len(fields)
-                    else None
+                    field_offset + len(page) if field_offset + len(page) < len(fields) else None
                 ),
             }
             return data
@@ -316,17 +317,28 @@ def build_mcp_server(
         return await safe(env, lambda rt: rt.service.get_result(result_id))
 
     @mcp.tool(annotations=_annotations(True))
-    async def list_result_tables(env: str, reference: str, offset: int = 0, limit: int = 100) -> Envelope[Any]:
+    async def list_result_tables(
+        env: str, reference: str, offset: int = 0, limit: int = 100
+    ) -> Envelope[Any]:
         """Discover explicit V2 result-table targets and their assigned schemas."""
+
         async def call(rt: Runtime) -> dict[str, Any]:
             if offset < 0 or limit < 1 or limit > 100:
-                raise ValidationError("offset must be nonnegative and limit must be between 1 and 100")
+                raise ValidationError(
+                    "offset must be nonnegative and limit must be between 1 and 100"
+                )
             result = await rt.service.list_result_tables(reference)
             items = result["items"]
-            page = items[offset:offset + limit]
+            page = items[offset : offset + limit]
             result["items"] = page
-            result["pagination"] = {"offset": offset, "returned": len(page), "total": len(items), "next_offset": offset + len(page) if offset + len(page) < len(items) else None}
+            result["pagination"] = {
+                "offset": offset,
+                "returned": len(page),
+                "total": len(items),
+                "next_offset": offset + len(page) if offset + len(page) < len(items) else None,
+            }
             return result
+
         return await safe(env, call)
 
     @mcp.tool(annotations=_annotations(False))
@@ -339,11 +351,12 @@ def build_mcp_server(
     @mcp.tool(annotations=_annotations(False, destructive=True))
     async def apply_changes(env: str, plan_id: str) -> Envelope[Any]:
         """Explicitly apply a previously previewed plan when writes are enabled for env."""
+
         async def call(rt: Runtime) -> dict[str, Any]:
-            if rt.profile.name not in writable_envs:
+            if rt.environment.name not in writable_envs:
                 raise UnsupportedError(
-                    f"MCP writes are disabled for {rt.profile.name}; restart with "
-                    f"`benchling mcp serve --allow-writes {rt.profile.name}`"
+                    f"MCP writes are disabled for {rt.environment.name}; restart with "
+                    f"`benchling mcp serve --allow-writes {rt.environment.name}`"
                 )
             return await rt.planner.apply(plan_id)
 
@@ -358,6 +371,11 @@ def build_mcp_server(
 
 
 def run_mcp_server(*, writable_envs: set[str] | frozenset[str] = frozenset()) -> None:
+    """Serve MCP over stdio until exit.
+
+    Raises AuthenticationError if no environment is configured and ValidationError
+    if writable_envs names an unconfigured one.
+    """
     pool = RuntimePool()
     available = pool.available()
     if not available:

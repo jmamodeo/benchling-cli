@@ -61,7 +61,7 @@ benchling --env dev auth status
 benchling --env test doctor
 ```
 
-`auth status` checks local configuration only; `doctor` makes read-only API checks. `-e` is short for `--env`; `--profile`/`-p` remain accepted aliases. `login` and `logout` only print an explanatory message. To disconnect, unset the environment's variables in the calling shell and restart any MCP process; this does not revoke the app remotely.
+`auth status` checks local configuration only; `doctor` makes read-only API checks. `-e` is short for `--env`. To disconnect, unset the environment's variables in the calling shell and restart any MCP process; this does not revoke the app remotely.
 
 `.env.example` contains the layout with placeholders. The CLI does **not** automatically load `.env` files: provide environment variables through your shell or MCP client's environment configuration. Never commit actual secrets or include them in command examples. Rotate any secret exposed in chat or logs before using it long-term.
 
@@ -217,7 +217,7 @@ Offline tests never require credentials. After configuring a sandbox entry that 
 
 ```console
 uv run python scripts/sandbox_exercise.py \
-  --profile dev \
+  --env dev \
   --entry etr_REPLACE_ME \
   --table-part docpart_REPLACE_ME \
   --row 0 --column 1 \

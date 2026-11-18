@@ -1,3 +1,5 @@
+"""Environment discovery from BENCHLING_<ENV>_* process variables."""
+
 from __future__ import annotations
 
 import os
@@ -8,7 +10,7 @@ from pydantic import ValidationError as ModelValidationError
 
 from .config import ConfigStore
 from .errors import AuthenticationError, ValidationError
-from .models import AuthMethod, Profile
+from .models import AuthMethod, Environment
 
 SUFFIXES = ("API_ENDPOINT", "CLIENT_ID", "CLIENT_SECRET")
 ENV_NAME = re.compile(r"^[a-z][a-z0-9]{0,31}$")
@@ -16,6 +18,7 @@ _VARIABLE = re.compile(rf"^BENCHLING_([A-Z][A-Z0-9]{{0,31}})_({'|'.join(SUFFIXES
 
 
 def variables(env: str) -> tuple[str, str, str]:
+    """Return the (endpoint, client id, client secret) variable names for an environment."""
     prefix = f"BENCHLING_{env.upper()}_"
     endpoint, client_id, secret = (prefix + suffix for suffix in SUFFIXES)
     return endpoint, client_id, secret
@@ -44,10 +47,15 @@ class EnvironmentConfigStore(ConfigStore):
     """Resolve environments from BENCHLING_<ENV>_* variables.
 
     The inherited directories hold write plans and journals, not credentials.
-    Profiles saved by previous versions are never read.
+    Files saved by previous versions are never read.
     """
 
-    def resolve(self, name: str | None) -> Profile:
+    def resolve(self, name: str | None) -> Environment:
+        """Build the Environment for a name.
+
+        Raises ValidationError if the name is missing, unknown or malformed, and
+        AuthenticationError if any of its three variables is unset.
+        """
         if not name:
             raise ValidationError(
                 "An environment is required; pass --env NAME",
@@ -56,7 +64,10 @@ class EnvironmentConfigStore(ConfigStore):
         if not ENV_NAME.match(name) or name not in configured_envs():
             raise ValidationError(
                 "Unknown environment; set BENCHLING_<ENV>_API_ENDPOINT, _CLIENT_ID, and _CLIENT_SECRET",
-                details={"env": name if ENV_NAME.match(name) else None, "available_envs": available_envs()},
+                details={
+                    "env": name if ENV_NAME.match(name) else None,
+                    "available_envs": available_envs(),
+                },
             )
         endpoint, client_id, secret = variables(name)
         missing = [key for key in (endpoint, client_id, secret) if not _value(key)]
@@ -66,7 +77,7 @@ class EnvironmentConfigStore(ConfigStore):
                 details={"env": name, "missing_variables": missing},
             )
         try:
-            return Profile.model_validate(
+            return Environment.model_validate(
                 {
                     "name": name,
                     "tenant_url": _value(endpoint),
@@ -79,6 +90,7 @@ class EnvironmentConfigStore(ConfigStore):
             raise ValidationError("Invalid endpoint or client ID", details={"env": name}) from exc
 
     def metadata(self) -> dict[str, Any]:
+        """Non-secret JSON description of every configured environment, keyed by name."""
         return {
             env: self.resolve(env).model_dump(mode="json", exclude_none=True)
             for env in configured_envs()
@@ -87,6 +99,4 @@ class EnvironmentConfigStore(ConfigStore):
 
 def environment_secrets() -> dict[str, str]:
     """Take a process-local snapshot; never write secrets or tokens to disk."""
-    return {
-        env: secret for env in configured_envs() if (secret := _value(variables(env)[2]))
-    }
+    return {env: secret for env in configured_envs() if (secret := _value(variables(env)[2]))}

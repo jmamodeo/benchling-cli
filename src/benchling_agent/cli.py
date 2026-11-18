@@ -1,3 +1,5 @@
+"""Typer CLI: every command prints a JSON Envelope on stdout and exits with an ExitCode."""
+
 from __future__ import annotations
 
 import asyncio
@@ -9,11 +11,11 @@ from typing import Any
 
 import typer
 
+from . import __version__
 from .auth import AuthManager
-from .environment import EnvironmentConfigStore as ConfigStore
-from .environment import environment_secrets
-from .errors import BenchlingAgentError, ExitCode, UnsupportedError, UpstreamError, ValidationError
-from .models import Envelope, PlanFamily, Profile
+from .environment import EnvironmentConfigStore, environment_secrets
+from .errors import BenchlingAgentError, ExitCode, UpstreamError, ValidationError
+from .models import Envelope, Environment, PlanFamily
 from .runtime import Runtime
 
 app = typer.Typer(
@@ -24,7 +26,6 @@ app = typer.Typer(
 )
 auth_app = typer.Typer(help="Inspect local authentication state.")
 envs_app = typer.Typer(help="List configured environments.")
-profiles_app = typer.Typer(help="Deprecated alias for envs.")
 entry_app = typer.Typer(help="Resolve, fetch, and inspect entries.")
 entry_fields_app = typer.Typer(help="Read entry schema fields.")
 section_app = typer.Typer(help="Read entry sections.")
@@ -37,7 +38,6 @@ mcp_app = typer.Typer(help="Run the local MCP server.")
 
 app.add_typer(auth_app, name="auth")
 app.add_typer(envs_app, name="envs")
-app.add_typer(profiles_app, name="profiles", hidden=True)
 app.add_typer(entry_app, name="entry")
 entry_app.add_typer(entry_fields_app, name="fields")
 app.add_typer(section_app, name="section")
@@ -50,8 +50,16 @@ app.add_typer(mcp_app, name="mcp")
 
 
 class State:
-    def __init__(self, profile: str | None) -> None:
-        self.profile = profile
+    """Per-invocation state stored on the Typer context; env is the --env selection."""
+
+    def __init__(self, env: str | None) -> None:
+        self.env = env
+
+
+def _show_version(value: bool) -> None:
+    if value:
+        typer.echo(f"benchling-agent {__version__}")
+        raise typer.Exit()
 
 
 @app.callback()
@@ -60,9 +68,12 @@ def root(
     env: str | None = typer.Option(
         None, "--env", "-e", help="Environment name; selects BENCHLING_<ENV>_* credentials."
     ),
-    profile: str | None = typer.Option(None, "--profile", "-p", hidden=True),
+    version: bool = typer.Option(
+        False, "--version", callback=_show_version, is_eager=True, help="Show version and exit."
+    ),
 ) -> None:
-    ctx.obj = State(env or profile)
+    """Agent-friendly access to structured Benchling entry data."""
+    ctx.obj = State(env)
 
 
 def _json(value: Any) -> str:
@@ -76,81 +87,57 @@ def _emit(envelope: Envelope[Any]) -> None:
 
 
 async def _run_with_runtime(
-    profile: str | None, call: Callable[[Runtime], Awaitable[Any]]
-) -> tuple[Any, Profile]:
-    runtime = Runtime(profile)
+    env: str | None, call: Callable[[Runtime], Awaitable[Any]]
+) -> tuple[Any, Environment]:
+    runtime = Runtime(env)
     try:
-        return await call(runtime), runtime.profile
+        return await call(runtime), runtime.environment
     finally:
         await runtime.close()
 
 
-def _execute(profile: str | None, call: Callable[[Runtime], Awaitable[Any]]) -> None:
+def _execute(env: str | None, call: Callable[[Runtime], Awaitable[Any]]) -> None:
     try:
-        result, runtime_profile = asyncio.run(_run_with_runtime(profile, call))
+        result, runtime_env = asyncio.run(_run_with_runtime(env, call))
         _emit(
             Envelope.success(
                 result,
-                profile=runtime_profile.name,
-                tenant_url=runtime_profile.base_url,
+                env=runtime_env.name,
+                tenant_url=runtime_env.base_url,
             )
         )
     except BenchlingAgentError as exc:
         _emit(Envelope.failure(exc))
         raise typer.Exit(int(exc.exit_code)) from None
     except Exception as exc:
-        error = UpstreamError(
-            "Unexpected local failure", details={"type": type(exc).__name__}
-        )
+        error = UpstreamError("Unexpected local failure", details={"type": type(exc).__name__})
         _emit(Envelope.failure(error))
         raise typer.Exit(int(ExitCode.UPSTREAM)) from None
 
 
-@app.command()
-def login(
-) -> None:
-    """Explain environment-only authentication; no browser or credentials are saved."""
-    error = UnsupportedError(
-        "Browser login is disabled; set BENCHLING_<ENV>_API_ENDPOINT, "
-        "BENCHLING_<ENV>_CLIENT_ID, and BENCHLING_<ENV>_CLIENT_SECRET"
-    )
-    _emit(Envelope.failure(error))
-    raise typer.Exit(int(error.exit_code))
-
-
-@app.command()
-def logout(ctx: typer.Context) -> None:
-    """Environment credentials must be unset in the calling shell."""
-    error = UnsupportedError(
-        "No credentials are stored; unset BENCHLING_<ENV>_CLIENT_SECRET in your shell "
-        "and restart any running MCP server. This does not revoke app access."
-    )
-    _emit(Envelope.failure(error))
-    raise typer.Exit(int(error.exit_code))
-
-
 @auth_app.command("status")
 def auth_status(ctx: typer.Context) -> None:
+    """Show local authentication state for the selected environment without calling the API."""
     state: State = ctx.obj
     try:
-        config = ConfigStore()
-        profile = config.resolve(state.profile)
+        config = EnvironmentConfigStore()
+        environment = config.resolve(state.env)
         auth = AuthManager(environment_secrets())
         try:
-            result = auth.status(profile)
+            result = auth.status(environment)
         finally:
             auth.close()
-        _emit(Envelope.success(result, profile=profile.name, tenant_url=profile.base_url))
+        _emit(Envelope.success(result, env=environment.name, tenant_url=environment.base_url))
     except BenchlingAgentError as exc:
         _emit(Envelope.failure(exc))
         raise typer.Exit(int(exc.exit_code)) from None
 
 
 @envs_app.command("list")
-@profiles_app.command("list")
 def envs_list() -> None:
+    """List configured environments (metadata only, no secrets)."""
     try:
-        _emit(Envelope.success({"environments": ConfigStore().metadata()}))
+        _emit(Envelope.success({"environments": EnvironmentConfigStore().metadata()}))
     except BenchlingAgentError as exc:
         _emit(Envelope.failure(exc))
         raise typer.Exit(int(exc.exit_code)) from None
@@ -158,14 +145,16 @@ def envs_list() -> None:
 
 @app.command()
 def doctor(ctx: typer.Context) -> None:
+    """Check configuration, authentication and API connectivity for the environment."""
     state: State = ctx.obj
-    _execute(state.profile, lambda runtime: runtime.service.doctor())
+    _execute(state.env, lambda runtime: runtime.service.doctor())
 
 
 @entry_app.command("resolve")
 def entry_resolve(ctx: typer.Context, reference: str) -> None:
+    """Resolve an entry ID, display ID or URL to its canonical entry."""
     state: State = ctx.obj
-    _execute(state.profile, lambda runtime: runtime.service.resolve_entry(reference))
+    _execute(state.env, lambda runtime: runtime.service.resolve_entry(reference))
 
 
 @entry_app.command("get")
@@ -173,53 +162,52 @@ def entry_get(
     ctx: typer.Context,
     reference: str,
     full: bool = typer.Option(False, help="Retrieve all available structured content."),
-    api_version: int = typer.Option(3, min=2, max=3, help="V3 snapshot or raw V2 entry response for diagnostics."),
 ) -> None:
+    """Fetch an entry snapshot; --full retrieves all available structured content."""
     state: State = ctx.obj
-    if api_version == 2:
-        async def legacy(runtime: Runtime) -> dict[str, Any]:
-            resolved = await runtime.service.resolve_entry(reference)
-            payload = await runtime.api.request("GET", f"/entries/{resolved['entry_id']}", version=2)
-            return {"resolved": resolved, "v2_response": payload}
-        _execute(state.profile, legacy)
-        return
-    _execute(state.profile, lambda runtime: runtime.service.get_entry(reference, full=full))
+    _execute(state.env, lambda runtime: runtime.service.get_entry(reference, full=full))
 
 
 @entry_app.command("inspect")
 def entry_inspect(ctx: typer.Context, reference: str) -> None:
+    """Summarize an entry's structure (sections, parts, tables, schemas) without full content."""
     state: State = ctx.obj
-    _execute(state.profile, lambda runtime: runtime.service.inspect_entry(reference))
+    _execute(state.env, lambda runtime: runtime.service.inspect_entry(reference))
 
 
 @entry_fields_app.command("get")
 def entry_fields_get(ctx: typer.Context, reference: str) -> None:
+    """Get the schema field values of an entry."""
     state: State = ctx.obj
-    _execute(state.profile, lambda runtime: runtime.service.get_entry_fields(reference))
+    _execute(state.env, lambda runtime: runtime.service.get_entry_fields(reference))
 
 
 @section_app.command("get")
 def section_get(ctx: typer.Context, reference: str, section: str) -> None:
+    """Get one section of an entry."""
     state: State = ctx.obj
-    _execute(state.profile, lambda runtime: runtime.service.get_section(reference, section))
+    _execute(state.env, lambda runtime: runtime.service.get_section(reference, section))
 
 
 @part_app.command("get")
 def part_get(ctx: typer.Context, reference: str, part_id: str) -> None:
+    """Get one document part of an entry by part ID."""
     state: State = ctx.obj
-    _execute(state.profile, lambda runtime: runtime.service.get_part(reference, part_id))
+    _execute(state.env, lambda runtime: runtime.service.get_part(reference, part_id))
 
 
 @table_app.command("get")
 def table_get(ctx: typer.Context, part_id: str) -> None:
+    """Get an unstructured table by its part ID."""
     state: State = ctx.obj
-    _execute(state.profile, lambda runtime: runtime.service.get_table(part_id))
+    _execute(state.env, lambda runtime: runtime.service.get_table(part_id))
 
 
 @schema_app.command("get")
 def schema_get(ctx: typer.Context, schema_id: str) -> None:
+    """Get an entry or result schema by ID."""
     state: State = ctx.obj
-    _execute(state.profile, lambda runtime: runtime.service.get_schema(schema_id))
+    _execute(state.env, lambda runtime: runtime.service.get_schema(schema_id))
 
 
 @results_app.command("list")
@@ -230,9 +218,10 @@ def results_list(
     page_size: int = typer.Option(100, min=1, max=100),
     cursor: str | None = typer.Option(None),
 ) -> None:
+    """List result records, optionally filtered by entry or schema, one page at a time."""
     state: State = ctx.obj
     _execute(
-        state.profile,
+        state.env,
         lambda runtime: runtime.service.list_results(
             entry=entry, schema_id=schema_id, page_size=page_size, cursor=cursor
         ),
@@ -241,15 +230,16 @@ def results_list(
 
 @results_app.command("get")
 def results_get(ctx: typer.Context, result_id: str) -> None:
+    """Get one result record by ID."""
     state: State = ctx.obj
-    _execute(state.profile, lambda runtime: runtime.service.get_result(result_id))
+    _execute(state.env, lambda runtime: runtime.service.get_result(result_id))
 
 
 @results_app.command("tables")
 def results_tables(ctx: typer.Context, reference: str) -> None:
     """Discover explicit V2 result-table IDs and assigned schemas on one entry."""
     state: State = ctx.obj
-    _execute(state.profile, lambda runtime: runtime.service.list_result_tables(reference))
+    _execute(state.env, lambda runtime: runtime.service.list_result_tables(reference))
 
 
 def _read_spec(path: str) -> dict[str, Any]:
@@ -273,6 +263,7 @@ def changes_plan(
     family: PlanFamily = typer.Option(..., case_sensitive=False),
     spec: str = typer.Option(..., help="JSON file path, or '-' for stdin."),
 ) -> None:
+    """Create a change plan from a JSON spec; nothing is written until it is applied."""
     state: State = ctx.obj
     try:
         request = _read_spec(spec)
@@ -280,32 +271,35 @@ def changes_plan(
         _emit(Envelope.failure(exc))
         raise typer.Exit(int(exc.exit_code)) from None
     _execute(
-        state.profile,
+        state.env,
         lambda runtime: runtime.planner.plan(entry, family, request),
     )
 
 
 @changes_app.command("apply")
 def changes_apply(ctx: typer.Context, plan_id: str) -> None:
+    """Apply a previously created plan, re-checking its preconditions first."""
     state: State = ctx.obj
-    _execute(state.profile, lambda runtime: runtime.planner.apply(plan_id))
+    _execute(state.env, lambda runtime: runtime.planner.apply(plan_id))
 
 
 @changes_app.command("status")
 def changes_status(ctx: typer.Context, plan_id: str) -> None:
+    """Show the journal and status of a plan."""
     state: State = ctx.obj
 
     async def call(runtime: Runtime) -> dict[str, Any]:
         return await runtime.planner.status(plan_id)
 
-    _execute(state.profile, call)
+    _execute(state.env, call)
 
 
 @mcp_app.command("serve")
 def mcp_serve(
-    ctx: typer.Context,
     allow_writes: list[str] = typer.Option(
-        [], "--allow-writes", metavar="ENV",
+        [],
+        "--allow-writes",
+        metavar="ENV",
         help="Allow apply_changes in this environment; repeatable.",
     ),
 ) -> None:
@@ -320,6 +314,7 @@ def mcp_serve(
 
 
 def main() -> None:
+    """Console-script entry point."""
     app()
 
 

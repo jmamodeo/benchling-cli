@@ -1,3 +1,5 @@
+"""Error taxonomy: each error carries a stable code and the CLI exit code it maps to."""
+
 from __future__ import annotations
 
 from enum import IntEnum
@@ -5,6 +7,8 @@ from typing import Any
 
 
 class ExitCode(IntEnum):
+    """Process exit codes; 0 is success and each failure class has a distinct value."""
+
     SUCCESS = 0
     VALIDATION = 2
     AUTHENTICATION = 3
@@ -16,6 +20,11 @@ class ExitCode(IntEnum):
 
 
 class BenchlingAgentError(Exception):
+    """Base for all expected failures; subclasses set code and exit_code.
+
+    details must be JSON-safe and free of secrets since it is emitted in the envelope.
+    """
+
     code = "benchling_error"
     exit_code = ExitCode.UPSTREAM
 
@@ -33,41 +42,56 @@ class BenchlingAgentError(Exception):
 
 
 class ValidationError(BenchlingAgentError):
+    """Caller input or a change specification is invalid."""
+
     code = "validation_error"
     exit_code = ExitCode.VALIDATION
 
 
 class AuthenticationError(BenchlingAgentError):
+    """Credentials are missing, rejected or could not be exchanged for a token."""
+
     code = "authentication_error"
     exit_code = ExitCode.AUTHENTICATION
 
 
 class AccessError(BenchlingAgentError):
+    """Authenticated but not permitted to access the resource."""
+
     code = "access_denied"
     exit_code = ExitCode.ACCESS_OR_NOT_FOUND
 
 
 class NotFoundError(BenchlingAgentError):
+    """The requested resource does not exist; shares an exit code with AccessError."""
+
     code = "not_found"
     exit_code = ExitCode.ACCESS_OR_NOT_FOUND
 
 
 class ConflictError(BenchlingAgentError):
+    """A plan precondition failed, e.g. the entry changed since the plan was made."""
+
     code = "conflict"
     exit_code = ExitCode.CONFLICT
 
 
 class UnsupportedError(BenchlingAgentError):
+    """The operation or content type is not supported, or is unavailable on this tenant."""
+
     code = "unsupported_capability"
     exit_code = ExitCode.UNSUPPORTED
 
 
 class UpstreamError(BenchlingAgentError):
+    """The remote API failed or returned an unexpected response; may be retryable."""
+
     code = "upstream_error"
     exit_code = ExitCode.UPSTREAM
 
 
 class PartialCompletionError(BenchlingAgentError):
+    """An apply finished only in part, or its outcome cannot be confirmed; inspect the journal."""
+
     code = "partial_or_unknown_completion"
     exit_code = ExitCode.PARTIAL_OR_UNKNOWN
-

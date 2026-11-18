@@ -31,16 +31,6 @@ def test_envs_cli_returns_json_envelope(tmp_path, monkeypatch) -> None:
     }
 
 
-def test_browser_login_is_disabled(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("BENCHLING_AGENT_HOME", str(tmp_path / "app"))
-    result = CliRunner().invoke(app, ["login"])
-    assert result.exit_code == 6
-    payload = json.loads(result.stdout)
-    assert payload["ok"] is False
-    assert "BENCHLING_<ENV>_CLIENT_SECRET" in payload["error"]["message"]
-    assert result.stderr == ""
-
-
 @pytest.mark.asyncio
 async def test_mcp_tools_use_structured_envelopes_and_gate_writes(tmp_path, monkeypatch) -> None:
     for name in list(os.environ):
@@ -66,21 +56,15 @@ async def test_mcp_tools_use_structured_envelopes_and_gate_writes(tmp_path, monk
         auth_http=httpx.Client(transport=httpx.MockTransport(token)),
         async_http=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
     )
-    server = build_mcp_server(
-        RuntimePool(config=config, runtimes={"sandbox": runtime})
-    )
+    server = build_mcp_server(RuntimePool(config=config, runtimes={"sandbox": runtime}))
     async with Client(server) as client:
         listed = await client.list_tools()
         names = {tool.name for tool in listed.tools}
         assert {"get_entry", "plan_changes", "apply_changes", "get_change_status"} <= names
         plan_tool = next(tool for tool in listed.tools if tool.name == "plan_changes")
         assert plan_tool.annotations.read_only_hint is False
-        capabilities_tool = next(
-            tool for tool in listed.tools if tool.name == "get_capabilities"
-        )
-        assert capabilities_tool.output_schema["properties"]["schema_version"][
-            "const"
-        ] == "1.0"
+        capabilities_tool = next(tool for tool in listed.tools if tool.name == "get_capabilities")
+        assert capabilities_tool.output_schema["properties"]["schema_version"]["const"] == "1.0"
         assert "ok" in capabilities_tool.output_schema["required"]
 
         capabilities = await client.call_tool("get_capabilities", {"env": "sandbox"})

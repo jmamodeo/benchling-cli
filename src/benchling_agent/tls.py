@@ -1,3 +1,5 @@
+"""TLS context shared by all outbound HTTP clients."""
+
 import ssl
 
 import truststore
