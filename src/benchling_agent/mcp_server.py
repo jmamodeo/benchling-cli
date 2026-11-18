@@ -83,7 +83,9 @@ def build_mcp_server(
     return mcp
 
 
-_Safe = Callable[[str, Callable[[Runtime], Coroutine[Any, Any, Any]]], Coroutine[Any, Any, Envelope[Any]]]
+_Safe = Callable[
+    [str, Callable[[Runtime], Coroutine[Any, Any, Any]]], Coroutine[Any, Any, Envelope[Any]]
+]
 
 
 def _make_safe(pool: RuntimePool) -> _Safe:
@@ -138,6 +140,7 @@ def _register_environment_tools(
     async def get_capabilities(env: str) -> Envelope[Any]:
         """Check authentication, API availability, and supported edit types."""
         return await safe(env, lambda rt: rt.service.doctor())
+
 
 def _register_entry_tools(mcp: MCPServer, pool: RuntimePool) -> None:
     """Register the entry, section, part and table read tools."""
@@ -291,6 +294,7 @@ def _register_entry_tools(mcp: MCPServer, pool: RuntimePool) -> None:
 
         return await safe(env, call)
 
+
 def _register_result_tools(mcp: MCPServer, pool: RuntimePool) -> None:
     """Register the schema and result read tools."""
     safe = _make_safe(pool)
@@ -370,6 +374,7 @@ def _register_result_tools(mcp: MCPServer, pool: RuntimePool) -> None:
             return result
 
         return await safe(env, call)
+
 
 def _register_change_tools(
     mcp: MCPServer, pool: RuntimePool, writable_envs: set[str] | frozenset[str]

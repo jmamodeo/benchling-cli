@@ -623,6 +623,30 @@ class BenchlingService:
             )
         ]
         issues: list[CompletenessIssue] = []
+        tables = await self._collect_part_tables(parts, issues)
+        schema = await self._fetch_entry_schema(entry, issues)
+        fields = await self._fetch_entry_fields(entry_id, issues)
+        results, result_retrieval = await self._fetch_linked_results(entry_id, issues)
+
+        return EntrySnapshot(
+            entry=entry,
+            version_id=version,
+            parts=parts,
+            sections=build_sections(parts),
+            tables=tables,
+            entry_schema=schema,
+            fields=fields,
+            result_tables=(fields or {}).get("result_tables", []),
+            results=results,
+            result_retrieval=result_retrieval,
+            completeness="partial" if issues else "complete",
+            issues=issues,
+        )
+
+    async def _collect_part_tables(
+        self, parts: list[dict[str, Any]], issues: list[CompletenessIssue]
+    ) -> dict[str, dict[str, Any]]:
+        """Fetch unstructured table details, recording issues for unknown or unavailable parts."""
         tables: dict[str, dict[str, Any]] = {}
         for part in parts:
             part_id = part.get("id")
@@ -653,24 +677,33 @@ class BenchlingService:
                         reason="structured_table_detail_not_available_through_document_api",
                     )
                 )
+        return tables
 
-        schema: dict[str, Any] | None = None
+    async def _fetch_entry_schema(
+        self, entry: dict[str, Any], issues: list[CompletenessIssue]
+    ) -> dict[str, Any] | None:
+        """Fetch the entry's schema, recording an issue if it is unavailable."""
         schema_ref = entry.get("typedSchema") or entry.get("schema")
-        if isinstance(schema_ref, dict) and schema_ref.get("id"):
-            try:
-                schema = await self.get_schema(str(schema_ref["id"]))
-            except Exception as exc:
-                issues.append(
-                    CompletenessIssue(
-                        scope="entry_schema",
-                        reason="schema_unavailable",
-                        details={"error": getattr(exc, "message", str(exc))},
-                    )
-                )
-
-        fields: dict[str, Any] | None = None
+        if not (isinstance(schema_ref, dict) and schema_ref.get("id")):
+            return None
         try:
-            fields = await self.get_entry_fields(entry_id)
+            return await self.get_schema(str(schema_ref["id"]))
+        except Exception as exc:
+            issues.append(
+                CompletenessIssue(
+                    scope="entry_schema",
+                    reason="schema_unavailable",
+                    details={"error": getattr(exc, "message", str(exc))},
+                )
+            )
+            return None
+
+    async def _fetch_entry_fields(
+        self, entry_id: str, issues: list[CompletenessIssue]
+    ) -> dict[str, Any] | None:
+        """Fetch V2 entry fields, recording an issue if they are unavailable."""
+        try:
+            return await self.get_entry_fields(entry_id)
         except Exception as exc:
             issues.append(
                 CompletenessIssue(
@@ -679,7 +712,12 @@ class BenchlingService:
                     details={"error": getattr(exc, "message", str(exc))},
                 )
             )
+            return None
 
+    async def _fetch_linked_results(
+        self, entry_id: str, issues: list[CompletenessIssue]
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        """Page through all results linked to the entry; returns records and retrieval metadata."""
         results: list[dict[str, Any]] = []
         result_retrieval: dict[str, Any] = {
             "consistency": "independent_non_atomic",
@@ -709,18 +747,4 @@ class BenchlingService:
             )
         result_retrieval["finished_at"] = datetime.now(UTC).isoformat()
         result_retrieval["records"] = len(results)
-
-        return EntrySnapshot(
-            entry=entry,
-            version_id=version,
-            parts=parts,
-            sections=build_sections(parts),
-            tables=tables,
-            entry_schema=schema,
-            fields=fields,
-            result_tables=(fields or {}).get("result_tables", []),
-            results=results,
-            result_retrieval=result_retrieval,
-            completeness="partial" if issues else "complete",
-            issues=issues,
-        )
+        return results, result_retrieval
