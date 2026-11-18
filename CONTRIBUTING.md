@@ -13,9 +13,10 @@ uv sync --extra dev
 ## Tests and linting
 
 ```console
-uv run pytest --cov  # offline; no credentials needed; reports coverage
-uv run ruff check .  # must pass; use --fix for mechanical fixes
-uv run mypy          # must pass; strict-ish config in pyproject.toml
+uv run pytest --cov      # offline; no credentials needed; reports coverage
+uv run ruff format .     # formatting is enforced in CI (ruff format --check)
+uv run ruff check .      # must pass; use --fix for mechanical fixes
+uv run mypy              # must pass; strict-ish config in pyproject.toml
 ```
 
 After changing code or tests, refresh the README coverage badge from the latest `pytest --cov` run:
@@ -31,7 +32,7 @@ Add or update tests for behavior you change. Tests must stay offline and use moc
 - Branch from `main` and keep each PR focused.
 - Describe what changed and why; link related issues.
 - Update the README, docs, and `CHANGELOG.md` (under "Unreleased") when behavior changes.
-- CI (ruff, mypy, and pytest with coverage on Python 3.11–3.13) must pass.
+- CI (ruff format and lint, mypy, pytest with coverage on Python 3.11–3.13, and the package build) must pass.
 - Preserve the safety model: preview-then-apply, version preconditions, read-only MCP by default.
 
 ## No secrets or real tenant data
