@@ -13,6 +13,7 @@ from ..models import (
 )
 from ..services import (
     entry_version,
+    part_content,
     part_type,
 )
 from .base import PlannerBase, PlanParts
@@ -62,12 +63,12 @@ class DocumentPlanning(PlannerBase):
             original = by_id.get(part_id)
             if not original:
                 raise ValidationError("Text replacement target was not found")
-            if part_type(original).split(".")[-1] != "TextDocumentContent":
+            if part_type(original).split(".")[-1] not in {"TextDocumentContent", "DocumentPartText"}:
                 raise UnsupportedError("replace_text only supports text document parts")
             if not isinstance(request.get("text"), str):
                 raise ValidationError("replace_text requires text")
             before = {"version_id": snapshot["version_id"], "part": original}
-            content = original.get("content") or {}
+            content = part_content(original)
             replacement = {
                 "contentType": "text",
                 "text": request["text"],

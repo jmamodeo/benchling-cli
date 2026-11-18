@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-11-18
+
+### Added
+
+- Offline test coverage for the MCP server (every tool, per-environment write guard, error envelopes), document and table planning and applying (validation, version preconditions, partial completion, cell-state preservation), field validation, result planning, the CLI commands, the API client (retries, timeouts, pagination) and service read paths, all against a synthetic in-process fake of the Benchling API.
+- Total branch coverage rose from 66% to 98%; the enforced CI floor is now 96%. The suite has 220 test functions (381 collected cases).
+
+### Fixed
+
+- `replace_text` now accepts the flattened V3 text parts (`DocumentPartText`) that current API responses return, and preserves their formatting. Previously only the legacy nested `TextDocumentContent` shape was recognized.
+
 ## [0.1.1] - 2026-11-18
 
 ### Changed
@@ -40,6 +51,7 @@ All notable changes to this project are documented here. The format is based on
 - Versioned JSON envelope, stable exit codes, and published JSON schemas.
 - Operating-system trust-store TLS verification.
 
-[Unreleased]: https://github.com/jmamodeo/benchling-cli/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/jmamodeo/benchling-cli/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/jmamodeo/benchling-cli/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/jmamodeo/benchling-cli/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/jmamodeo/benchling-cli/releases/tag/v0.1.0

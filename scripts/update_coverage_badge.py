@@ -81,7 +81,7 @@ def main() -> int:
     parser.add_argument("--json", type=Path, help="existing coverage JSON report")
     parser.add_argument("--readme", type=Path, default=ROOT / "README.md")
     args = parser.parse_args()
-    percent = int(read_percent(args.json))
+    percent = round(read_percent(args.json))
     changed = update_readme(args.readme, percent)
     print(f"coverage {percent}%: README.md {'updated' if changed else 'already current'}")
     return 0

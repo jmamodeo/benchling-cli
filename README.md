@@ -3,7 +3,7 @@
 [![CI](https://github.com/jmamodeo/benchling-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/jmamodeo/benchling-cli/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
-[![Coverage](https://img.shields.io/badge/coverage-66%25-yellow)](https://github.com/jmamodeo/benchling-cli/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/badge/coverage-98%25-brightgreen)](https://github.com/jmamodeo/benchling-cli/actions/workflows/ci.yml)
 
 An agent-friendly `benchling` command-line tool and local MCP server for safely reading and editing Benchling notebook entries through the public API.
 
@@ -209,7 +209,7 @@ uv run mypy
 uv run pytest --cov
 ```
 
-The suite has 42 test functions (49 collected cases, parametrization included). Coverage is measured with branch coverage and enforced by a `fail_under` floor in `pyproject.toml`.
+The suite has 220 test functions (381 collected cases, parametrization included). Coverage is measured with branch coverage and enforced by a `fail_under` floor in `pyproject.toml`.
 
 ### Opt-in sandbox exercise
 
