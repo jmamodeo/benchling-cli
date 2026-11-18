@@ -87,7 +87,8 @@ class AuthManager:
                 details={"status": response.status_code},
             )
         try:
-            return response.json()
+            token_response: dict[str, Any] = response.json()
+            return token_response
         except ValueError as exc:
             raise UpstreamError("Benchling returned an invalid token response") from exc
 

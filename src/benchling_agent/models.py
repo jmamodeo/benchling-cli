@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Generic, Literal, TypeVar
+from typing import Any, Generic, Literal, TypeVar, cast
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
 
@@ -35,7 +35,7 @@ class Envelope(BaseModel, Generic[T]):
     def failure(
         cls, error: BenchlingAgentError, **meta: Any
     ) -> Envelope[dict[str, Any]]:
-        return cls(
+        return cast(Envelope[dict[str, Any]], cls(
             ok=False,
             error=ErrorDetail(
                 code=error.code,
@@ -44,7 +44,7 @@ class Envelope(BaseModel, Generic[T]):
                 details=error.details,
             ),
             meta=meta,
-        )
+        ))
 
 
 class AuthMethod(str, Enum):

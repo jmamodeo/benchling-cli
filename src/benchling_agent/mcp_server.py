@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Coroutine
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .errors import (
     AuthenticationError,
@@ -14,6 +14,10 @@ from .errors import (
 from .models import Envelope, PlanFamily
 from .runtime import Runtime, RuntimePool
 from .services import part_content
+
+if TYPE_CHECKING:
+    from mcp.server.mcpserver import MCPServer
+    from mcp.types import ToolAnnotations
 
 
 def _page_table(
@@ -34,10 +38,10 @@ def _page_table(
     return table
 
 
-def _annotations(read_only: bool, destructive: bool = False):
+def _annotations(read_only: bool, destructive: bool = False) -> ToolAnnotations:
     from mcp.types import ToolAnnotations
 
-    values = {
+    values: dict[str, Any] = {
         "readOnlyHint": read_only,
         "destructiveHint": destructive,
         "idempotentHint": read_only,
@@ -58,11 +62,11 @@ def build_mcp_server(
     pool: RuntimePool,
     *,
     writable_envs: set[str] | frozenset[str] = frozenset(),
-):
+) -> MCPServer:
     try:
         from mcp.server.mcpserver import MCPServer
     except ImportError:  # pragma: no cover - compatibility with MCP 1.x
-        from mcp.server.fastmcp import FastMCP as MCPServer  # type: ignore[no-redef]
+        from mcp.server.fastmcp import FastMCP as MCPServer  # type: ignore[no-redef, attr-defined]  # FastMCP exists only in mcp 1.x
 
     mcp = MCPServer(
         "Benchling",

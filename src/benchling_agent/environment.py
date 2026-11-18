@@ -66,11 +66,13 @@ class EnvironmentConfigStore(ConfigStore):
                 details={"env": name, "missing_variables": missing},
             )
         try:
-            return Profile(
-                name=name,
-                tenant_url=_value(endpoint),
-                client_id=_value(client_id),
-                auth_method=AuthMethod.CLIENT_CREDENTIALS,
+            return Profile.model_validate(
+                {
+                    "name": name,
+                    "tenant_url": _value(endpoint),
+                    "client_id": _value(client_id),
+                    "auth_method": AuthMethod.CLIENT_CREDENTIALS,
+                }
             )
         except ModelValidationError as exc:
             # Pydantic errors include input values; never expose them.

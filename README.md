@@ -3,6 +3,7 @@
 [![CI](https://github.com/jmamodeo/benchling-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/jmamodeo/benchling-cli/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
+[![Coverage](https://img.shields.io/badge/coverage-66%25-yellow)](https://github.com/jmamodeo/benchling-cli/actions/workflows/ci.yml)
 
 An agent-friendly `benchling` command-line tool and local MCP server for safely reading and editing Benchling notebook entries through the public API.
 
@@ -164,7 +165,10 @@ flowchart TD
 | `cli.py` | Typer command-line interface |
 | `mcp_server.py` | MCP tools, read-only default, write allow-list |
 | `services.py` | Shared typed service layer |
-| `plans.py` | Immutable change plans, apply, status, journal |
+| `plans/` | Immutable change plans, apply, status, journal (package, see below) |
+| `plans/repository.py` | Plan and journal persistence, checksums, JSON diff helpers |
+| `plans/base.py`, `plans/planner.py` | Shared planner core; `ChangePlanner` plan/apply/status and family dispatch |
+| `plans/document.py`, `plans/table.py`, `plans/fields.py`, `plans/results.py` | One mixin per change family (document, table, fields, results) |
 | `api.py` | HTTP client for Benchling REST V2/V3 |
 | `auth.py` | OAuth client-credentials token handling |
 | `config.py`, `environment.py`, `runtime.py` | Environment discovery and per-environment runtimes |
@@ -200,9 +204,12 @@ The test suite is fully offline and needs no credentials.
 
 ```console
 uv sync --extra dev
-uv run pytest
-uvx ruff check .
+uv run ruff check .
+uv run mypy
+uv run pytest --cov
 ```
+
+The suite has 42 test functions (49 collected cases, parametrization included). Coverage is measured with branch coverage and enforced by a `fail_under` floor in `pyproject.toml`.
 
 ### Opt-in sandbox exercise
 

@@ -662,7 +662,7 @@ class BenchlingService:
             parts=parts,
             sections=build_sections(parts),
             tables=tables,
-            schema=schema,
+            entry_schema=schema,
             fields=fields,
             result_tables=(fields or {}).get("result_tables", []),
             results=results,
