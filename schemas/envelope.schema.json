@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/benchling-agent/envelope.schema.json",
+  "title": "Benchling Agent Envelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "ok", "data", "error", "meta"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "ok": { "type": "boolean" },
+    "data": {},
+    "error": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["code", "message", "retryable", "details"],
+          "properties": {
+            "code": { "type": "string" },
+            "message": { "type": "string" },
+            "retryable": { "type": "boolean" },
+            "details": { "type": "object" }
+          }
+        }
+      ]
+    },
+    "meta": { "type": "object" }
+  }
+}
+

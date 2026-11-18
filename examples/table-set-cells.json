@@ -1,0 +1,8 @@
+{
+  "operation": "set_cells",
+  "table_part_id": "docpart_REPLACE_ME",
+  "updates": [
+    { "row": 0, "column": 1, "value": "1.25" }
+  ]
+}
+

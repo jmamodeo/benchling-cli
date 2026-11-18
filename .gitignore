@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.venv/
+.uv-cache/
+build/
+dist/
+.coverage
+htmlcov/
+.benchling-agent/
+.env
+.env.*
+!.env.example
+work/live-test/

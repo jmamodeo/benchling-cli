@@ -1,0 +1,146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/benchling-agent/change-spec.schema.json",
+  "title": "Benchling Agent Change Specification",
+  "description": "Select the matching object for the --family argument.",
+  "$defs": {
+    "fieldValueInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value"],
+      "properties": { "value": {} }
+    }
+  },
+  "oneOf": [
+    {
+      "title": "Document change",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["operation", "parts"],
+          "properties": {
+            "operation": { "const": "insert" },
+            "position": { "type": "string", "default": "end_of_document" },
+            "parts": { "type": "array", "minItems": 1, "items": { "type": "object" } }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["operation", "from_part_id"],
+          "properties": {
+            "operation": { "const": "delete" },
+            "from_part_id": { "type": "string" },
+            "to_part_id": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["operation", "from_part_id", "position"],
+          "properties": {
+            "operation": { "const": "move" },
+            "from_part_id": { "type": "string" },
+            "to_part_id": { "type": "string" },
+            "position": { "type": "string" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["operation", "part_id", "text"],
+          "properties": {
+            "operation": { "const": "replace_text" },
+            "part_id": { "type": "string" },
+            "text": { "type": "string" },
+            "formats": { "type": "array" },
+            "links": { "type": "array" },
+            "mentions": { "type": "array" },
+            "indentation": { "type": "integer", "minimum": 0 }
+          }
+        }
+      ]
+    },
+    {
+      "title": "Table change",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operation", "table_part_id"],
+      "properties": {
+        "operation": { "enum": ["set_cells", "append_rows", "replace"] },
+        "table_part_id": { "type": "string", "pattern": "^docpart_" },
+        "updates": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["row", "column", "value"],
+            "properties": {
+              "row": { "type": "integer", "minimum": 0 },
+              "column": { "type": "integer", "minimum": 0 },
+              "value": {}
+            }
+          }
+        },
+        "rows": { "type": "array", "minItems": 1 },
+        "table": { "type": "object" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "operation": { "const": "set_cells" } } },
+          "then": { "required": ["updates"] }
+        },
+        {
+          "if": { "properties": { "operation": { "const": "append_rows" } } },
+          "then": { "required": ["rows"] }
+        },
+        {
+          "if": { "properties": { "operation": { "const": "replace" } } },
+          "then": { "required": ["table"] }
+        }
+      ]
+    },
+    {
+      "title": "Entry-field change",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_fields"],
+      "properties": {
+        "schema_fields": {
+          "description": "Keys are V3 field system names or field-definition IDs; plans normalize them to system names.",
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": { "$ref": "#/$defs/fieldValueInput" }
+        }
+      }
+    },
+    {
+      "title": "Result upload",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["table_id", "assay_results"],
+      "properties": {
+        "table_id": { "type": "string", "pattern": "^strtbl_" },
+        "assay_results": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["schemaId", "fields"],
+            "properties": {
+              "schemaId": { "type": "string" },
+              "projectId": { "type": ["string", "null"] },
+              "fields": {
+                "type": "object",
+                "additionalProperties": { "$ref": "#/$defs/fieldValueInput" }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

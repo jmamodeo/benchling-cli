@@ -1,0 +1,23 @@
+# API limitations
+
+These limits are based on the public Benchling documentation and OpenAPI contracts inspected on 2026-09-24.
+
+- The V3 Document API is beta. This client sends `EARLY-ACCESS: true` and uses the unified `/api/v3` routes.
+- Entry content is an ordered, flat list. Sections are derived from section markers; they are not independent nested resources.
+- The document API can read and replace unstructured tables. It does not expose modular row/cell writes, so `set_cells` and `append_rows` read every row, preserve supported fields, and send a complete version-checked replacement.
+- API table edits clear evaluated values. Benchling's browser is currently responsible for recalculating formulas.
+- Structured result, registration, inventory, and generic structured tables are discoverable as document parts but their cells are not editable through the Document API.
+- Document part mutations and unstructured table updates accept a current document version and return HTTP 409 when stale. Entry schema-field updates do not publish an equivalent atomic version precondition. This client compares affected values immediately before writing and labels that protection as best effort.
+- Entry field and result inputs are normalized from a V3 field-definition ID or `systemName` to the API-facing system name. Display names are deliberately rejected because they are mutable and may not be unique.
+- Replacing a text part requires insert followed by delete. If the second request fails, the entry contains both parts and the journal reports partial completion.
+- V2 result-table bulk creation creates pending result records. A person must integrate them into the existing table in Benchling.
+- Live verification on 2026-09-29 against a Benchling tenant found that it rejects `assayResults[].id` in notebook-table bulk uploads, even though public V2 `AssayResultCreate` declares it. The CLI omits remote IDs, retains local correlation UUIDs plus task IDs, and never treats those local UUIDs as idempotency keys. Fresh plans are required for the updated contract; plans using the old request shape cannot be applied. Table uploads are capped at 500 records.
+- Current V3 document-part responses are flattened `DocumentPart*` objects. Reads preserve these objects and support both flattened and legacy nested content. Unknown types are explicitly retained as opaque data. V2 get responses wrap their object (for example `entry`, `project`, `folder`); adapters unwrap and validate these instead of silently reporting empty data. Tasks can be flat status objects without IDs. Confirmed task result IDs are persisted by `changes status` for reconciliation.
+- Pending result uploads have no integrated entry source (`entryId`/`entry` is null) until browser integration. An Entry Link schema-field value is a distinct relationship and does not make the pending result appear in the V3 `entry.eq` filter. Read pending records by the canonical V3 IDs returned in the task instead.
+- A result plan verifies its `strtbl_…` identifier against the selected entry's V2 `results_table` note, enforces that note's result schema, validates required fields, and checks supplied project IDs. Those reads do not establish write permission; Benchling remains authoritative at submission time.
+- A write that times out is never retried automatically. Its journal status is `unknown` until reconciled.
+- Plans are guarded by per-plan cross-process locks, so a CLI and MCP process cannot intentionally apply the same plan concurrently. A plan with any prior attempt is not reusable.
+- Full entry reads combine entry metadata, document parts, schemas, V2 entry fields, and result records from several calls. The client reads the entry version before and after assembly, but linked results do not share that atomic document version; their independent retrieval timing and page count are reported separately.
+- Attachment metadata and temporary download URLs may be returned. Attachment binaries are not downloaded by `entry get --full`.
+- Current authentication is environment-only app client credentials, one set per environment: `BENCHLING_<ENV>_API_ENDPOINT`, `BENCHLING_<ENV>_CLIENT_ID`, `BENCHLING_<ENV>_CLIENT_SECRET` (for example `DEV`, `TEST`). Every CLI command and MCP tool call names its environment explicitly. App permissions, not the browser user's permissions, control API access. Personal keys, delegated login, and saved profiles are not accepted by the public CLI/MCP interfaces. Legacy internal helpers remain covered by fixtures but are not reachable through these interfaces.
+- Benchling's official Python SDK currently targets V2 and does not implement delegated authorization. This package uses HTTPX for both API versions.

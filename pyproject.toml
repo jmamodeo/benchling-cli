@@ -1,0 +1,88 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "benchling-agent"
+version = "0.1.0"
+description = "Agent-friendly Benchling CLI and local MCP server"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "John Amodeo", email = "120539773+jmamodeo@users.noreply.github.com" }]
+keywords = [
+  "benchling",
+  "eln",
+  "cli",
+  "mcp",
+  "model-context-protocol",
+  "lab-automation",
+  "laboratory-informatics",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: Science/Research",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering",
+]
+dependencies = [
+  "filelock>=3.16",
+  "httpx>=0.27,<1",
+  "keyring>=25,<26",
+  "mcp>=1.13,<3",
+  "pydantic>=2.8,<3",
+  "typer>=0.12,<1",
+  "truststore>=0.10,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3,<9",
+  "pytest-asyncio>=0.24,<1",
+  "ruff>=0.6",
+]
+
+[project.urls]
+Homepage = "https://github.com/jmamodeo/benchling-cli"
+Repository = "https://github.com/jmamodeo/benchling-cli"
+Issues = "https://github.com/jmamodeo/benchling-cli/issues"
+Changelog = "https://github.com/jmamodeo/benchling-cli/blob/main/CHANGELOG.md"
+
+[project.scripts]
+benchling = "benchling_agent.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.data-files]
+"share/benchling-agent/schemas" = ["schemas/*.json"]
+"share/benchling-agent/contracts" = ["contracts/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = [
+  "E501",  # long lines are tolerated; formatter is not enforced
+  "B008",  # typer uses call expressions in argument defaults
+  "B905",  # zip() strictness would change behavior
+  "UP042", # str-mixin enums are part of the public API
+  "E402",
+]
