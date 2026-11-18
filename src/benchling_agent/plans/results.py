@@ -1,3 +1,5 @@
+"""Result-record submission planning."""
+
 from __future__ import annotations
 
 import uuid
@@ -19,6 +21,7 @@ from .fields import FieldNormalization
 
 
 class ResultsPlanning(FieldNormalization):
+    """Planning and submission of new result records."""
     async def _plan_results(self, entry_id: str, request: dict[str, Any]) -> PlanParts:
         table_id = request.get("table_id")
         records = request.get("assay_results")

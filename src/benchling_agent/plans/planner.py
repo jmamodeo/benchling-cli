@@ -1,3 +1,5 @@
+"""Plan/apply orchestration: builds checksummed change plans and applies them with a journal."""
+
 from __future__ import annotations
 
 import asyncio
@@ -29,9 +31,15 @@ from .table import TablePlanning
 
 
 class ChangePlanner(DocumentPlanning, TablePlanning, FieldsPlanning, ResultsPlanning):
+    """Creates change plans and applies them under a per-plan file lock."""
+
     async def plan(
         self, reference: str, family: PlanFamily | str, request: dict[str, Any]
     ) -> ChangePlan:
+        """Build and persist a checksummed plan without writing to the entry.
+
+        Raises ValidationError for an unknown family or invalid request.
+        """
         try:
             family = PlanFamily(family)
         except ValueError as exc:
@@ -83,6 +91,10 @@ class ChangePlanner(DocumentPlanning, TablePlanning, FieldsPlanning, ResultsPlan
         return plan
 
     async def apply(self, plan_id: str) -> dict[str, Any]:
+        """Apply a stored plan while holding its lock.
+
+        Raises ConflictError if another process holds the lock for 30 seconds.
+        """
         self.repository._validate_id(plan_id)
         self.repository.config.ensure()
         lock = FileLock(
@@ -190,6 +202,10 @@ class ChangePlanner(DocumentPlanning, TablePlanning, FieldsPlanning, ResultsPlan
             raise wrapped from exc
 
     async def status(self, plan_id: str) -> dict[str, Any]:
+        """Return the plan and journal; for submitted results, also reconcile the remote task.
+
+        Remote lookup failures are reported under remote_task_error, not raised.
+        """
         plan = self.repository.load_plan(plan_id)
         if plan.env != self.api.environment.name or plan.tenant_url != self.api.environment.base_url:
             raise ValidationError(

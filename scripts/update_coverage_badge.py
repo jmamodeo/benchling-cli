@@ -27,6 +27,7 @@ ANCHOR = re.compile(r"^\[!\[Python 3\.11\+\].*$", re.MULTILINE)
 
 
 def color_for(percent: int) -> str:
+    """Map a coverage percentage to a shields.io color name."""
     if percent >= 90:
         return "brightgreen"
     if percent >= 80:
@@ -39,6 +40,7 @@ def color_for(percent: int) -> str:
 
 
 def read_percent(json_path: Path | None) -> float:
+    """Return total percent covered from a coverage JSON report, generating one if none is given."""
     if json_path is None:
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "coverage.json"
@@ -54,6 +56,7 @@ def read_percent(json_path: Path | None) -> float:
 
 
 def badge_line(percent: int) -> str:
+    """Render the README markdown for the coverage badge."""
     return (
         f"[![Coverage](https://img.shields.io/badge/coverage-{percent}%25-{color_for(percent)})]"
         "(https://github.com/jmamodeo/benchling-cli/actions/workflows/ci.yml)"
@@ -61,6 +64,10 @@ def badge_line(percent: int) -> str:
 
 
 def update_readme(readme: Path, percent: int) -> bool:
+    """Replace or insert the badge line in the README; return False if nothing changed.
+
+    Exits if there is no existing badge or anchor line to extend.
+    """
     text = readme.read_text("utf-8")
     line = badge_line(percent)
     if BADGE.search(text):
@@ -77,6 +84,7 @@ def update_readme(readme: Path, percent: int) -> bool:
 
 
 def main() -> int:
+    """Update the README badge from coverage data; returns the process exit code."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--json", type=Path, help="existing coverage JSON report")
     parser.add_argument("--readme", type=Path, default=ROOT / "README.md")

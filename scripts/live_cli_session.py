@@ -17,6 +17,7 @@ from pathlib import Path
 
 
 def main() -> None:
+    """Relay JSON command lines from stdin to the real CLI, printing one JSON result per line."""
     root = Path(__file__).resolve().parents[1]
     output_dir = root / "work" / "live-test"
     output_dir.mkdir(parents=True, exist_ok=True, mode=0o700)

@@ -1,3 +1,5 @@
+"""Typer CLI: every command prints a JSON Envelope on stdout and exits with an ExitCode."""
+
 from __future__ import annotations
 
 import asyncio
@@ -48,6 +50,8 @@ app.add_typer(mcp_app, name="mcp")
 
 
 class State:
+    """Per-invocation state stored on the Typer context; env is the --env selection."""
+
     def __init__(self, env: str | None) -> None:
         self.env = env
 
@@ -115,6 +119,7 @@ def _execute(env: str | None, call: Callable[[Runtime], Awaitable[Any]]) -> None
 
 @auth_app.command("status")
 def auth_status(ctx: typer.Context) -> None:
+    """Show local authentication state for the selected environment without calling the API."""
     state: State = ctx.obj
     try:
         config = EnvironmentConfigStore()
@@ -132,6 +137,7 @@ def auth_status(ctx: typer.Context) -> None:
 
 @envs_app.command("list")
 def envs_list() -> None:
+    """List configured environments (metadata only, no secrets)."""
     try:
         _emit(Envelope.success({"environments": EnvironmentConfigStore().metadata()}))
     except BenchlingAgentError as exc:
@@ -141,12 +147,14 @@ def envs_list() -> None:
 
 @app.command()
 def doctor(ctx: typer.Context) -> None:
+    """Check configuration, authentication and API connectivity for the environment."""
     state: State = ctx.obj
     _execute(state.env, lambda runtime: runtime.service.doctor())
 
 
 @entry_app.command("resolve")
 def entry_resolve(ctx: typer.Context, reference: str) -> None:
+    """Resolve an entry ID, display ID or URL to its canonical entry."""
     state: State = ctx.obj
     _execute(state.env, lambda runtime: runtime.service.resolve_entry(reference))
 
@@ -157,42 +165,49 @@ def entry_get(
     reference: str,
     full: bool = typer.Option(False, help="Retrieve all available structured content."),
 ) -> None:
+    """Fetch an entry snapshot; --full retrieves all available structured content."""
     state: State = ctx.obj
     _execute(state.env, lambda runtime: runtime.service.get_entry(reference, full=full))
 
 
 @entry_app.command("inspect")
 def entry_inspect(ctx: typer.Context, reference: str) -> None:
+    """Summarize an entry's structure (sections, parts, tables, schemas) without full content."""
     state: State = ctx.obj
     _execute(state.env, lambda runtime: runtime.service.inspect_entry(reference))
 
 
 @entry_fields_app.command("get")
 def entry_fields_get(ctx: typer.Context, reference: str) -> None:
+    """Get the schema field values of an entry."""
     state: State = ctx.obj
     _execute(state.env, lambda runtime: runtime.service.get_entry_fields(reference))
 
 
 @section_app.command("get")
 def section_get(ctx: typer.Context, reference: str, section: str) -> None:
+    """Get one section of an entry."""
     state: State = ctx.obj
     _execute(state.env, lambda runtime: runtime.service.get_section(reference, section))
 
 
 @part_app.command("get")
 def part_get(ctx: typer.Context, reference: str, part_id: str) -> None:
+    """Get one document part of an entry by part ID."""
     state: State = ctx.obj
     _execute(state.env, lambda runtime: runtime.service.get_part(reference, part_id))
 
 
 @table_app.command("get")
 def table_get(ctx: typer.Context, part_id: str) -> None:
+    """Get an unstructured table by its part ID."""
     state: State = ctx.obj
     _execute(state.env, lambda runtime: runtime.service.get_table(part_id))
 
 
 @schema_app.command("get")
 def schema_get(ctx: typer.Context, schema_id: str) -> None:
+    """Get an entry or result schema by ID."""
     state: State = ctx.obj
     _execute(state.env, lambda runtime: runtime.service.get_schema(schema_id))
 
@@ -205,6 +220,7 @@ def results_list(
     page_size: int = typer.Option(100, min=1, max=100),
     cursor: str | None = typer.Option(None),
 ) -> None:
+    """List result records, optionally filtered by entry or schema, one page at a time."""
     state: State = ctx.obj
     _execute(
         state.env,
@@ -216,6 +232,7 @@ def results_list(
 
 @results_app.command("get")
 def results_get(ctx: typer.Context, result_id: str) -> None:
+    """Get one result record by ID."""
     state: State = ctx.obj
     _execute(state.env, lambda runtime: runtime.service.get_result(result_id))
 
@@ -248,6 +265,7 @@ def changes_plan(
     family: PlanFamily = typer.Option(..., case_sensitive=False),
     spec: str = typer.Option(..., help="JSON file path, or '-' for stdin."),
 ) -> None:
+    """Create a change plan from a JSON spec; nothing is written until it is applied."""
     state: State = ctx.obj
     try:
         request = _read_spec(spec)
@@ -262,12 +280,14 @@ def changes_plan(
 
 @changes_app.command("apply")
 def changes_apply(ctx: typer.Context, plan_id: str) -> None:
+    """Apply a previously created plan, re-checking its preconditions first."""
     state: State = ctx.obj
     _execute(state.env, lambda runtime: runtime.planner.apply(plan_id))
 
 
 @changes_app.command("status")
 def changes_status(ctx: typer.Context, plan_id: str) -> None:
+    """Show the journal and status of a plan."""
     state: State = ctx.obj
 
     async def call(runtime: Runtime) -> dict[str, Any]:
@@ -294,6 +314,7 @@ def mcp_serve(
 
 
 def main() -> None:
+    """Console-script entry point."""
     app()
 
 

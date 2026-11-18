@@ -1,3 +1,5 @@
+"""Unstructured table edit planning."""
+
 from __future__ import annotations
 
 from copy import deepcopy
@@ -15,6 +17,7 @@ from .base import PlannerBase, PlanParts
 
 
 class TablePlanning(PlannerBase):
+    """Planning and applying of unstructured table edits."""
     async def _plan_table(self, entry_id: str, request: dict[str, Any]) -> PlanParts:
         part_id = request.get("table_part_id")
         if not isinstance(part_id, str):

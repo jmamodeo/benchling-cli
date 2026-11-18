@@ -1,3 +1,5 @@
+"""Wiring of auth, API client, service and planner for one or more environments."""
+
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -12,6 +14,8 @@ from .services import BenchlingService
 
 
 class Runtime:
+    """Fully wired object graph for one resolved environment."""
+
     def __init__(
         self,
         env: str | None,
@@ -31,6 +35,7 @@ class Runtime:
         self.planner = ChangePlanner(self.service, self.api, self.repository)
 
     async def close(self) -> None:
+        """Release HTTP clients owned by the API and auth layers."""
         await self.api.close()
         self.auth.close()
 
@@ -50,9 +55,11 @@ class RuntimePool:
         self._runtimes: dict[str, Runtime] = dict(runtimes or {})
 
     def available(self) -> list[str]:
+        """Sorted names of cached runtimes plus environments configured in the process env."""
         return sorted(set(self._runtimes) | set(self.config.metadata()))
 
     def get(self, env: str) -> Runtime:
+        """Return the cached runtime, building it on first use; raises if the environment is invalid."""
         runtime = self._runtimes.get(env)
         if runtime is None:
             runtime = Runtime(env, config=self.config, secrets=self.secrets)
@@ -60,6 +67,7 @@ class RuntimePool:
         return runtime
 
     async def close(self) -> None:
+        """Empty the cache and close every runtime."""
         runtimes, self._runtimes = list(self._runtimes.values()), {}
         for runtime in runtimes:
             await runtime.close()

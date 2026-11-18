@@ -43,6 +43,7 @@ def comparable_table(table: dict[str, Any], row: int, column: int) -> dict[str, 
 
 
 async def run(args: argparse.Namespace) -> None:
+    """Run the interactive exercise; exits via SystemExit if any verification step fails."""
     runtime = Runtime(args.env)
     try:
         target = await runtime.service.get_table_for_entry(args.entry, args.table_part)
@@ -120,6 +121,7 @@ async def run(args: argparse.Namespace) -> None:
 
 
 def main() -> None:
+    """Parse arguments and run the exercise; row and column must be nonnegative."""
     parser = argparse.ArgumentParser(
         description="Exercise stale-plan rejection and a targeted write in a sandbox entry."
     )

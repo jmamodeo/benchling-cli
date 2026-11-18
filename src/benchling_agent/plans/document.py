@@ -1,3 +1,5 @@
+"""Document-part change planning."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -20,6 +22,7 @@ from .base import PlannerBase, PlanParts
 
 
 class DocumentPlanning(PlannerBase):
+    """Planning and applying of document-part changes."""
     async def _plan_document(self, entry_id: str, request: dict[str, Any]) -> PlanParts:
         snapshot = await self.service.get_entry(entry_id, full=True)
         operation = request.get("operation")

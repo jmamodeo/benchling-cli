@@ -1,3 +1,5 @@
+"""OAuth client-credentials token handling."""
+
 from __future__ import annotations
 
 import threading
@@ -28,13 +30,19 @@ class AuthManager:
         self._app_lock = threading.Lock()
 
     def close(self) -> None:
+        """Close the HTTP client only if this manager created it."""
         if self._owns_http:
             self.http.close()
 
     def headers(self, environment: Environment) -> dict[str, str]:
+        """Return a Bearer Authorization header, fetching a token if the cache is empty or expired.
+
+        Raises AuthenticationError when credentials are missing or rejected.
+        """
         return self._app_headers(environment)
 
     def status(self, environment: Environment) -> dict[str, Any]:
+        """Describe credential state without network calls or exposing secrets."""
         bundle = self._app_tokens.get((environment.name, environment.base_url, environment.client_id))
         return {
             "env": environment.name,

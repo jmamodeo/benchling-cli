@@ -1,3 +1,5 @@
+"""Schema field planning and field value validation."""
+
 from __future__ import annotations
 
 from copy import deepcopy
@@ -19,6 +21,7 @@ from .base import PlannerBase, PlanParts
 
 
 class FieldNormalization(PlannerBase):
+    """Validation and normalization of schema field values shared by fields and results planners."""
     def _normalize_schema_field_updates(
         self,
         updates: dict[str, Any],
@@ -212,6 +215,7 @@ class FieldNormalization(PlannerBase):
 
 
 class FieldsPlanning(FieldNormalization):
+    """Planning and applying of entry schema field updates."""
     async def _plan_fields(self, entry_id: str, request: dict[str, Any]) -> PlanParts:
         updates = request.get("schema_fields")
         if not isinstance(updates, dict) or not updates:

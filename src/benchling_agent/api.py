@@ -1,3 +1,5 @@
+"""Async Benchling HTTP client."""
+
 from __future__ import annotations
 
 import asyncio
@@ -39,6 +41,7 @@ class BenchlingAPI:
         self.max_read_attempts = max_read_attempts
 
     async def close(self) -> None:
+        """Close the HTTP client only if this instance created it."""
         if self._owns_http:
             await self.http.aclose()
 
@@ -52,6 +55,11 @@ class BenchlingAPI:
         json: Any = None,
         early_access: bool | None = None,
     ) -> dict[str, Any]:
+        """Send one request and return the decoded JSON object.
+
+        Only GET is retried. A non-GET with no confirmed response raises
+        PartialCompletionError because the write may have been applied.
+        """
         method = method.upper()
         if not path.startswith("/"):
             raise ValidationError("API path must start with '/'")
@@ -96,6 +104,10 @@ class BenchlingAPI:
         item_key: str = "items",
         max_items: int | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
+        """Yield items across nextToken pages, stopping at max_items.
+
+        Raises UpstreamError on a malformed page or a repeated token.
+        """
         query = dict(params or {})
         yielded = 0
         seen_tokens: set[str] = set()

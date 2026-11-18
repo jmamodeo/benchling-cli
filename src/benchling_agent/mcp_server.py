@@ -1,3 +1,5 @@
+"""MCP server exposing Benchling read tools and gated write tools."""
+
 from __future__ import annotations
 
 import asyncio
@@ -63,6 +65,7 @@ def build_mcp_server(
     *,
     writable_envs: set[str] | frozenset[str] = frozenset(),
 ) -> MCPServer:
+    """Create the MCP server; apply_changes works only for envs in writable_envs."""
     try:
         from mcp.server.mcpserver import MCPServer
     except ImportError:  # pragma: no cover - compatibility with MCP 1.x
@@ -78,6 +81,7 @@ def build_mcp_server(
     )
 
     def meta(active: Runtime | None) -> dict[str, Any]:
+        """Envelope metadata identifying the env and tenant, empty if no runtime resolved."""
         if active is None:
             return {}
         return {"env": active.environment.name, "tenant_url": active.environment.base_url}
@@ -85,6 +89,7 @@ def build_mcp_server(
     async def safe(
         env: str, call: Callable[[Runtime], Coroutine[Any, Any, Any]]
     ) -> Envelope[Any]:
+        """Run call against env's runtime, converting every exception into a failure envelope."""
         active: Runtime | None = None
         try:
             active = pool.get(env)
@@ -358,6 +363,11 @@ def build_mcp_server(
 
 
 def run_mcp_server(*, writable_envs: set[str] | frozenset[str] = frozenset()) -> None:
+    """Serve MCP over stdio until exit.
+
+    Raises AuthenticationError if no environment is configured and ValidationError
+    if writable_envs names an unconfigured one.
+    """
     pool = RuntimePool()
     available = pool.available()
     if not available:

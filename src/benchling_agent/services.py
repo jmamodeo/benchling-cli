@@ -1,3 +1,5 @@
+"""Read-side Benchling operations: entry resolution, snapshots, tables, schemas and results."""
+
 from __future__ import annotations
 
 import re
@@ -43,6 +45,7 @@ KNOWN_PART_TYPES = {
 
 
 def entry_version(entry: dict[str, Any]) -> str:
+    """Return the entry's version ID; raises UpstreamError if version metadata is absent."""
     metadata = entry.get("versionMetadata") or {}
     version = metadata.get("versionId") or metadata.get("id")
     if not version:
@@ -63,19 +66,23 @@ def part_content(part: dict[str, Any]) -> dict[str, Any]:
 
 
 def part_type(part: dict[str, Any]) -> str:
+    """Return the part's __typename, or "Unknown" when absent."""
     content = part_content(part)
     return str(content.get("__typename") or "Unknown")
 
 
 def is_section(part: dict[str, Any]) -> bool:
+    """True for section parts, with or without a namespace prefix on the type."""
     return part_type(part).split(".")[-1] in {"SectionDocumentContent", "DocumentPartSection"}
 
 
 def is_unstructured_table(part: dict[str, Any]) -> bool:
+    """True for free-form (unstructured) table parts."""
     return "UnstructuredTableDocumentContent" in part_type(part) or part_type(part) == "DocumentPartUnstructuredTable"
 
 
 def is_structured_table(part: dict[str, Any]) -> bool:
+    """True for any structured table part (results, registration, inventory); excludes unstructured."""
     kind = part_type(part)
     return ("StructuredTableDocumentContent" in kind or kind.startswith("DocumentPart") and "StructuredTable" in kind) and "Unstructured" not in kind
 
@@ -105,6 +112,10 @@ def field_definition_type(definition: dict[str, Any]) -> str:
 
 
 def build_sections(parts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Group a flat part list into sections; each records its index range and child part IDs.
+
+    Parts before the first section belong to no section.
+    """
     sections: list[dict[str, Any]] = []
     current: dict[str, Any] | None = None
     for index, part in enumerate(parts):
@@ -128,14 +139,17 @@ def build_sections(parts: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 class BenchlingService:
+    """Read operations built on BenchlingAPI that return plain JSON-ready dicts."""
+
     def __init__(self, api: BenchlingAPI) -> None:
         self.api = api
 
-    @property
-    def env(self) -> str:
-        return self.api.environment.name
-
     async def resolve_entry(self, reference: str) -> dict[str, Any]:
+        """Resolve an entry ID, tenant URL or display ID to its canonical ID.
+
+        Raises ValidationError for a foreign-tenant URL or ambiguous display ID,
+        and NotFoundError when nothing matches.
+        """
         reference = reference.strip()
         parsed_id: str | None = None
         if ENTRY_ID.fullmatch(reference):
@@ -191,6 +205,11 @@ class BenchlingService:
         }
 
     async def get_entry(self, reference: str, *, full: bool = False) -> dict[str, Any]:
+        """Fetch an entry; with full=True assemble a snapshot of parts, tables and schema.
+
+        A full snapshot is retried once if the entry version changes mid-read,
+        then raises ConflictError.
+        """
         resolved = await self.resolve_entry(reference)
         entry_id = resolved["entry_id"]
         if not full:
@@ -219,6 +238,7 @@ class BenchlingService:
         raise AssertionError("unreachable")
 
     async def inspect_entry(self, reference: str) -> dict[str, Any]:
+        """Summarize a full entry snapshot: sections, part summaries, table sizes and completeness."""
         snapshot = await self.get_entry(reference, full=True)
         return {
             "resolved": snapshot["resolved"],
@@ -250,6 +270,10 @@ class BenchlingService:
         }
 
     async def get_section(self, reference: str, section: str) -> dict[str, Any]:
+        """Return one section's parts and tables, matched by part ID or title.
+
+        Raises NotFoundError if none match and ValidationError if the title is ambiguous.
+        """
         snapshot = await self.get_entry(reference, full=True)
         matches = [
             item
@@ -276,6 +300,7 @@ class BenchlingService:
         }
 
     async def get_part(self, reference: str, part_id: str) -> dict[str, Any]:
+        """Return one document part and any table detail; raises NotFoundError if absent."""
         snapshot = await self.get_entry(reference, full=True)
         for part in snapshot["parts"]:
             if part.get("id") == part_id:
@@ -288,6 +313,10 @@ class BenchlingService:
         raise NotFoundError("Document part was not found", details={"part_id": part_id})
 
     async def get_table(self, part_id: str) -> dict[str, Any]:
+        """Fetch every page of an unstructured table and merge the rows into one response.
+
+        Raises UpstreamError on invalid rows or a repeated pagination token.
+        """
         rows: list[dict[str, Any]] = []
         detail: dict[str, Any] | None = None
         params: dict[str, Any] = {"pageSize": 1000}
@@ -362,6 +391,7 @@ class BenchlingService:
         return {"resolved": resolved, "part": part, "table": table}
 
     async def get_schema(self, schema_id: str) -> dict[str, Any]:
+        """Return a result or entry schema (chosen by ID prefix) with all its field definitions."""
         if schema_id.startswith("assaysch_"):
             base = f"/result-schema/{schema_id}"
         else:
@@ -376,6 +406,7 @@ class BenchlingService:
         return {"schema": schema, "field_definitions": fields}
 
     async def get_entry_fields(self, reference: str) -> dict[str, Any]:
+        """Return an entry's custom fields keyed by raw and system name, with schema, project and result tables."""
         resolved = await self.resolve_entry(reference)
         entry = self._v2_object(await self.api.request("GET", f"/entries/{resolved['entry_id']}", version=2), "entry")
         schema_ref = entry.get("schema")
@@ -448,6 +479,7 @@ class BenchlingService:
         return tables
 
     async def list_result_tables(self, reference: str) -> dict[str, Any]:
+        """List the V2 Results tables embedded in an entry, with its project ID."""
         resolved = await self.resolve_entry(reference)
         entry = self._v2_object(await self.api.request("GET", f"/entries/{resolved['entry_id']}", version=2), "entry")
         return {
@@ -486,9 +518,11 @@ class BenchlingService:
         }
 
     async def get_project(self, project_id: str) -> dict[str, Any]:
+        """Fetch a V2 project; raises UpstreamError if the response lacks an object ID."""
         return self._v2_object(await self.api.request("GET", f"/projects/{project_id}", version=2), "project")
 
     async def get_task(self, task_id: str) -> dict[str, Any]:
+        """Fetch a V2 task; raises UpstreamError if the response has no string status."""
         payload = await self.api.request("GET", f"/tasks/{task_id}", version=2)
         task = payload.get("task", payload)
         # Task responses may be a flat status object without an id property.
@@ -504,6 +538,10 @@ class BenchlingService:
         page_size: int = 100,
         cursor: str | None = None,
     ) -> dict[str, Any]:
+        """Return one page of results, optionally filtered by entry and schema.
+
+        page_size must be 1-100 (ValidationError otherwise); next_token is None on the last page.
+        """
         if page_size < 1 or page_size > 100:
             raise ValidationError("page_size must be between 1 and 100")
         params: dict[str, Any] = {"pageSize": page_size}
@@ -520,9 +558,11 @@ class BenchlingService:
         }
 
     async def get_result(self, result_id: str) -> dict[str, Any]:
+        """Fetch a single result by ID."""
         return await self.api.request("GET", f"/result/{result_id}")
 
     async def doctor(self) -> dict[str, Any]:
+        """Probe V3 and V2 entry endpoints; failures are reported per check rather than raised."""
         checks: list[dict[str, Any]] = []
         for name, version, path, params in (
             ("v3_entries", 3, "/entry/items", {"pageSize": 1}),
