@@ -364,6 +364,10 @@ uv run python scripts/sandbox_exercise.py \
 
 See [API limitations](docs/api-limitations.md) and the [research record](docs/research.md) before enabling writes against production data.
 
+## Citation
+
+If you use this software, please cite it. GitHub's "Cite this repository" button uses [`CITATION.cff`](CITATION.cff).
+
 ## Contributing, security, license
 
 - [Contributing guide](CONTRIBUTING.md) and [Code of Conduct](CODE_OF_CONDUCT.md)
