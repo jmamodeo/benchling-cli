@@ -11,7 +11,7 @@ import typer
 
 from .auth import AuthManager
 from .environment import EnvironmentConfigStore as ConfigStore
-from .environment import environment_credentials
+from .environment import environment_secrets
 from .errors import BenchlingAgentError, ExitCode, UnsupportedError, UpstreamError, ValidationError
 from .models import Envelope, PlanFamily, Profile
 from .runtime import Runtime
@@ -135,7 +135,7 @@ def auth_status(ctx: typer.Context) -> None:
     try:
         config = ConfigStore()
         profile = config.resolve(state.profile)
-        auth = AuthManager(config, environment_credentials())
+        auth = AuthManager(environment_secrets())
         try:
             result = auth.status(profile)
         finally:

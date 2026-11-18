@@ -14,16 +14,15 @@ from typer.testing import CliRunner
 
 from benchling_agent.auth import AuthManager
 from benchling_agent.cli import app
-from benchling_agent.config import ConfigStore
 from benchling_agent.environment import (
     EnvironmentConfigStore,
     available_envs,
-    environment_credentials,
+    environment_secrets,
     variables,
 )
 from benchling_agent.errors import AuthenticationError, ValidationError
 from benchling_agent.mcp_server import build_mcp_server
-from benchling_agent.models import AuthMethod, Profile
+from benchling_agent.models import AuthMethod
 from benchling_agent.runtime import Runtime, RuntimePool
 from benchling_agent.tls import verified_context
 
@@ -49,8 +48,9 @@ def test_tls_verification_remains_enabled():
 
 
 def test_environment_layout_and_no_legacy_fallback(tmp_path, monkeypatch):
-    legacy = ConfigStore(tmp_path)
-    legacy.upsert(Profile(name="dev", tenant_url="https://old.benchling.com", auth_method=AuthMethod.API_KEY))
+    (tmp_path / "profiles.json").write_text(
+        '{"version": 1, "profiles": {"dev": {"name": "dev", "tenant_url": "https://old.benchling.com"}}}'
+    )
     env = EnvironmentConfigStore(tmp_path)
     with pytest.raises(ValidationError):
         env.resolve("dev")
@@ -76,9 +76,7 @@ def test_multiple_environments_discovered_with_separate_secrets(tmp_path, monkey
     with pytest.raises(AuthenticationError) as partial:
         store.resolve("prod")
     assert partial.value.details["missing_variables"] == ["BENCHLING_PROD_CLIENT_ID", "BENCHLING_PROD_CLIENT_SECRET"]
-    credentials = environment_credentials()
-    assert credentials.get("dev", "client_secret") == "sensitive-test-secret"
-    assert credentials.get("test", "client_secret") == "other-secret"
+    assert environment_secrets() == {"dev": "sensitive-test-secret", "test": "other-secret"}
 
 
 @pytest.mark.parametrize("name", ["DEV", "../dev", "dev_1", "1dev", ""])
@@ -122,22 +120,20 @@ def test_app_tokens_cached_renewed_and_not_persisted(tmp_path, monkeypatch):
         }
         return httpx.Response(200, json={"access_token": f"token-{count}", "token_type": "bearer", "expires_in": 900})
 
-    store = environment_credentials()
-    auth = AuthManager(config, store, http=httpx.Client(transport=httpx.MockTransport(handler)))
+    auth = AuthManager(environment_secrets(), http=httpx.Client(transport=httpx.MockTransport(handler)))
     with ThreadPoolExecutor(max_workers=2) as pool:
         assert list(pool.map(lambda _: auth.headers(profile), range(2))) == [{"Authorization": "Bearer token-1"}] * 2
     assert count == 1
     bundle = auth._app_tokens[(profile.name, profile.base_url, profile.client_id)]
     bundle.expires_at = datetime.now(UTC) - timedelta(seconds=1)
     assert auth.headers(profile) == {"Authorization": "Bearer token-2"}
-    assert store.get("dev", "token_bundle") is None
     assert not config.root.exists()
 
 
 def test_token_error_cannot_echo_secret(tmp_path, monkeypatch):
     configure(monkeypatch)
     config = EnvironmentConfigStore(tmp_path)
-    auth = AuthManager(config, environment_credentials(), http=httpx.Client(transport=httpx.MockTransport(
+    auth = AuthManager(environment_secrets(), http=httpx.Client(transport=httpx.MockTransport(
         lambda _: httpx.Response(401, json={"error": "sensitive-test-secret"})
     )))
     with pytest.raises(AuthenticationError) as caught:

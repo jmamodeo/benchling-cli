@@ -32,7 +32,7 @@ def test_current_flat_parts_are_preserved_and_sections_resolve():
 
 
 @pytest.mark.asyncio
-async def test_v2_entry_envelope_and_folder_project_relationship(config, credentials):
+async def test_v2_entry_envelope_and_folder_project_relationship():
     def handler(request):
         path = request.url.path
         if path == "/api/v3/entry/etr_one":
@@ -49,7 +49,7 @@ async def test_v2_entry_envelope_and_folder_project_relationship(config, credent
         if path == "/api/v2/tasks/task_one":
             return response_for(request, {"status": "SUCCEEDED", "response": {"assayResults": ["result-uuid"]}})
         raise AssertionError(path)
-    api = make_api(config, credentials, handler)
+    api = make_api(handler)
     service = BenchlingService(api)
     tables = await service.list_result_tables("etr_one")
     assert tables["project_id"] == "src_one"
@@ -68,7 +68,6 @@ def response_for(request: httpx.Request, payload: dict, status: int = 200) -> ht
 
 @pytest.mark.asyncio
 async def test_full_entry_paginates_parts_and_preserves_unknown_types(
-    config, credentials
 ) -> None:
     calls: Counter[str] = Counter()
 
@@ -121,7 +120,7 @@ async def test_full_entry_paginates_parts_and_preserves_unknown_types(
             return response_for(request, {"items": [], "nextToken": ""})
         raise AssertionError(f"unexpected {request.method} {request.url}")
 
-    api = make_api(config, credentials, handler)
+    api = make_api(handler)
     service = BenchlingService(api)
     result = await service.get_entry("etr_one", full=True)
     assert [part["id"] for part in result["parts"]] == [
@@ -139,7 +138,7 @@ async def test_full_entry_paginates_parts_and_preserves_unknown_types(
 
 
 @pytest.mark.asyncio
-async def test_full_entry_rejects_two_concurrent_changes(config, credentials) -> None:
+async def test_full_entry_rejects_two_concurrent_changes() -> None:
     entry_reads = 0
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -159,7 +158,7 @@ async def test_full_entry_rejects_two_concurrent_changes(config, credentials) ->
             return response_for(request, {"items": [], "nextToken": ""})
         raise AssertionError(path)
 
-    api = make_api(config, credentials, handler)
+    api = make_api(handler)
     service = BenchlingService(api)
     with pytest.raises(ConflictError):
         await service.get_entry("etr_one", full=True)
@@ -167,8 +166,8 @@ async def test_full_entry_rejects_two_concurrent_changes(config, credentials) ->
 
 
 @pytest.mark.asyncio
-async def test_duplicate_section_title_requires_part_id(config, credentials) -> None:
-    api = make_api(config, credentials, lambda request: response_for(request, {}))
+async def test_duplicate_section_title_requires_part_id() -> None:
+    api = make_api(lambda request: response_for(request, {}))
     service = BenchlingService(api)
 
     async def snapshot(reference: str, *, full: bool = False):
@@ -204,7 +203,6 @@ def test_section_boundaries_follow_flat_part_order() -> None:
 
 @pytest.mark.asyncio
 async def test_entry_fields_are_addressable_by_v3_system_name(
-    config, credentials
 ) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
@@ -242,7 +240,7 @@ async def test_entry_fields_are_addressable_by_v3_system_name(
             )
         raise AssertionError(path)
 
-    api = make_api(config, credentials, handler)
+    api = make_api(handler)
     fields = await BenchlingService(api).get_entry_fields("etr_one")
     assert fields["fields_by_system_name"] == {"temperature": {"value": 21}}
     assert fields["field_definitions"][0]["id"] == "tsf_temperature"
@@ -250,7 +248,7 @@ async def test_entry_fields_are_addressable_by_v3_system_name(
 
 
 @pytest.mark.asyncio
-async def test_table_target_must_belong_to_selected_entry(config, credentials) -> None:
+async def test_table_target_must_belong_to_selected_entry() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/api/v3/entry/etr_one":
             return response_for(
@@ -261,14 +259,14 @@ async def test_table_target_must_belong_to_selected_entry(config, credentials) -
             return response_for(request, {"items": [], "nextToken": ""})
         raise AssertionError(request.url.path)
 
-    api = make_api(config, credentials, handler)
+    api = make_api(handler)
     with pytest.raises(NotFoundError):
         await BenchlingService(api).get_table_for_entry("etr_one", "docpart_other")
     await api.close()
 
 
 @pytest.mark.asyncio
-async def test_result_table_relationship_comes_from_v2_entry(config, credentials) -> None:
+async def test_result_table_relationship_comes_from_v2_entry() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/api/v2/entries/etr_one"
         return response_for(
@@ -291,14 +289,14 @@ async def test_result_table_relationship_comes_from_v2_entry(config, credentials
             },
         )
 
-    api = make_api(config, credentials, handler)
+    api = make_api(handler)
     table = await BenchlingService(api).get_result_table("etr_one", "strtbl_one")
     assert table["schema_id"] == "assaysch_one"
     await api.close()
 
 
 @pytest.mark.asyncio
-async def test_write_server_error_is_unknown_and_never_retried(config, credentials) -> None:
+async def test_write_server_error_is_unknown_and_never_retried() -> None:
     calls = 0
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -306,7 +304,7 @@ async def test_write_server_error_is_unknown_and_never_retried(config, credentia
         calls += 1
         return response_for(request, {"message": "failed"}, status=503)
 
-    api = make_api(config, credentials, handler)
+    api = make_api(handler)
     with pytest.raises(PartialCompletionError):
         await api.request("PATCH", "/entry/etr_one", json={"name": "Changed"})
     assert calls == 1
@@ -314,7 +312,7 @@ async def test_write_server_error_is_unknown_and_never_retried(config, credentia
 
 
 @pytest.mark.asyncio
-async def test_inaccessible_table_is_reported_as_partial(config, credentials) -> None:
+async def test_inaccessible_table_is_reported_as_partial() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
         if path == "/api/v3/entry/etr_one":
@@ -345,7 +343,7 @@ async def test_inaccessible_table_is_reported_as_partial(config, credentials) ->
             return response_for(request, {"items": [], "nextToken": ""})
         raise AssertionError(path)
 
-    api = make_api(config, credentials, handler)
+    api = make_api(handler)
     result = await BenchlingService(api).get_entry("etr_one", full=True)
     assert result["completeness"] == "partial"
     assert result["issues"][0]["scope"] == "table:docpart_table"
@@ -354,7 +352,7 @@ async def test_inaccessible_table_is_reported_as_partial(config, credentials) ->
 
 
 @pytest.mark.asyncio
-async def test_ambiguous_display_id_is_rejected(config, credentials) -> None:
+async def test_ambiguous_display_id_is_rejected() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/api/v2/entries"
         return response_for(
@@ -368,7 +366,7 @@ async def test_ambiguous_display_id_is_rejected(config, credentials) -> None:
             },
         )
 
-    api = make_api(config, credentials, handler)
+    api = make_api(handler)
     with pytest.raises(ValidationError) as caught:
         await BenchlingService(api).resolve_entry("EXP-1")
     assert caught.value.details["entry_ids"] == ["etr_one", "etr_two"]

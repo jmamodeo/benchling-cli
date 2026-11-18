@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 import httpx
 
 from .api import BenchlingAPI
 from .auth import AuthManager
-from .config import ConfigStore
-from .credentials import CredentialStore
-from .environment import EnvironmentConfigStore, environment_credentials
+from .environment import EnvironmentConfigStore, environment_secrets
 from .plans import ChangePlanner, PlanRepository
 from .services import BenchlingService
 
@@ -16,15 +16,15 @@ class Runtime:
         self,
         profile_name: str | None,
         *,
-        config: ConfigStore | None = None,
-        credentials: CredentialStore | None = None,
+        config: EnvironmentConfigStore | None = None,
+        secrets: Mapping[str, str] | None = None,
         async_http: httpx.AsyncClient | None = None,
         auth_http: httpx.Client | None = None,
     ) -> None:
         self.config = config or EnvironmentConfigStore()
-        self.credentials = credentials or environment_credentials()
+        self.secrets = secrets if secrets is not None else environment_secrets()
         self.profile = self.config.resolve(profile_name)
-        self.auth = AuthManager(self.config, self.credentials, http=auth_http)
+        self.auth = AuthManager(self.secrets, http=auth_http)
         self.api = BenchlingAPI(self.profile, self.auth, http=async_http)
         self.service = BenchlingService(self.api)
         self.repository = PlanRepository(self.config)
@@ -41,12 +41,12 @@ class RuntimePool:
     def __init__(
         self,
         *,
-        config: ConfigStore | None = None,
-        credentials: CredentialStore | None = None,
+        config: EnvironmentConfigStore | None = None,
+        secrets: Mapping[str, str] | None = None,
         runtimes: dict[str, Runtime] | None = None,
     ) -> None:
         self.config = config or EnvironmentConfigStore()
-        self.credentials = credentials or environment_credentials()
+        self.secrets = secrets if secrets is not None else environment_secrets()
         self._runtimes: dict[str, Runtime] = dict(runtimes or {})
 
     def available(self) -> list[str]:
@@ -55,7 +55,7 @@ class RuntimePool:
     def get(self, env: str) -> Runtime:
         runtime = self._runtimes.get(env)
         if runtime is None:
-            runtime = Runtime(env, config=self.config, credentials=self.credentials)
+            runtime = Runtime(env, config=self.config, secrets=self.secrets)
             self._runtimes[runtime.profile.name] = runtime
         return runtime
 

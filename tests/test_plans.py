@@ -15,7 +15,7 @@ class FakeAPI:
         self.profile = Profile(
             name="sandbox",
             tenant_url="https://tenant.benchling.com",
-            auth_method=AuthMethod.API_KEY,
+            auth_method=AuthMethod.CLIENT_CREDENTIALS,
         )
         self.requests: list[tuple[str, str, int, dict | None]] = []
         self.entry_version = "v1"

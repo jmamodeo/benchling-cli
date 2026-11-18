@@ -3,6 +3,7 @@
 [![CI](https://github.com/jmamodeo/benchling-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/jmamodeo/benchling-cli/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
+[![Coverage](https://img.shields.io/badge/coverage-66%25-yellow)](https://github.com/jmamodeo/benchling-cli/actions/workflows/ci.yml)
 
 An agent-friendly `benchling` command-line tool and local MCP server for safely reading and editing Benchling notebook entries through the public API.
 
@@ -50,7 +51,7 @@ export BENCHLING_TEST_CLIENT_ID="your-app-client-id"
 export BENCHLING_TEST_CLIENT_SECRET="your-app-client-secret"
 ```
 
-The application uses OAuth `client_credentials` against `/oauth/token`, acting as the **app**, with the app's permissions and audit identity—not the signed-in browser user. The app must already have access to the entry's project. Tokens remain in process memory, cached per environment, and are renewed before expiry in a long-running MCP process. No credentials or tokens are saved in configuration files or the OS keychain, and saved legacy profiles are ignored. Missing or partial variables produce an explicit authentication error; there is no fallback.
+The application uses OAuth `client_credentials` against `/oauth/token`, acting as the **app**, with the app's permissions and audit identity—not the signed-in browser user. The app must already have access to the entry's project. Tokens remain in process memory, cached per environment, and are renewed before expiry in a long-running MCP process. Nothing is saved to disk or the OS keychain, and profiles saved by previous versions are never read. Missing or partial variables produce an explicit authentication error; there is no fallback.
 
 Environment names are the lowercase `<ENV>` part (letters and digits only). The environment is required on every command; there is no default:
 
@@ -60,7 +61,7 @@ benchling --env dev auth status
 benchling --env test doctor
 ```
 
-`auth status` checks local configuration only; `doctor` makes read-only API checks. `-e` is short for `--env`; `--profile`/`-p` remain accepted aliases. Browser login is disabled. To disconnect, unset the environment's variables in the calling shell and restart any MCP process; this does not revoke the app remotely.
+`auth status` checks local configuration only; `doctor` makes read-only API checks. `-e` is short for `--env`; `--profile`/`-p` remain accepted aliases. `login` and `logout` only print an explanatory message. To disconnect, unset the environment's variables in the calling shell and restart any MCP process; this does not revoke the app remotely.
 
 `.env.example` contains the layout with placeholders. The CLI does **not** automatically load `.env` files: provide environment variables through your shell or MCP client's environment configuration. Never commit actual secrets or include them in command examples. Rotate any secret exposed in chat or logs before using it long-term.
 
@@ -164,7 +165,10 @@ flowchart TD
 | `cli.py` | Typer command-line interface |
 | `mcp_server.py` | MCP tools, read-only default, write allow-list |
 | `services.py` | Shared typed service layer |
-| `plans.py` | Immutable change plans, apply, status, journal |
+| `plans/` | Immutable change plans, apply, status, journal (package, see below) |
+| `plans/repository.py` | Plan and journal persistence, checksums, JSON diff helpers |
+| `plans/base.py`, `plans/planner.py` | Shared planner core; `ChangePlanner` plan/apply/status and family dispatch |
+| `plans/document.py`, `plans/table.py`, `plans/fields.py`, `plans/results.py` | One mixin per change family (document, table, fields, results) |
 | `api.py` | HTTP client for Benchling REST V2/V3 |
 | `auth.py` | OAuth client-credentials token handling |
 | `config.py`, `environment.py`, `runtime.py` | Environment discovery and per-environment runtimes |
@@ -200,9 +204,12 @@ The test suite is fully offline and needs no credentials.
 
 ```console
 uv sync --extra dev
-uv run pytest
-uvx ruff check .
+uv run ruff check .
+uv run mypy
+uv run pytest --cov
 ```
+
+The suite has 42 test functions (49 collected cases, parametrization included). Coverage is measured with branch coverage and enforced by a `fail_under` floor in `pyproject.toml`.
 
 ### Opt-in sandbox exercise
 

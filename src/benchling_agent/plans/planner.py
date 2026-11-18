@@ -1,0 +1,244 @@
+from __future__ import annotations
+
+import asyncio
+import uuid
+from copy import deepcopy
+from datetime import UTC, datetime
+from typing import Any
+
+from filelock import FileLock
+from filelock import Timeout as FileLockTimeout
+
+from ..errors import (
+    BenchlingAgentError,
+    ConflictError,
+    PartialCompletionError,
+    UpstreamError,
+    ValidationError,
+)
+from ..models import (
+    ChangePlan,
+    PlanFamily,
+    PlanStatus,
+)
+from .document import DocumentPlanning
+from .fields import FieldsPlanning
+from .repository import checksum_for, json_diff
+from .results import ResultsPlanning
+from .table import TablePlanning
+
+
+class ChangePlanner(DocumentPlanning, TablePlanning, FieldsPlanning, ResultsPlanning):
+    async def plan(
+        self, reference: str, family: PlanFamily | str, request: dict[str, Any]
+    ) -> ChangePlan:
+        try:
+            family = PlanFamily(family)
+        except ValueError as exc:
+            raise ValidationError(
+                "Unknown change family",
+                details={"family": str(family), "supported": [item.value for item in PlanFamily]},
+            ) from exc
+        request = deepcopy(request)
+        resolved = await self.service.resolve_entry(reference)
+        entry_id = resolved["entry_id"]
+        if family == PlanFamily.DOCUMENT:
+            before, after, preconditions, guarantees, warnings = await self._plan_document(
+                entry_id, request
+            )
+        elif family == PlanFamily.TABLE:
+            before, after, preconditions, guarantees, warnings = await self._plan_table(
+                entry_id, request
+            )
+        elif family == PlanFamily.FIELDS:
+            before, after, preconditions, guarantees, warnings = await self._plan_fields(
+                entry_id, request
+            )
+        else:
+            before, after, preconditions, guarantees, warnings = await self._plan_results(
+                entry_id, request
+            )
+        plan_data: dict[str, Any] = {
+            "schema_version": "1.0",
+            "id": uuid.uuid4().hex,
+            "created_at": datetime.now(UTC).isoformat(),
+            "profile": self.api.profile.name,
+            "tenant_url": self.api.profile.base_url,
+            "entry_id": entry_id,
+            "family": family.value,
+            "request": request,
+            "before": before,
+            "after": after,
+            "diff": json_diff(before, after),
+            "preconditions": preconditions,
+            "guarantees": guarantees,
+            "warnings": warnings,
+        }
+        # Hash the normalized Pydantic representation so datetimes and enums
+        # verify identically after the plan is read from disk.
+        plan_data["checksum"] = ""
+        plan = ChangePlan.model_validate(plan_data)
+        plan.checksum = checksum_for(plan.model_dump(mode="json"))
+        self.repository.save_plan(plan)
+        return plan
+
+    async def apply(self, plan_id: str) -> dict[str, Any]:
+        self.repository._validate_id(plan_id)
+        self.repository.config.ensure()
+        lock = FileLock(
+            str(self.repository.config.locks_dir / f"plan-{plan_id}.apply.lock"),
+            thread_local=False,
+        )
+        try:
+            await asyncio.to_thread(lock.acquire, timeout=30)
+        except FileLockTimeout as exc:
+            raise ConflictError(
+                "Another process is applying this plan",
+                details={"plan_id": plan_id},
+            ) from exc
+        try:
+            return await self._apply_locked(plan_id)
+        finally:
+            lock.release()
+
+    async def _apply_locked(self, plan_id: str) -> dict[str, Any]:
+        plan = self.repository.load_plan(plan_id)
+        if plan.profile != self.api.profile.name or plan.tenant_url != self.api.profile.base_url:
+            raise ValidationError(
+                "Plan belongs to a different profile or tenant",
+                details={"plan_profile": plan.profile, "active_profile": self.api.profile.name},
+            )
+        journal = self.repository.load_journal(plan_id)
+        if journal.status != PlanStatus.PENDING:
+            raise ConflictError(
+                "Plan has already been applied or attempted",
+                details={"plan_id": plan_id, "status": journal.status.value},
+            )
+        self._event(journal, "apply", "started", {"family": plan.family.value})
+        journal.status = PlanStatus.APPLYING
+        self.repository.save_journal(journal)
+        try:
+            if plan.family == PlanFamily.DOCUMENT:
+                result = await self._apply_document(plan, journal)
+            elif plan.family == PlanFamily.TABLE:
+                result = await self._apply_table(plan, journal)
+            elif plan.family == PlanFamily.FIELDS:
+                result = await self._apply_fields(plan, journal)
+            else:
+                result = await self._apply_results(plan, journal)
+            journal.status = PlanStatus.SUCCEEDED
+            journal.result = result
+            self._event(journal, "apply", "succeeded", result)
+            self.repository.save_journal(journal)
+            return {"plan": plan.model_dump(mode="json"), "journal": journal.model_dump(mode="json")}
+        except PartialCompletionError as exc:
+            journal.status = PlanStatus.UNKNOWN
+            self._event(journal, "apply", "unknown", exc.details)
+            self.repository.save_journal(journal)
+            exc.details = {
+                **exc.details,
+                "plan_id": plan_id,
+                "journal": journal.model_dump(mode="json"),
+            }
+            raise
+        except BenchlingAgentError as exc:
+            if any(event.status == "succeeded" for event in journal.events if event.stage != "apply"):
+                journal.status = PlanStatus.PARTIAL
+                self._event(journal, "apply", "partial", {"error": exc.message})
+                self.repository.save_journal(journal)
+                raise PartialCompletionError(
+                    "Some plan steps completed before a later step failed",
+                    details={
+                        "plan_id": plan_id,
+                        "cause": exc.message,
+                        "journal": journal.model_dump(mode="json"),
+                    },
+                ) from exc
+            journal.status = PlanStatus.FAILED
+            self._event(journal, "apply", "failed", {"error": exc.message})
+            self.repository.save_journal(journal)
+            raise
+        except Exception as exc:
+            has_completed_step = any(
+                event.status == "succeeded"
+                for event in journal.events
+                if event.stage != "apply"
+            )
+            journal.status = (
+                PlanStatus.PARTIAL if has_completed_step else PlanStatus.FAILED
+            )
+            self._event(
+                journal,
+                "apply",
+                journal.status.value,
+                {"error": type(exc).__name__},
+            )
+            self.repository.save_journal(journal)
+            wrapped = UpstreamError(
+                "An unexpected local failure interrupted plan execution",
+                details={
+                    "plan_id": plan_id,
+                    "type": type(exc).__name__,
+                    "journal": journal.model_dump(mode="json"),
+                },
+            )
+            if has_completed_step:
+                raise PartialCompletionError(
+                    "A local failure occurred after at least one write completed",
+                    details=wrapped.details,
+                ) from exc
+            raise wrapped from exc
+
+    async def status(self, plan_id: str) -> dict[str, Any]:
+        plan = self.repository.load_plan(plan_id)
+        if plan.profile != self.api.profile.name or plan.tenant_url != self.api.profile.base_url:
+            raise ValidationError(
+                "Plan belongs to a different profile or tenant",
+                details={"plan_profile": plan.profile, "active_profile": self.api.profile.name},
+            )
+        journal = self.repository.load_journal(plan_id)
+        status: dict[str, Any] = {
+            "plan": plan.model_dump(mode="json"),
+            "journal": journal.model_dump(mode="json"),
+        }
+        task_id = (journal.result or {}).get("task_id")
+        if plan.family == PlanFamily.RESULTS and task_id:
+            try:
+                remote = await self.service.get_task(task_id)
+                status["remote_task"] = remote
+                remote_status: Any = remote.get("status")
+                status["result_state"] = {
+                    "RUNNING": "submission_running",
+                    "FAILED": "submission_failed",
+                    "SUCCEEDED": "pending_integration",
+                }.get(remote_status, "unknown")
+                records = (remote.get("response") or {}).get("assayResults", [])
+                confirmed_ids = [record.get("id") for record in records if isinstance(record, dict) and record.get("id")]
+                confirmed_v3_ids = [record.get("v3Id") for record in records if isinstance(record, dict) and record.get("v3Id")]
+                status["record_ids"] = confirmed_ids
+                status["record_v3_ids"] = confirmed_v3_ids
+                # Retain server-assigned IDs for reconciliation after task data
+                # expires. Use the same lock as apply to avoid lost updates.
+                lock = FileLock(str(self.repository.config.locks_dir / f"plan-{plan_id}.apply.lock"), thread_local=False)
+                await asyncio.to_thread(lock.acquire, timeout=30)
+                try:
+                    latest = self.repository.load_journal(plan_id)
+                    if latest.status == PlanStatus.SUCCEEDED and latest.result:
+                        latest.result.update({
+                            "record_ids": confirmed_ids,
+                            "record_v3_ids": confirmed_v3_ids,
+                            "task_status": remote_status,
+                            "state": status["result_state"],
+                        })
+                        self.repository.save_journal(latest)
+                        status["journal"] = latest.model_dump(mode="json")
+                finally:
+                    lock.release()
+            except BenchlingAgentError as exc:
+                status["remote_task_error"] = {
+                    "code": exc.code,
+                    "message": exc.message,
+                    "retryable": exc.retryable,
+                    "details": exc.details,
+                }
+        return status
