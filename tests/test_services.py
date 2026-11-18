@@ -51,6 +51,7 @@ def test_part_helpers_handle_nested_and_flat_shapes() -> None:
 
 def test_section_boundaries_follow_flat_part_order() -> None:
     parts = [
+        {"id": "p0", "content": {"__typename": "TextDocumentContent"}},
         {"id": "s1", "content": {"__typename": "SectionDocumentContent", "title": "A"}},
         {"id": "p1", "content": {"__typename": "HeaderDocumentContent"}},
         {"id": "s2", "content": {"__typename": "SectionDocumentContent", "title": "B"}},
@@ -58,7 +59,8 @@ def test_section_boundaries_follow_flat_part_order() -> None:
     ]
     sections = build_sections(parts)
     assert sections[0]["child_part_ids"] == ["p1"]
-    assert sections[0]["end_index"] == 1
+    assert sections[0]["end_index"] == 2
+    assert [s["part_id"] for s in sections] == ["s1", "s2"]
     assert sections[1]["child_part_ids"] == ["p2"]
 
 
@@ -334,3 +336,21 @@ async def test_snapshot_retries_once_when_entry_changes_during_assembly(runtime,
     fake._get_entry = settles
     snapshot = await runtime.service.get_entry(ENTRY_ID, full=True)
     assert snapshot["version_id"] == "ver_2"
+
+
+async def test_entry_without_schema_or_folder_has_no_schema_snapshot_or_project(
+    runtime, fake
+) -> None:
+    fake.entry_schema_id = None
+    original = fake._get_entry_v2
+
+    def unfiled(call, entry_id):
+        status, payload = original(call, entry_id)
+        del payload["entry"]["folderId"]
+        return status, payload
+
+    fake._get_entry_v2 = unfiled
+    snapshot = await runtime.service.get_entry(ENTRY_ID, full=True)
+    assert snapshot["schema"] is None
+    assert not any(i["scope"] == "entry_schema" for i in snapshot["issues"])
+    assert (await runtime.service.list_result_tables(ENTRY_ID))["project_id"] is None

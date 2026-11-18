@@ -262,6 +262,11 @@ async def test_replace_text_partial_failure_keeps_inserted_part_and_journals_it(
     assert {TEXT_PART, "docpart_new1"} <= set(fake.part_ids())
     status = await runtime.planner.status(planned.id)
     assert status["journal"]["status"] == "partial"
+    assert [event["stage"] for event in status["journal"]["events"]] == [
+        "apply",
+        "insert_replacement",
+        "apply",
+    ]
     with pytest.raises(ConflictError):
         await runtime.planner.apply(planned.id)
 

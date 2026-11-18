@@ -40,6 +40,7 @@ async def plan(runtime, records, table_id=TABLE):
         (TABLE, [record(fields={"note": {"value": "only"}})], "required schema field"),
         (TABLE, [record(projectId="")], "non-empty string"),
         (TABLE, [record(projectId=5)], "non-empty string"),
+        (TABLE, [record(schemaId="assaysch_other")], "does not match the selected table"),
         (TABLE, [record(fields={"ct": {"value": "high"}})], "wrong type"),
     ],
 )
@@ -98,6 +99,24 @@ async def test_apply_posts_normalized_records_once(runtime, fake) -> None:
     assert applied["journal"]["result"]["task_id"] == "task_abc123"
     assert applied["journal"]["result"]["state"] == "submission_pending"
     assert applied["journal"]["result"]["record_ids"] == []
+    assert applied["journal"]["result"]["client_record_ids"] == planned.after["client_record_ids"]
+    assert all("id" not in record for record in payload["assayResults"])
+
+
+async def test_status_persists_server_assigned_ids_not_local_correlations(runtime, fake) -> None:
+    planned = await plan(runtime, [record()])
+    await runtime.planner.apply(planned.id)
+    fake.task = {
+        "status": "SUCCEEDED",
+        "response": {"assayResults": [{"id": "server-uuid", "v3Id": "result_server"}]},
+    }
+    status = await runtime.planner.status(planned.id)
+    assert status["record_ids"] == ["server-uuid"]
+    stored = runtime.repository.load_journal(planned.id).result
+    assert stored["record_v3_ids"] == ["result_server"]
+    assert stored["client_record_ids"] == planned.after["client_record_ids"]
+    assert stored["state"] == "pending_integration"
+    assert len(fake.bulk_payloads) == 1
 
 
 async def test_apply_detects_result_schema_drift(runtime, fake) -> None:

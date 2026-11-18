@@ -297,6 +297,7 @@ async def test_apply_refuses_stale_table_without_writing(runtime, fake) -> None:
         await runtime.planner.apply(planned.id)
     assert caught.value.details == {"expected": "tver_1", "actual": "tver_2"}
     assert fake.writes() == []
+    assert (await runtime.planner.status(planned.id))["journal"]["status"] == "failed"
 
 
 async def test_server_side_conflict_marks_plan_failed(runtime, fake) -> None:
