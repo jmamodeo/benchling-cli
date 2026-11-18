@@ -29,66 +29,15 @@ class DocumentPlanning(PlannerBase):
         operation = request.get("operation")
         parts = snapshot["parts"]
         by_id = {part.get("id"): part for part in parts}
+        version_id = snapshot["version_id"]
         if operation == "insert":
-            new_parts = request.get("parts")
-            position = request.get("position", "end_of_document")
-            if not isinstance(new_parts, list) or not new_parts:
-                raise ValidationError("Document insert requires a non-empty parts list")
-            if any(
-                not isinstance(part, dict) or not isinstance(part.get("contentType"), str)
-                for part in new_parts
-            ):
-                raise ValidationError("Every inserted document part requires a contentType")
-            if (
-                position not in {"beginning_of_document", "end_of_document"}
-                and position not in by_id
-            ):
-                raise ValidationError("Insert position is not a document part")
-            before = {"version_id": snapshot["version_id"], "position": position, "parts": []}
-            after = {"version_id": "changes_on_apply", "position": position, "parts": new_parts}
+            before, after = self._plan_insert(request, version_id, by_id)
         elif operation == "delete":
-            first = request.get("from_part_id")
-            last = request.get("to_part_id", first)
-            selected = self._part_range(parts, first, last)
-            before = {"version_id": snapshot["version_id"], "parts": selected}
-            after = {"version_id": "changes_on_apply", "parts": []}
+            before, after = self._plan_delete(request, version_id, parts)
         elif operation == "move":
-            first = request.get("from_part_id")
-            last = request.get("to_part_id", first)
-            selected = self._part_range(parts, first, last)
-            destination = request.get("position")
-            if (
-                destination not in {"beginning_of_document", "end_of_document"}
-                and destination not in by_id
-            ):
-                raise ValidationError("Move destination is not a document part")
-            if destination in {part.get("id") for part in selected}:
-                raise ValidationError("Move destination cannot be inside the source range")
-            before = {"version_id": snapshot["version_id"], "parts": selected}
-            after = {"version_id": "changes_on_apply", "position": destination, "parts": selected}
+            before, after = self._plan_move(request, version_id, parts, by_id)
         elif operation == "replace_text":
-            part_id = request.get("part_id")
-            original = by_id.get(part_id)
-            if not original:
-                raise ValidationError("Text replacement target was not found")
-            if part_type(original).split(".")[-1] not in {
-                "TextDocumentContent",
-                "DocumentPartText",
-            }:
-                raise UnsupportedError("replace_text only supports text document parts")
-            if not isinstance(request.get("text"), str):
-                raise ValidationError("replace_text requires text")
-            before = {"version_id": snapshot["version_id"], "part": original}
-            content = part_content(original)
-            replacement = {
-                "contentType": "text",
-                "text": request["text"],
-                "formats": request.get("formats", content.get("formats", [])),
-                "links": request.get("links", content.get("links", [])),
-                "mentions": request.get("mentions", content.get("mentions", [])),
-                "indentation": request.get("indentation", content.get("indentation", 0)),
-            }
-            after = {"version_id": "changes_on_apply", "part": replacement}
+            before, after = self._plan_replace_text(request, version_id, by_id)
         else:
             raise ValidationError(
                 "Unknown document operation",
@@ -98,7 +47,7 @@ class DocumentPlanning(PlannerBase):
             before,
             after,
             {
-                "entry_version": snapshot["version_id"],
+                "entry_version": version_id,
                 "part_ids": [part.get("id") for part in parts if part.get("id")],
             },
             ["server-enforced document version check"],
@@ -109,6 +58,83 @@ class DocumentPlanning(PlannerBase):
             ),
         )
 
+    def _plan_insert(
+        self, request: dict[str, Any], version_id: str, by_id: dict[Any, Any]
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Validate an insert and return its before/after states."""
+        new_parts = request.get("parts")
+        position = request.get("position", "end_of_document")
+        if not isinstance(new_parts, list) or not new_parts:
+            raise ValidationError("Document insert requires a non-empty parts list")
+        if any(
+            not isinstance(part, dict) or not isinstance(part.get("contentType"), str)
+            for part in new_parts
+        ):
+            raise ValidationError("Every inserted document part requires a contentType")
+        if position not in {"beginning_of_document", "end_of_document"} and position not in by_id:
+            raise ValidationError("Insert position is not a document part")
+        before = {"version_id": version_id, "position": position, "parts": []}
+        after = {"version_id": "changes_on_apply", "position": position, "parts": new_parts}
+        return before, after
+
+    def _plan_delete(
+        self, request: dict[str, Any], version_id: str, parts: list[dict[str, Any]]
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Validate a part-range delete and return its before/after states."""
+        first = request.get("from_part_id")
+        last = request.get("to_part_id", first)
+        selected = self._part_range(parts, first, last)
+        before = {"version_id": version_id, "parts": selected}
+        after = {"version_id": "changes_on_apply", "parts": []}
+        return before, after
+
+    def _plan_move(
+        self,
+        request: dict[str, Any],
+        version_id: str,
+        parts: list[dict[str, Any]],
+        by_id: dict[Any, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Validate a part-range move and return its before/after states."""
+        first = request.get("from_part_id")
+        last = request.get("to_part_id", first)
+        selected = self._part_range(parts, first, last)
+        destination = request.get("position")
+        if (
+            destination not in {"beginning_of_document", "end_of_document"}
+            and destination not in by_id
+        ):
+            raise ValidationError("Move destination is not a document part")
+        if destination in {part.get("id") for part in selected}:
+            raise ValidationError("Move destination cannot be inside the source range")
+        before = {"version_id": version_id, "parts": selected}
+        after = {"version_id": "changes_on_apply", "position": destination, "parts": selected}
+        return before, after
+
+    def _plan_replace_text(
+        self, request: dict[str, Any], version_id: str, by_id: dict[Any, Any]
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Validate a text replacement and return its before/after states."""
+        original = by_id.get(request.get("part_id"))
+        if not original:
+            raise ValidationError("Text replacement target was not found")
+        if part_type(original).split(".")[-1] not in {"TextDocumentContent", "DocumentPartText"}:
+            raise UnsupportedError("replace_text only supports text document parts")
+        if not isinstance(request.get("text"), str):
+            raise ValidationError("replace_text requires text")
+        before = {"version_id": version_id, "part": original}
+        content = part_content(original)
+        replacement = {
+            "contentType": "text",
+            "text": request["text"],
+            "formats": request.get("formats", content.get("formats", [])),
+            "links": request.get("links", content.get("links", [])),
+            "mentions": request.get("mentions", content.get("mentions", [])),
+            "indentation": request.get("indentation", content.get("indentation", 0)),
+        }
+        after = {"version_id": "changes_on_apply", "part": replacement}
+        return before, after
+
     async def _apply_document(self, plan: ChangePlan, journal: ChangeJournal) -> dict[str, Any]:
         current = await self.api.request("GET", f"/entry/{plan.entry_id}")
         version = entry_version(current)
@@ -116,64 +142,9 @@ class DocumentPlanning(PlannerBase):
         request = plan.request
         operation = request["operation"]
         if operation == "replace_text":
-            target = request["part_id"]
-            insertion = {
-                "operationType": "insert",
-                "version": version,
-                "coordinates": {"position": target},
-                "parts": [plan.after["part"]],
-            }
-            first = await self.api.request(
-                "PATCH", f"/entry/{plan.entry_id}", json={"partsMutation": insertion}
-            )
-            self._event(journal, "insert_replacement", "succeeded", {"response": first})
-            self.repository.save_journal(journal)
-            updated = await self.api.request("GET", f"/entry/{plan.entry_id}")
-            next_version = entry_version(updated)
-            deletion = {
-                "operationType": "delete",
-                "version": next_version,
-                "coordinates": {"fromDocumentPartId": target, "toDocumentPartId": target},
-            }
-            second = await self.api.request(
-                "PATCH", f"/entry/{plan.entry_id}", json={"partsMutation": deletion}
-            )
-            self._event(journal, "delete_original", "succeeded", {"response": second})
-            discovered = await self._discover_new_part_ids(
-                plan.entry_id, plan.preconditions.get("part_ids", [])
-            )
-            return {
-                "operations": [first, second],
-                "changed_part_ids": [target, *discovered["ids"]],
-                "part_id_discovery": discovered,
-            }
+            return await self._apply_replace_text(plan, journal, version)
 
-        if operation == "insert":
-            mutation = {
-                "operationType": "insert",
-                "version": version,
-                "coordinates": {"position": request.get("position", "end_of_document")},
-                "parts": request["parts"],
-            }
-        elif operation == "delete":
-            mutation = {
-                "operationType": "delete",
-                "version": version,
-                "coordinates": {
-                    "fromDocumentPartId": request["from_part_id"],
-                    "toDocumentPartId": request.get("to_part_id", request["from_part_id"]),
-                },
-            }
-        else:
-            mutation = {
-                "operationType": "move",
-                "version": version,
-                "sourceCoordinates": {
-                    "fromDocumentPartId": request["from_part_id"],
-                    "toDocumentPartId": request.get("to_part_id", request["from_part_id"]),
-                },
-                "destinationCoordinates": {"position": request["position"]},
-            }
+        mutation = self._parts_mutation(operation, request, version)
         response = await self.api.request(
             "PATCH", f"/entry/{plan.entry_id}", json={"partsMutation": mutation}
         )
@@ -193,6 +164,72 @@ class DocumentPlanning(PlannerBase):
             "response": response,
             "changed_part_ids": changed_part_ids,
             "part_id_discovery": discovered,
+        }
+
+    async def _apply_replace_text(
+        self, plan: ChangePlan, journal: ChangeJournal, version: str
+    ) -> dict[str, Any]:
+        """Replace text by inserting the new part, then deleting the original (two requests)."""
+        target = plan.request["part_id"]
+        insertion = {
+            "operationType": "insert",
+            "version": version,
+            "coordinates": {"position": target},
+            "parts": [plan.after["part"]],
+        }
+        first = await self.api.request(
+            "PATCH", f"/entry/{plan.entry_id}", json={"partsMutation": insertion}
+        )
+        self._event(journal, "insert_replacement", "succeeded", {"response": first})
+        self.repository.save_journal(journal)
+        updated = await self.api.request("GET", f"/entry/{plan.entry_id}")
+        next_version = entry_version(updated)
+        deletion = {
+            "operationType": "delete",
+            "version": next_version,
+            "coordinates": {"fromDocumentPartId": target, "toDocumentPartId": target},
+        }
+        second = await self.api.request(
+            "PATCH", f"/entry/{plan.entry_id}", json={"partsMutation": deletion}
+        )
+        self._event(journal, "delete_original", "succeeded", {"response": second})
+        discovered = await self._discover_new_part_ids(
+            plan.entry_id, plan.preconditions.get("part_ids", [])
+        )
+        return {
+            "operations": [first, second],
+            "changed_part_ids": [target, *discovered["ids"]],
+            "part_id_discovery": discovered,
+        }
+
+    def _parts_mutation(
+        self, operation: str, request: dict[str, Any], version: str
+    ) -> dict[str, Any]:
+        """Build the partsMutation payload for an insert, delete or move."""
+        if operation == "insert":
+            return {
+                "operationType": "insert",
+                "version": version,
+                "coordinates": {"position": request.get("position", "end_of_document")},
+                "parts": request["parts"],
+            }
+        if operation == "delete":
+            return {
+                "operationType": "delete",
+                "version": version,
+                "coordinates": {
+                    "fromDocumentPartId": request["from_part_id"],
+                    "toDocumentPartId": request.get("to_part_id", request["from_part_id"]),
+                },
+            }
+        return {
+            "operationType": "move",
+            "version": version,
+            "sourceCoordinates": {
+                "fromDocumentPartId": request["from_part_id"],
+                "toDocumentPartId": request.get("to_part_id", request["from_part_id"]),
+            },
+            "destinationCoordinates": {"position": request["position"]},
         }
 
     def _part_range(
