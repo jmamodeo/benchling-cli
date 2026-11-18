@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "benchling-agent"
-version = "0.1.1"
+version = "0.1.2"
 description = "Agent-friendly Benchling CLI and local MCP server"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -118,4 +118,4 @@ branch = true
 [tool.coverage.report]
 show_missing = true
 skip_empty = true
-fail_under = 64
+fail_under = 96
