@@ -48,8 +48,6 @@ class Envelope(BaseModel, Generic[T]):
 
 
 class AuthMethod(str, Enum):
-    API_KEY = "api_key"
-    DELEGATED = "delegated"
     CLIENT_CREDENTIALS = "client_credentials"
 
 
@@ -60,14 +58,11 @@ class Profile(BaseModel):
     tenant_url: HttpUrl
     auth_method: AuthMethod
     client_id: str | None = None
-    redirect_uri: HttpUrl | None = None
     early_access: bool = True
 
-    @field_validator("tenant_url", "redirect_uri")
+    @field_validator("tenant_url")
     @classmethod
-    def strip_url_path(cls, value: HttpUrl | None, info: Any) -> HttpUrl | None:
-        if value is None or info.field_name != "tenant_url":
-            return value
+    def strip_url_path(cls, value: HttpUrl) -> HttpUrl:
         if value.scheme != "https":
             raise ValueError("tenant_url must use HTTPS")
         if value.username or value.password:
@@ -78,7 +73,7 @@ class Profile(BaseModel):
 
     @field_validator("client_id")
     @classmethod
-    def delegated_needs_client_id(cls, value: str | None, info: Any) -> str | None:
+    def strip_client_id(cls, value: str | None) -> str | None:
         return value.strip() if value else None
 
     @property
@@ -88,9 +83,7 @@ class Profile(BaseModel):
 
 class TokenBundle(BaseModel):
     access_token: str
-    refresh_token: str | None = None
     expires_at: datetime
-    refresh_expires_at: datetime | None = None
     token_type: str = "Bearer"
 
     def usable(self, skew_seconds: int = 60) -> bool:

@@ -50,7 +50,7 @@ export BENCHLING_TEST_CLIENT_ID="your-app-client-id"
 export BENCHLING_TEST_CLIENT_SECRET="your-app-client-secret"
 ```
 
-The application uses OAuth `client_credentials` against `/oauth/token`, acting as the **app**, with the app's permissions and audit identity—not the signed-in browser user. The app must already have access to the entry's project. Tokens remain in process memory, cached per environment, and are renewed before expiry in a long-running MCP process. No credentials or tokens are saved in configuration files or the OS keychain, and saved legacy profiles are ignored. Missing or partial variables produce an explicit authentication error; there is no fallback.
+The application uses OAuth `client_credentials` against `/oauth/token`, acting as the **app**, with the app's permissions and audit identity—not the signed-in browser user. The app must already have access to the entry's project. Tokens remain in process memory, cached per environment, and are renewed before expiry in a long-running MCP process. Nothing is saved to disk or the OS keychain, and profiles saved by previous versions are never read. Missing or partial variables produce an explicit authentication error; there is no fallback.
 
 Environment names are the lowercase `<ENV>` part (letters and digits only). The environment is required on every command; there is no default:
 
@@ -60,7 +60,7 @@ benchling --env dev auth status
 benchling --env test doctor
 ```
 
-`auth status` checks local configuration only; `doctor` makes read-only API checks. `-e` is short for `--env`; `--profile`/`-p` remain accepted aliases. Browser login is disabled. To disconnect, unset the environment's variables in the calling shell and restart any MCP process; this does not revoke the app remotely.
+`auth status` checks local configuration only; `doctor` makes read-only API checks. `-e` is short for `--env`; `--profile`/`-p` remain accepted aliases. `login` and `logout` only print an explanatory message. To disconnect, unset the environment's variables in the calling shell and restart any MCP process; this does not revoke the app remotely.
 
 `.env.example` contains the layout with placeholders. The CLI does **not** automatically load `.env` files: provide environment variables through your shell or MCP client's environment configuration. Never commit actual secrets or include them in command examples. Rotate any secret exposed in chat or logs before using it long-term.
 

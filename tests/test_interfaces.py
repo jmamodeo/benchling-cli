@@ -9,10 +9,8 @@ from mcp import Client
 from typer.testing import CliRunner
 
 from benchling_agent.cli import app
-from benchling_agent.config import ConfigStore
-from benchling_agent.credentials import MemoryCredentialStore
+from benchling_agent.environment import EnvironmentConfigStore
 from benchling_agent.mcp_server import build_mcp_server
-from benchling_agent.models import AuthMethod, Profile
 from benchling_agent.runtime import Runtime, RuntimePool
 
 
@@ -44,16 +42,19 @@ def test_browser_login_is_disabled(tmp_path, monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_mcp_tools_use_structured_envelopes_and_gate_writes(tmp_path) -> None:
-    config = ConfigStore(tmp_path / "app")
-    profile = Profile(
-        name="sandbox",
-        tenant_url="https://tenant.benchling.com",
-        auth_method=AuthMethod.API_KEY,
-    )
-    config.upsert(profile)
-    credentials = MemoryCredentialStore()
-    credentials.set("sandbox", "api_key", "sk_test")
+async def test_mcp_tools_use_structured_envelopes_and_gate_writes(tmp_path, monkeypatch) -> None:
+    for name in list(os.environ):
+        if name.startswith("BENCHLING_"):
+            monkeypatch.delenv(name)
+    monkeypatch.setenv("BENCHLING_SANDBOX_API_ENDPOINT", "https://tenant.benchling.com")
+    monkeypatch.setenv("BENCHLING_SANDBOX_CLIENT_ID", "client")
+    monkeypatch.setenv("BENCHLING_SANDBOX_CLIENT_SECRET", "secret")
+    config = EnvironmentConfigStore(tmp_path / "app")
+
+    def token(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, json={"access_token": "token", "token_type": "Bearer", "expires_in": 900}
+        )
 
     def handler(request: httpx.Request) -> httpx.Response:
         key = "items" if request.url.path.startswith("/api/v3/") else "entries"
@@ -62,11 +63,11 @@ async def test_mcp_tools_use_structured_envelopes_and_gate_writes(tmp_path) -> N
     runtime = Runtime(
         "sandbox",
         config=config,
-        credentials=credentials,
+        auth_http=httpx.Client(transport=httpx.MockTransport(token)),
         async_http=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
     )
     server = build_mcp_server(
-        RuntimePool(config=config, credentials=credentials, runtimes={"sandbox": runtime})
+        RuntimePool(config=config, runtimes={"sandbox": runtime})
     )
     async with Client(server) as client:
         listed = await client.list_tools()

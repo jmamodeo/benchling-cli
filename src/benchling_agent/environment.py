@@ -7,7 +7,6 @@ from typing import Any
 from pydantic import ValidationError as ModelValidationError
 
 from .config import ConfigStore
-from .credentials import MemoryCredentialStore
 from .errors import AuthenticationError, ValidationError
 from .models import AuthMethod, Profile
 
@@ -45,7 +44,7 @@ class EnvironmentConfigStore(ConfigStore):
     """Resolve environments from BENCHLING_<ENV>_* variables.
 
     The inherited directories hold write plans and journals, not credentials.
-    Existing saved profiles are deliberately ignored.
+    Profiles saved by previous versions are never read.
     """
 
     def resolve(self, name: str | None) -> Profile:
@@ -84,11 +83,8 @@ class EnvironmentConfigStore(ConfigStore):
         }
 
 
-def environment_credentials() -> MemoryCredentialStore:
+def environment_secrets() -> dict[str, str]:
     """Take a process-local snapshot; never write secrets or tokens to disk."""
-    store = MemoryCredentialStore()
-    for env in configured_envs():
-        secret = _value(variables(env)[2])
-        if secret:
-            store.set(env, "client_secret", secret)
-    return store
+    return {
+        env: secret for env in configured_envs() if (secret := _value(variables(env)[2]))
+    }
