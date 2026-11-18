@@ -33,87 +33,8 @@ class TablePlanning(PlannerBase):
             "version_id": table.get("versionId"),
             "content": content,
         }
-        after_content = deepcopy(content)
-        operation = request.get("operation")
-        if operation == "set_cells":
-            updates = request.get("updates")
-            if not isinstance(updates, list) or not updates:
-                raise ValidationError("set_cells requires non-empty updates")
-            rows = after_content.get("rows") or []
-            seen_coordinates: set[tuple[int, int]] = set()
-            for update in updates:
-                if (
-                    not isinstance(update, dict)
-                    or "value" not in update
-                    or isinstance(update.get("row"), bool)
-                    or not isinstance(update.get("row"), int)
-                    or isinstance(update.get("column"), bool)
-                    or not isinstance(update.get("column"), int)
-                    or update["row"] < 0
-                    or update["column"] < 0
-                ):
-                    raise ValidationError(
-                        "Each cell update requires nonnegative integer row and column coordinates and a value",
-                        details={"update": update},
-                    )
-                coordinate = (update["row"], update["column"])
-                if coordinate in seen_coordinates:
-                    raise ValidationError(
-                        "A table plan cannot update the same cell twice",
-                        details={"row": coordinate[0], "column": coordinate[1]},
-                    )
-                seen_coordinates.add(coordinate)
-                try:
-                    row = update["row"]
-                    column = update["column"]
-                    cell = rows[row]["cells"][column]
-                except (KeyError, TypeError, IndexError) as exc:
-                    raise ValidationError(
-                        "Cell coordinate is outside the table",
-                        details={"update": update},
-                    ) from exc
-                if cell.get("mergeRangeParent"):
-                    raise UnsupportedError("Cannot write directly to a merged child cell")
-                cell["inputValue"] = {
-                    "type": "text_value",
-                    "value": str(update.get("value", "")),
-                }
-                cell.pop("evaluatedValue", None)
-        elif operation == "append_rows":
-            rows = request.get("rows")
-            if not isinstance(rows, list) or not rows:
-                raise ValidationError("append_rows requires non-empty rows")
-            expected = len(after_content.get("columnDefinitions") or [])
-            normalized = [self._normalize_row(row, expected) for row in rows]
-            after_content.setdefault("rows", []).extend(normalized)
-        elif operation == "replace":
-            replacement = request.get("table")
-            if not isinstance(replacement, dict):
-                raise ValidationError("replace requires a table object")
-            after_content = deepcopy(content)
-            after_content.update(deepcopy(replacement))
-            if "rows" in replacement:
-                self._preserve_table_cell_state(
-                    content.get("rows") or [], after_content.get("rows") or []
-                )
-            expected = len(after_content.get("columnDefinitions") or [])
-            after_content["rows"] = [
-                self._normalize_row(row, expected) for row in after_content.get("rows", [])
-            ]
-        else:
-            raise ValidationError(
-                "Unknown table operation",
-                details={"supported": ["set_cells", "append_rows", "replace"]},
-            )
-        expected = len(after_content.get("columnDefinitions") or [])
-        after_content["rows"] = [
-            self._normalize_row(row, expected) for row in after_content.get("rows", [])
-        ]
-        for row in after_content["rows"]:
-            for cell in row["cells"]:
-                cell.pop("evaluatedValue", None)
-        after_content["isEvaluated"] = False
-        self._validate_table_content(after_content)
+        after_content = self._apply_table_operation(content, request)
+        self._finalize_table_content(after_content)
         after = {
             "table_part_id": part_id,
             "version_id": "changes_on_apply",
@@ -128,6 +49,112 @@ class TablePlanning(PlannerBase):
                 "API table edits clear evaluated values until Benchling evaluates the table in the browser"
             ],
         )
+
+    def _apply_table_operation(
+        self, content: dict[str, Any], request: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Return a copy of content with the requested operation applied."""
+        operation = request.get("operation")
+        if operation == "set_cells":
+            return self._table_set_cells(deepcopy(content), request)
+        if operation == "append_rows":
+            return self._table_append_rows(deepcopy(content), request)
+        if operation == "replace":
+            return self._table_replace(content, request)
+        raise ValidationError(
+            "Unknown table operation",
+            details={"supported": ["set_cells", "append_rows", "replace"]},
+        )
+
+    def _table_set_cells(
+        self, after_content: dict[str, Any], request: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Apply validated text updates to individual cells."""
+        updates = request.get("updates")
+        if not isinstance(updates, list) or not updates:
+            raise ValidationError("set_cells requires non-empty updates")
+        rows = after_content.get("rows") or []
+        seen_coordinates: set[tuple[int, int]] = set()
+        for update in updates:
+            if (
+                not isinstance(update, dict)
+                or "value" not in update
+                or isinstance(update.get("row"), bool)
+                or not isinstance(update.get("row"), int)
+                or isinstance(update.get("column"), bool)
+                or not isinstance(update.get("column"), int)
+                or update["row"] < 0
+                or update["column"] < 0
+            ):
+                raise ValidationError(
+                    "Each cell update requires nonnegative integer row and column coordinates and a value",
+                    details={"update": update},
+                )
+            coordinate = (update["row"], update["column"])
+            if coordinate in seen_coordinates:
+                raise ValidationError(
+                    "A table plan cannot update the same cell twice",
+                    details={"row": coordinate[0], "column": coordinate[1]},
+                )
+            seen_coordinates.add(coordinate)
+            try:
+                row = update["row"]
+                column = update["column"]
+                cell = rows[row]["cells"][column]
+            except (KeyError, TypeError, IndexError) as exc:
+                raise ValidationError(
+                    "Cell coordinate is outside the table",
+                    details={"update": update},
+                ) from exc
+            if cell.get("mergeRangeParent"):
+                raise UnsupportedError("Cannot write directly to a merged child cell")
+            cell["inputValue"] = {
+                "type": "text_value",
+                "value": str(update.get("value", "")),
+            }
+            cell.pop("evaluatedValue", None)
+        return after_content
+
+    def _table_append_rows(
+        self, after_content: dict[str, Any], request: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Append normalized rows to the end of the table."""
+        rows = request.get("rows")
+        if not isinstance(rows, list) or not rows:
+            raise ValidationError("append_rows requires non-empty rows")
+        expected = len(after_content.get("columnDefinitions") or [])
+        normalized = [self._normalize_row(row, expected) for row in rows]
+        after_content.setdefault("rows", []).extend(normalized)
+        return after_content
+
+    def _table_replace(self, content: dict[str, Any], request: dict[str, Any]) -> dict[str, Any]:
+        """Overlay a replacement table, preserving cell state not restated in it."""
+        replacement = request.get("table")
+        if not isinstance(replacement, dict):
+            raise ValidationError("replace requires a table object")
+        after_content = deepcopy(content)
+        after_content.update(deepcopy(replacement))
+        if "rows" in replacement:
+            self._preserve_table_cell_state(
+                content.get("rows") or [], after_content.get("rows") or []
+            )
+        expected = len(after_content.get("columnDefinitions") or [])
+        after_content["rows"] = [
+            self._normalize_row(row, expected) for row in after_content.get("rows", [])
+        ]
+        return after_content
+
+    def _finalize_table_content(self, after_content: dict[str, Any]) -> None:
+        """Normalize rows, clear evaluated values and validate the final table."""
+        expected = len(after_content.get("columnDefinitions") or [])
+        after_content["rows"] = [
+            self._normalize_row(row, expected) for row in after_content.get("rows", [])
+        ]
+        for row in after_content["rows"]:
+            for cell in row["cells"]:
+                cell.pop("evaluatedValue", None)
+        after_content["isEvaluated"] = False
+        self._validate_table_content(after_content)
 
     async def _apply_table(self, plan: ChangePlan, journal: ChangeJournal) -> dict[str, Any]:
         part_id = plan.after["table_part_id"]
