@@ -11,11 +11,14 @@ from benchling_agent.errors import (
     ValidationError,
 )
 from benchling_agent.services import (
+    build_sections,
     entry_version,
     field_definition_type,
     is_section,
+    is_structured_table,
     is_unstructured_table,
     part_content,
+    part_type,
 )
 
 
@@ -23,8 +26,6 @@ from benchling_agent.services import (
     ("definition", "expected"),
     [
         ({"type": "integer"}, "INTEGER"),
-        ({"__typename": "TextFieldDefinition"}, "TEXT"),
-        ({"__typename": "LongTextFieldDefinition"}, "LONG_TEXT"),
         ({"__typename": "benchling.DateTimeFieldDefinition"}, "DATETIME"),
         ({"__typename": "DropdownLinkFieldDefinition"}, "DROPDOWN"),
         ({"__typename": "EntityLinkFieldDefinition"}, "LINK"),
@@ -44,6 +45,23 @@ def test_part_helpers_handle_nested_and_flat_shapes() -> None:
     assert is_section(nested) and not is_section(flat)
     assert is_unstructured_table(flat)
     assert not is_unstructured_table({"__typename": "DocumentPartStructuredTable"})
+    assert part_type({"__typename": "DocumentPartText"}) == "DocumentPartText"
+    assert is_structured_table({"__typename": "DocumentPartResultsStructuredTable"})
+
+
+def test_section_boundaries_follow_flat_part_order() -> None:
+    parts = [
+        {"id": "p0", "content": {"__typename": "TextDocumentContent"}},
+        {"id": "s1", "content": {"__typename": "SectionDocumentContent", "title": "A"}},
+        {"id": "p1", "content": {"__typename": "HeaderDocumentContent"}},
+        {"id": "s2", "content": {"__typename": "SectionDocumentContent", "title": "B"}},
+        {"id": "p2", "content": {"__typename": "TextDocumentContent"}},
+    ]
+    sections = build_sections(parts)
+    assert sections[0]["child_part_ids"] == ["p1"]
+    assert sections[0]["end_index"] == 2
+    assert [s["part_id"] for s in sections] == ["s1", "s2"]
+    assert sections[1]["child_part_ids"] == ["p2"]
 
 
 def test_entry_version_accepts_either_key_and_rejects_missing() -> None:
@@ -52,10 +70,24 @@ def test_entry_version_accepts_either_key_and_rejects_missing() -> None:
         entry_version({"id": ENTRY_ID})
 
 
-@pytest.mark.parametrize("reference", ["https://your-tenant-dev.benchling.com/s/no-id-here"])
-async def test_url_without_entry_id_is_rejected(runtime, reference) -> None:
+async def test_url_without_entry_id_is_rejected(runtime) -> None:
     with pytest.raises(ValidationError, match="does not contain"):
-        await runtime.service.resolve_entry(reference)
+        await runtime.service.resolve_entry("https://your-tenant-dev.benchling.com/s/no-id-here")
+
+
+async def test_ambiguous_display_id_is_rejected(runtime, fake) -> None:
+    fake._list_entries_v2 = lambda call: (
+        200,
+        {
+            "entries": [
+                {"id": ENTRY_ID, "displayId": "EXP-1"},
+                {"id": "etr_other", "displayId": "EXP-1"},
+            ]
+        },
+    )
+    with pytest.raises(ValidationError) as caught:
+        await runtime.service.resolve_entry("EXP-1")
+    assert caught.value.details["entry_ids"] == [ENTRY_ID, "etr_other"]
 
 
 async def test_resolve_strips_whitespace_and_canonicalizes(runtime) -> None:
@@ -136,6 +168,22 @@ async def test_full_snapshot_collects_every_result_page(runtime, fake) -> None:
     assert snapshot["result_retrieval"]["records"] == 3
 
 
+async def test_full_snapshot_collects_every_part_page(runtime, fake) -> None:
+    fake.parts_page_size = 1
+    snapshot = await runtime.service.get_entry(ENTRY_ID, full=True)
+    assert [part["id"] for part in snapshot["parts"]] == [part["id"] for part in fake.parts]
+    parts_calls = [c for c in fake.calls if c.path.endswith("/parts/items")]
+    assert len(parts_calls) == len(fake.parts)
+
+
+async def test_inaccessible_table_is_reported_as_partial(runtime, fake) -> None:
+    fake.fail("GET", "/document-part-unstructured-table/", 403)
+    snapshot = await runtime.service.get_entry(ENTRY_ID, full=True)
+    assert snapshot["completeness"] == "partial"
+    (issue,) = [i for i in snapshot["issues"] if i["scope"] == f"table:{TABLE_PART}"]
+    assert issue["reason"] == "detail_unavailable"
+
+
 async def test_unknown_part_types_are_preserved_and_flagged(runtime, fake) -> None:
     fake.parts.append({"id": "docpart_new_kind", "__typename": "DocumentPartHologram", "x": 1})
     snapshot = await runtime.service.get_entry(ENTRY_ID, full=True)
@@ -179,6 +227,14 @@ async def test_result_table_discovery_validates_identifiers(runtime, fake) -> No
     variant = invalid
     with pytest.raises(UpstreamError, match="no valid API identifier"):
         await runtime.service.list_result_tables(ENTRY_ID)
+
+
+async def test_result_table_relationship_comes_from_v2_entry(runtime, fake) -> None:
+    listed = await runtime.service.list_result_tables(ENTRY_ID)
+    assert listed["project_id"] == "src_abc123"
+    assert [t["table_id"] for t in listed["items"]] == ["strtbl_example"]
+    table = await runtime.service.get_result_table(ENTRY_ID, "strtbl_example")
+    assert table["schema_id"] == fake.result_table_schema
 
 
 async def test_missing_result_table_is_not_found(runtime) -> None:
@@ -280,3 +336,21 @@ async def test_snapshot_retries_once_when_entry_changes_during_assembly(runtime,
     fake._get_entry = settles
     snapshot = await runtime.service.get_entry(ENTRY_ID, full=True)
     assert snapshot["version_id"] == "ver_2"
+
+
+async def test_entry_without_schema_or_folder_has_no_schema_snapshot_or_project(
+    runtime, fake
+) -> None:
+    fake.entry_schema_id = None
+    original = fake._get_entry_v2
+
+    def unfiled(call, entry_id):
+        status, payload = original(call, entry_id)
+        del payload["entry"]["folderId"]
+        return status, payload
+
+    fake._get_entry_v2 = unfiled
+    snapshot = await runtime.service.get_entry(ENTRY_ID, full=True)
+    assert snapshot["schema"] is None
+    assert not any(i["scope"] == "entry_schema" for i in snapshot["issues"])
+    assert (await runtime.service.list_result_tables(ENTRY_ID))["project_id"] is None

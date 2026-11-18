@@ -72,7 +72,11 @@ async def test_tools_are_annotated_by_whether_they_can_write(client) -> None:
     for name in READ_TOOLS:
         assert tools[name].annotations.read_only_hint is True, name
     assert tools["apply_changes"].annotations.destructive_hint is True
+    assert tools["plan_changes"].annotations.read_only_hint is False
     assert tools["plan_changes"].annotations.destructive_hint is False
+    schema = tools["get_capabilities"].output_schema
+    assert schema["properties"]["schema_version"]["const"] == "1.0"
+    assert "ok" in schema["required"]
     for name in set(tools) - {"list_environments"}:
         assert "env" in tools[name].input_schema["required"], name
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 from conftest import runtime_for
@@ -131,19 +132,19 @@ def test_results_list_page_size_bounds_are_enforced_by_the_cli(invoke, fake, siz
 
 
 @pytest.mark.parametrize(
-    ("args", "status", "code", "error"),
+    ("status", "code", "error"),
     [
-        (["entry", "resolve", ENTRY_ID], 401, 3, "authentication_error"),
-        (["entry", "resolve", ENTRY_ID], 403, 4, "access_denied"),
-        (["entry", "resolve", ENTRY_ID], 404, 4, "not_found"),
-        (["entry", "resolve", ENTRY_ID], 400, 2, "validation_error"),
-        (["entry", "resolve", ENTRY_ID], 409, 5, "conflict"),
-        (["entry", "resolve", ENTRY_ID], 0, 7, "upstream_error"),
+        (401, 3, "authentication_error"),
+        (403, 4, "access_denied"),
+        (404, 4, "not_found"),
+        (400, 2, "validation_error"),
+        (409, 5, "conflict"),
+        (0, 7, "upstream_error"),
     ],
 )
-def test_error_codes_map_to_exit_codes(invoke, fake, args, status, code, error) -> None:
+def test_error_codes_map_to_exit_codes(invoke, fake, status, code, error) -> None:
     fake.fail("GET", f"/entry/{ENTRY_ID}", status)
-    exit_code, payload, _ = invoke(*args)
+    exit_code, payload, _ = invoke("entry", "resolve", ENTRY_ID)
     assert exit_code == code
     assert payload["ok"] is False and payload["data"] is None
     assert payload["error"]["code"] == error
@@ -313,6 +314,33 @@ def test_envs_list_shows_configured_environment_without_secrets(invoke) -> None:
         "https://your-tenant-dev.benchling.com"
     )
     assert "secret" not in result.stdout.replace("client_secret", "")
+
+
+def test_envs_list_is_an_empty_envelope_when_nothing_is_configured(monkeypatch) -> None:
+    for name in list(os.environ):
+        if name.startswith("BENCHLING_") and name != "BENCHLING_AGENT_HOME":
+            monkeypatch.delenv(name)
+    result = CliRunner().invoke(cli.app, ["envs", "list"])
+    assert result.exit_code == 0
+    assert json.loads(result.stdout) == {
+        "schema_version": "1.0",
+        "ok": True,
+        "data": {"environments": {}},
+        "error": None,
+        "meta": {},
+    }
+
+
+def test_mcp_serve_reports_startup_errors_as_json_on_stderr(invoke, monkeypatch) -> None:
+    unknown = CliRunner().invoke(cli.app, ["mcp", "serve", "--allow-writes", "prod"])
+    assert unknown.exit_code == 2
+    assert json.loads(unknown.stderr)["error"]["details"]["unknown_envs"] == ["prod"]
+
+    monkeypatch.delenv("BENCHLING_SANDBOX_CLIENT_SECRET")
+    missing = CliRunner().invoke(cli.app, ["mcp", "serve"])
+    assert missing.exit_code == 3
+    assert missing.stdout == ""
+    assert json.loads(missing.stderr)["error"]["code"] == "authentication_error"
 
 
 def test_auth_status_reports_without_calling_the_api(invoke, fake) -> None:

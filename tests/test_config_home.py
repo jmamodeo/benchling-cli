@@ -56,6 +56,8 @@ def test_store_layout_follows_root(tmp_path) -> None:
         tmp_path / "root" / "journals",
         tmp_path / "root" / "locks",
     )
+    store.ensure()
+    assert sorted(path.name for path in store.root.iterdir()) == ["journals", "locks", "plans"]
 
 
 def test_default_store_uses_application_home(monkeypatch, tmp_path) -> None:
