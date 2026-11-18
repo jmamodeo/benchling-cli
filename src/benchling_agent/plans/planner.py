@@ -6,7 +6,7 @@ import asyncio
 import uuid
 from copy import deepcopy
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, NoReturn
 
 from filelock import FileLock
 from filelock import Timeout as FileLockTimeout
@@ -19,6 +19,7 @@ from ..errors import (
     ValidationError,
 )
 from ..models import (
+    ChangeJournal,
     ChangePlan,
     PlanFamily,
     PlanStatus,
@@ -50,22 +51,15 @@ class ChangePlanner(DocumentPlanning, TablePlanning, FieldsPlanning, ResultsPlan
         request = deepcopy(request)
         resolved = await self.service.resolve_entry(reference)
         entry_id = resolved["entry_id"]
-        if family == PlanFamily.DOCUMENT:
-            before, after, preconditions, guarantees, warnings = await self._plan_document(
-                entry_id, request
-            )
-        elif family == PlanFamily.TABLE:
-            before, after, preconditions, guarantees, warnings = await self._plan_table(
-                entry_id, request
-            )
-        elif family == PlanFamily.FIELDS:
-            before, after, preconditions, guarantees, warnings = await self._plan_fields(
-                entry_id, request
-            )
-        else:
-            before, after, preconditions, guarantees, warnings = await self._plan_results(
-                entry_id, request
-            )
+        planners = {
+            PlanFamily.DOCUMENT: self._plan_document,
+            PlanFamily.TABLE: self._plan_table,
+            PlanFamily.FIELDS: self._plan_fields,
+            PlanFamily.RESULTS: self._plan_results,
+        }
+        before, after, preconditions, guarantees, warnings = await planners[family](
+            entry_id, request
+        )
         plan_data: dict[str, Any] = {
             "schema_version": "1.0",
             "id": uuid.uuid4().hex,
@@ -113,8 +107,8 @@ class ChangePlanner(DocumentPlanning, TablePlanning, FieldsPlanning, ResultsPlan
         finally:
             lock.release()
 
-    async def _apply_locked(self, plan_id: str) -> dict[str, Any]:
-        plan = self.repository.load_plan(plan_id)
+    def _check_plan_scope(self, plan: ChangePlan) -> None:
+        """Reject plans created for a different environment or tenant."""
         if (
             plan.env != self.api.environment.name
             or plan.tenant_url != self.api.environment.base_url
@@ -123,6 +117,20 @@ class ChangePlanner(DocumentPlanning, TablePlanning, FieldsPlanning, ResultsPlan
                 "Plan belongs to a different environment or tenant",
                 details={"plan_env": plan.env, "active_env": self.api.environment.name},
             )
+
+    async def _run_family_apply(self, plan: ChangePlan, journal: ChangeJournal) -> dict[str, Any]:
+        """Dispatch to the apply routine for the plan's family."""
+        appliers = {
+            PlanFamily.DOCUMENT: self._apply_document,
+            PlanFamily.TABLE: self._apply_table,
+            PlanFamily.FIELDS: self._apply_fields,
+            PlanFamily.RESULTS: self._apply_results,
+        }
+        return await appliers[plan.family](plan, journal)
+
+    async def _apply_locked(self, plan_id: str) -> dict[str, Any]:
+        plan = self.repository.load_plan(plan_id)
+        self._check_plan_scope(plan)
         journal = self.repository.load_journal(plan_id)
         if journal.status != PlanStatus.PENDING:
             raise ConflictError(
@@ -133,77 +141,90 @@ class ChangePlanner(DocumentPlanning, TablePlanning, FieldsPlanning, ResultsPlan
         journal.status = PlanStatus.APPLYING
         self.repository.save_journal(journal)
         try:
-            if plan.family == PlanFamily.DOCUMENT:
-                result = await self._apply_document(plan, journal)
-            elif plan.family == PlanFamily.TABLE:
-                result = await self._apply_table(plan, journal)
-            elif plan.family == PlanFamily.FIELDS:
-                result = await self._apply_fields(plan, journal)
-            else:
-                result = await self._apply_results(plan, journal)
-            journal.status = PlanStatus.SUCCEEDED
-            journal.result = result
-            self._event(journal, "apply", "succeeded", result)
-            self.repository.save_journal(journal)
-            return {
-                "plan": plan.model_dump(mode="json"),
-                "journal": journal.model_dump(mode="json"),
-            }
+            result = await self._run_family_apply(plan, journal)
+            return self._finalize_success(plan, journal, result)
         except PartialCompletionError as exc:
-            journal.status = PlanStatus.UNKNOWN
-            self._event(journal, "apply", "unknown", exc.details)
-            self.repository.save_journal(journal)
-            exc.details = {
-                **exc.details,
-                "plan_id": plan_id,
-                "journal": journal.model_dump(mode="json"),
-            }
+            self._record_unknown(plan_id, journal, exc)
             raise
         except BenchlingAgentError as exc:
-            if any(
-                event.status == "succeeded" for event in journal.events if event.stage != "apply"
-            ):
-                journal.status = PlanStatus.PARTIAL
-                self._event(journal, "apply", "partial", {"error": exc.message})
-                self.repository.save_journal(journal)
-                raise PartialCompletionError(
-                    "Some plan steps completed before a later step failed",
-                    details={
-                        "plan_id": plan_id,
-                        "cause": exc.message,
-                        "journal": journal.model_dump(mode="json"),
-                    },
-                ) from exc
-            journal.status = PlanStatus.FAILED
-            self._event(journal, "apply", "failed", {"error": exc.message})
-            self.repository.save_journal(journal)
+            self._record_error(plan_id, journal, exc)
             raise
         except Exception as exc:
-            has_completed_step = any(
-                event.status == "succeeded" for event in journal.events if event.stage != "apply"
-            )
-            journal.status = PlanStatus.PARTIAL if has_completed_step else PlanStatus.FAILED
-            self._event(
-                journal,
-                "apply",
-                journal.status.value,
-                {"error": type(exc).__name__},
-            )
+            self._raise_local_failure(plan_id, journal, exc)
+
+    def _finalize_success(
+        self, plan: ChangePlan, journal: ChangeJournal, result: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Mark the journal succeeded and build the apply response."""
+        journal.status = PlanStatus.SUCCEEDED
+        journal.result = result
+        self._event(journal, "apply", "succeeded", result)
+        self.repository.save_journal(journal)
+        return {
+            "plan": plan.model_dump(mode="json"),
+            "journal": journal.model_dump(mode="json"),
+        }
+
+    def _record_unknown(
+        self, plan_id: str, journal: ChangeJournal, exc: PartialCompletionError
+    ) -> None:
+        """Record an unknown outcome and attach plan and journal to the error details."""
+        journal.status = PlanStatus.UNKNOWN
+        self._event(journal, "apply", "unknown", exc.details)
+        self.repository.save_journal(journal)
+        exc.details = {
+            **exc.details,
+            "plan_id": plan_id,
+            "journal": journal.model_dump(mode="json"),
+        }
+
+    def _record_error(self, plan_id: str, journal: ChangeJournal, exc: BenchlingAgentError) -> None:
+        """Record a failed or partial apply; raises PartialCompletionError if a step had succeeded."""
+        if any(event.status == "succeeded" for event in journal.events if event.stage != "apply"):
+            journal.status = PlanStatus.PARTIAL
+            self._event(journal, "apply", "partial", {"error": exc.message})
             self.repository.save_journal(journal)
-            wrapped = UpstreamError(
-                "An unexpected local failure interrupted plan execution",
+            raise PartialCompletionError(
+                "Some plan steps completed before a later step failed",
                 details={
                     "plan_id": plan_id,
-                    "type": type(exc).__name__,
+                    "cause": exc.message,
                     "journal": journal.model_dump(mode="json"),
                 },
-            )
-            if has_completed_step:
-                raise PartialCompletionError(
-                    "A local failure occurred after at least one write completed",
-                    details=wrapped.details,
-                ) from exc
-            raise wrapped from exc
+            ) from exc
+        journal.status = PlanStatus.FAILED
+        self._event(journal, "apply", "failed", {"error": exc.message})
+        self.repository.save_journal(journal)
+
+    def _raise_local_failure(
+        self, plan_id: str, journal: ChangeJournal, exc: Exception
+    ) -> NoReturn:
+        """Record an unexpected local failure and raise the wrapped error."""
+        has_completed_step = any(
+            event.status == "succeeded" for event in journal.events if event.stage != "apply"
+        )
+        journal.status = PlanStatus.PARTIAL if has_completed_step else PlanStatus.FAILED
+        self._event(
+            journal,
+            "apply",
+            journal.status.value,
+            {"error": type(exc).__name__},
+        )
+        self.repository.save_journal(journal)
+        wrapped = UpstreamError(
+            "An unexpected local failure interrupted plan execution",
+            details={
+                "plan_id": plan_id,
+                "type": type(exc).__name__,
+                "journal": journal.model_dump(mode="json"),
+            },
+        )
+        if has_completed_step:
+            raise PartialCompletionError(
+                "A local failure occurred after at least one write completed",
+                details=wrapped.details,
+            ) from exc
+        raise wrapped from exc
 
     async def status(self, plan_id: str) -> dict[str, Any]:
         """Return the plan and journal; for submitted results, also reconcile the remote task.
@@ -211,14 +232,7 @@ class ChangePlanner(DocumentPlanning, TablePlanning, FieldsPlanning, ResultsPlan
         Remote lookup failures are reported under remote_task_error, not raised.
         """
         plan = self.repository.load_plan(plan_id)
-        if (
-            plan.env != self.api.environment.name
-            or plan.tenant_url != self.api.environment.base_url
-        ):
-            raise ValidationError(
-                "Plan belongs to a different environment or tenant",
-                details={"plan_env": plan.env, "active_env": self.api.environment.name},
-            )
+        self._check_plan_scope(plan)
         journal = self.repository.load_journal(plan_id)
         status: dict[str, Any] = {
             "plan": plan.model_dump(mode="json"),

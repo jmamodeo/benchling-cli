@@ -6,15 +6,22 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-18
+
 ### Changed
 
 - **Breaking:** the concept formerly called a "profile" is now consistently an "environment". The JSON envelope key `meta.profile` is now `meta.env`, the `auth status` and `doctor` data key `profile` is now `env`, and saved change plans store `env` instead of `profile`. Plans created by 0.1.x are not readable by this version; preview them again.
 - The package version is defined once, in `benchling_agent.__version__`; `pyproject.toml` reads it.
+- The test suite was audited for redundancy: duplicated interface, CLI and MCP-serve tests, hand-rolled planner doubles that the fake-backed plan tests already covered, and overlapping service-read tests were removed or merged, and same-branch parametrizations were collapsed. Unique assertions were kept. The suite is now 199 test functions (357 collected cases) at 98% branch coverage; the CI floor stays at 96%.
+- Long functions (`build_mcp_server`, snapshot assembly, the table, document and result planners, and plan apply) were split into small helpers, and plan and apply dispatch by change family through a mapping. Behavior is unchanged.
 - The code base is formatted with `ruff format`, enforced in CI, and public modules, classes and functions have docstrings.
 
 ### Added
 
 - `benchling --version`.
+- `scripts/demo.py`, which runs the real CLI and MCP server against the offline fake API and produces the transcript shown in the README. A test keeps it runnable.
+- A `build` job in CI that builds the sdist and wheel, runs `twine check --strict`, and smoke-tests the installed wheel.
+- README sections for why the project exists, an architecture diagram, the safety model, design decisions and tradeoffs, and known limitations.
 
 ### Removed
 
@@ -31,7 +38,7 @@ All notable changes to this project are documented here. The format is based on
 
 ### Fixed
 
-- `replace_text` now accepts the flattened V3 text parts (`DocumentPartText`) that current API responses return, and preserves their formatting. Previously only the legacy nested `TextDocumentContent` shape was recognized.
+- `replace_text` now accepts the flattened V3 text parts (`DocumentPartText`) that current API responses return, and preserves their formatting. Previously only the legacy nested `TextDocumentContent` shape was recognized. This fix is verified against offline fixtures only; it has not been checked against a live Benchling tenant.
 
 ## [0.1.1] - 2026-11-18
 
@@ -67,7 +74,8 @@ All notable changes to this project are documented here. The format is based on
 - Versioned JSON envelope, stable exit codes, and published JSON schemas.
 - Operating-system trust-store TLS verification.
 
-[Unreleased]: https://github.com/jmamodeo/benchling-cli/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/jmamodeo/benchling-cli/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/jmamodeo/benchling-cli/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/jmamodeo/benchling-cli/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/jmamodeo/benchling-cli/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/jmamodeo/benchling-cli/releases/tag/v0.1.0

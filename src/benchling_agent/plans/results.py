@@ -43,6 +43,40 @@ class ResultsPlanning(FieldNormalization):
             )
         schema = await self.service.get_schema(schema_id)
         definitions = schema.get("field_definitions") or []
+        planned, client_record_ids, projects = await self._prepare_result_records(
+            records, table_id, schema_id, definitions
+        )
+        before = {"table": table, "records": []}
+        after = {
+            "table_id": table_id,
+            "schema_id": schema_id,
+            "projects": projects,
+            "records": planned,
+            "client_record_ids": client_record_ids,
+            "state": "pending_integration",
+        }
+        warnings = self._result_plan_warnings(planned)
+        return (
+            before,
+            after,
+            {
+                "entry_id": entry_id,
+                "table_id": table_id,
+                "result_schema_id": schema_id,
+                "result_schema_fields": self._field_definition_fingerprints(definitions),
+            },
+            [
+                "verified entry-to-table and table-to-schema relationships",
+                "local correlation UUIDs and persisted task IDs for reconciliation",
+                "no automatic write retry",
+            ],
+            warnings,
+        )
+
+    async def _prepare_result_records(
+        self, records: list[Any], table_id: str, schema_id: str, definitions: list[Any]
+    ) -> tuple[list[Any], list[str], dict[str, dict[str, Any]]]:
+        """Validate and normalize records; returns them with correlation IDs and referenced projects."""
         planned = deepcopy(records)
         client_record_ids: list[str] = []
         projects: dict[str, dict[str, Any]] = {}
@@ -83,15 +117,10 @@ class ResultsPlanning(FieldNormalization):
                         "id": project.get("id", project_id),
                         "name": project.get("name"),
                     }
-        before = {"table": table, "records": []}
-        after = {
-            "table_id": table_id,
-            "schema_id": schema_id,
-            "projects": projects,
-            "records": planned,
-            "client_record_ids": client_record_ids,
-            "state": "pending_integration",
-        }
+        return planned, client_record_ids, projects
+
+    def _result_plan_warnings(self, planned: list[Any]) -> list[str]:
+        """Warnings shown in the preview for submitted results."""
         warnings = [
             "Created results remain pending until a person integrates them in Benchling",
             "Result IDs are assigned by Benchling; local correlation UUIDs are not idempotency keys",
@@ -100,22 +129,7 @@ class ResultsPlanning(FieldNormalization):
             warnings.append(
                 "Results without projectId are readable only by their creator until access is changed"
             )
-        return (
-            before,
-            after,
-            {
-                "entry_id": entry_id,
-                "table_id": table_id,
-                "result_schema_id": schema_id,
-                "result_schema_fields": self._field_definition_fingerprints(definitions),
-            },
-            [
-                "verified entry-to-table and table-to-schema relationships",
-                "local correlation UUIDs and persisted task IDs for reconciliation",
-                "no automatic write retry",
-            ],
-            warnings,
-        )
+        return warnings
 
     async def _apply_results(self, plan: ChangePlan, journal: ChangeJournal) -> dict[str, Any]:
         if any("id" in record for record in plan.after["records"]):
