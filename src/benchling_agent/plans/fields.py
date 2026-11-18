@@ -22,6 +22,7 @@ from .base import PlannerBase, PlanParts
 
 class FieldNormalization(PlannerBase):
     """Validation and normalization of schema field values shared by fields and results planners."""
+
     def _normalize_schema_field_updates(
         self,
         updates: dict[str, Any],
@@ -30,13 +31,9 @@ class FieldNormalization(PlannerBase):
         require_all_required: bool = False,
     ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         by_system = {
-            str(item["systemName"]): item
-            for item in definitions
-            if item.get("systemName")
+            str(item["systemName"]): item for item in definitions if item.get("systemName")
         }
-        by_id = {
-            str(item["id"]): item for item in definitions if item.get("id")
-        }
+        by_id = {str(item["id"]): item for item in definitions if item.get("id")}
         if not by_system:
             raise UnsupportedError(
                 "The assigned schema did not expose addressable field definitions"
@@ -117,9 +114,7 @@ class FieldNormalization(PlannerBase):
         fingerprints = []
         for definition in definitions:
             system_name = definition.get("systemName")
-            if not system_name or (
-                system_names is not None and system_name not in system_names
-            ):
+            if not system_name or (system_names is not None and system_name not in system_names):
                 continue
             fingerprints.append(
                 {
@@ -136,9 +131,7 @@ class FieldNormalization(PlannerBase):
             )
         return sorted(fingerprints, key=lambda item: str(item["system_name"]))
 
-    def _validate_schema_field_value(
-        self, definition: dict[str, Any], value: Any
-    ) -> None:
+    def _validate_schema_field_value(self, definition: dict[str, Any], value: Any) -> None:
         field = str(definition.get("systemName") or definition.get("id"))
         if value is None:
             if definition.get("isRequired"):
@@ -159,8 +152,7 @@ class FieldNormalization(PlannerBase):
             valid = all(isinstance(item, int) and not isinstance(item, bool) for item in values)
         elif field_type == "FLOAT":
             valid = all(
-                isinstance(item, (int, float)) and not isinstance(item, bool)
-                for item in values
+                isinstance(item, (int, float)) and not isinstance(item, bool) for item in values
             )
         elif field_type == "BOOLEAN":
             valid = all(isinstance(item, bool) for item in values)
@@ -216,6 +208,7 @@ class FieldNormalization(PlannerBase):
 
 class FieldsPlanning(FieldNormalization):
     """Planning and applying of entry schema field updates."""
+
     async def _plan_fields(self, entry_id: str, request: dict[str, Any]) -> PlanParts:
         updates = request.get("schema_fields")
         if not isinstance(updates, dict) or not updates:

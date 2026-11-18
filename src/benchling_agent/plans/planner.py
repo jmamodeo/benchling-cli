@@ -115,7 +115,10 @@ class ChangePlanner(DocumentPlanning, TablePlanning, FieldsPlanning, ResultsPlan
 
     async def _apply_locked(self, plan_id: str) -> dict[str, Any]:
         plan = self.repository.load_plan(plan_id)
-        if plan.env != self.api.environment.name or plan.tenant_url != self.api.environment.base_url:
+        if (
+            plan.env != self.api.environment.name
+            or plan.tenant_url != self.api.environment.base_url
+        ):
             raise ValidationError(
                 "Plan belongs to a different environment or tenant",
                 details={"plan_env": plan.env, "active_env": self.api.environment.name},
@@ -142,7 +145,10 @@ class ChangePlanner(DocumentPlanning, TablePlanning, FieldsPlanning, ResultsPlan
             journal.result = result
             self._event(journal, "apply", "succeeded", result)
             self.repository.save_journal(journal)
-            return {"plan": plan.model_dump(mode="json"), "journal": journal.model_dump(mode="json")}
+            return {
+                "plan": plan.model_dump(mode="json"),
+                "journal": journal.model_dump(mode="json"),
+            }
         except PartialCompletionError as exc:
             journal.status = PlanStatus.UNKNOWN
             self._event(journal, "apply", "unknown", exc.details)
@@ -154,7 +160,9 @@ class ChangePlanner(DocumentPlanning, TablePlanning, FieldsPlanning, ResultsPlan
             }
             raise
         except BenchlingAgentError as exc:
-            if any(event.status == "succeeded" for event in journal.events if event.stage != "apply"):
+            if any(
+                event.status == "succeeded" for event in journal.events if event.stage != "apply"
+            ):
                 journal.status = PlanStatus.PARTIAL
                 self._event(journal, "apply", "partial", {"error": exc.message})
                 self.repository.save_journal(journal)
@@ -172,13 +180,9 @@ class ChangePlanner(DocumentPlanning, TablePlanning, FieldsPlanning, ResultsPlan
             raise
         except Exception as exc:
             has_completed_step = any(
-                event.status == "succeeded"
-                for event in journal.events
-                if event.stage != "apply"
+                event.status == "succeeded" for event in journal.events if event.stage != "apply"
             )
-            journal.status = (
-                PlanStatus.PARTIAL if has_completed_step else PlanStatus.FAILED
-            )
+            journal.status = PlanStatus.PARTIAL if has_completed_step else PlanStatus.FAILED
             self._event(
                 journal,
                 "apply",
@@ -207,7 +211,10 @@ class ChangePlanner(DocumentPlanning, TablePlanning, FieldsPlanning, ResultsPlan
         Remote lookup failures are reported under remote_task_error, not raised.
         """
         plan = self.repository.load_plan(plan_id)
-        if plan.env != self.api.environment.name or plan.tenant_url != self.api.environment.base_url:
+        if (
+            plan.env != self.api.environment.name
+            or plan.tenant_url != self.api.environment.base_url
+        ):
             raise ValidationError(
                 "Plan belongs to a different environment or tenant",
                 details={"plan_env": plan.env, "active_env": self.api.environment.name},
@@ -229,23 +236,36 @@ class ChangePlanner(DocumentPlanning, TablePlanning, FieldsPlanning, ResultsPlan
                     "SUCCEEDED": "pending_integration",
                 }.get(remote_status, "unknown")
                 records = (remote.get("response") or {}).get("assayResults", [])
-                confirmed_ids = [record.get("id") for record in records if isinstance(record, dict) and record.get("id")]
-                confirmed_v3_ids = [record.get("v3Id") for record in records if isinstance(record, dict) and record.get("v3Id")]
+                confirmed_ids = [
+                    record.get("id")
+                    for record in records
+                    if isinstance(record, dict) and record.get("id")
+                ]
+                confirmed_v3_ids = [
+                    record.get("v3Id")
+                    for record in records
+                    if isinstance(record, dict) and record.get("v3Id")
+                ]
                 status["record_ids"] = confirmed_ids
                 status["record_v3_ids"] = confirmed_v3_ids
                 # Retain server-assigned IDs for reconciliation after task data
                 # expires. Use the same lock as apply to avoid lost updates.
-                lock = FileLock(str(self.repository.config.locks_dir / f"plan-{plan_id}.apply.lock"), thread_local=False)
+                lock = FileLock(
+                    str(self.repository.config.locks_dir / f"plan-{plan_id}.apply.lock"),
+                    thread_local=False,
+                )
                 await asyncio.to_thread(lock.acquire, timeout=30)
                 try:
                     latest = self.repository.load_journal(plan_id)
                     if latest.status == PlanStatus.SUCCEEDED and latest.result:
-                        latest.result.update({
-                            "record_ids": confirmed_ids,
-                            "record_v3_ids": confirmed_v3_ids,
-                            "task_status": remote_status,
-                            "state": status["result_state"],
-                        })
+                        latest.result.update(
+                            {
+                                "record_ids": confirmed_ids,
+                                "record_v3_ids": confirmed_v3_ids,
+                                "task_status": remote_status,
+                                "state": status["result_state"],
+                            }
+                        )
                         self.repository.save_journal(latest)
                         status["journal"] = latest.model_dump(mode="json")
                 finally:

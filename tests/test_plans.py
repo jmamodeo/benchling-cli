@@ -135,9 +135,7 @@ class FakeService:
             "entry_id": "etr_one",
             "schema": {"id": "entsch_one"},
             "fields": {"Temperature": {"value": self.field_value}},
-            "fields_by_system_name": {
-                "temperature": {"value": self.field_value}
-            },
+            "fields_by_system_name": {"temperature": {"value": self.field_value}},
             "field_definitions": [
                 {
                     "id": "tsf_temperature",
@@ -240,7 +238,11 @@ async def test_result_plan_correlates_records_locally_and_submits_once(planner) 
         {
             "table_id": "strtbl_one",
             "assay_results": [
-                {"schemaId": "assaysch_one", "projectId": "src_one", "fields": {"ct": {"value": 12}}}
+                {
+                    "schemaId": "assaysch_one",
+                    "projectId": "src_one",
+                    "fields": {"ct": {"value": 12}},
+                }
             ],
         },
     )
@@ -278,13 +280,22 @@ async def test_same_plan_cannot_be_applied_twice(planner) -> None:
 @pytest.mark.asyncio
 async def test_status_persists_server_assigned_ids_not_local_correlations(planner):
     engine, service, api = planner
-    plan = await engine.plan("etr_one", "results", {
-        "table_id": "strtbl_one",
-        "assay_results": [{"schemaId": "assaysch_one", "fields": {"ct": {"value": 12}}}],
-    })
+    plan = await engine.plan(
+        "etr_one",
+        "results",
+        {
+            "table_id": "strtbl_one",
+            "assay_results": [{"schemaId": "assaysch_one", "fields": {"ct": {"value": 12}}}],
+        },
+    )
     await engine.apply(plan.id)
+
     async def task(task_id):
-        return {"status": "SUCCEEDED", "response": {"assayResults": [{"id": "server-uuid", "v3Id": "result_server"}]}}
+        return {
+            "status": "SUCCEEDED",
+            "response": {"assayResults": [{"id": "server-uuid", "v3Id": "result_server"}]},
+        }
+
     service.get_task = task
     status = await engine.status(plan.id)
     assert status["record_ids"] == ["server-uuid"]

@@ -13,9 +13,7 @@ from benchling_agent.errors import (
 
 
 async def plan(runtime, request, part_id=TABLE_PART):
-    return await runtime.planner.plan(
-        ENTRY_ID, "table", {"table_part_id": part_id, **request}
-    )
+    return await runtime.planner.plan(ENTRY_ID, "table", {"table_part_id": part_id, **request})
 
 
 def cell(row, column, value):
@@ -44,12 +42,15 @@ def cell(row, column, value):
         ({"operation": "append_rows", "rows": [{"cells": "ab"}]}, "must contain cells"),
         ({"operation": "replace"}, "table object"),
         ({"operation": "replace", "table": []}, "table object"),
-        ({"operation": "replace", "table": {"columnDefinitions": ["Sample"], "rows": []}},
-         "column definition"),
-        ({"operation": "replace", "table": {"columnDefinitions": "Sample", "rows": []}},
-         "arrays"),
-        ({"operation": "replace", "table": {"columnDefinitions": ["Sample"]}},
-         "wrong number of cells"),
+        (
+            {"operation": "replace", "table": {"columnDefinitions": ["Sample"], "rows": []}},
+            "column definition",
+        ),
+        ({"operation": "replace", "table": {"columnDefinitions": "Sample", "rows": []}}, "arrays"),
+        (
+            {"operation": "replace", "table": {"columnDefinitions": ["Sample"]}},
+            "wrong number of cells",
+        ),
         ({"operation": "replace", "table": {"rows": [["only one"]]}}, "wrong number of cells"),
         ({"operation": "replace", "table": {"rows": "none"}}, "must contain cells"),
         ({"operation": "sort"}, "Unknown table operation"),
@@ -72,20 +73,23 @@ async def test_table_part_id_is_required(runtime) -> None:
 
 async def test_structured_tables_cannot_be_edited(runtime) -> None:
     with pytest.raises(UnsupportedError, match="unstructured"):
-        await plan(runtime, {"operation": "append_rows", "rows": [["a", "b"]]},
-                   part_id="docpart_struct1")
+        await plan(
+            runtime, {"operation": "append_rows", "rows": [["a", "b"]]}, part_id="docpart_struct1"
+        )
 
 
 async def test_table_part_of_another_entry_is_not_found(runtime) -> None:
     with pytest.raises(NotFoundError):
-        await plan(runtime, {"operation": "append_rows", "rows": [["a", "b"]]},
-                   part_id="docpart_elsewhere")
+        await plan(
+            runtime, {"operation": "append_rows", "rows": [["a", "b"]]}, part_id="docpart_elsewhere"
+        )
 
 
 async def test_text_part_is_not_an_editable_table(runtime) -> None:
     with pytest.raises(UnsupportedError):
-        await plan(runtime, {"operation": "append_rows", "rows": [["a", "b"]]},
-                   part_id="docpart_text1")
+        await plan(
+            runtime, {"operation": "append_rows", "rows": [["a", "b"]]}, part_id="docpart_text1"
+        )
 
 
 async def test_writing_into_a_merged_child_cell_is_unsupported(runtime) -> None:
@@ -119,7 +123,12 @@ async def test_append_rows_accepts_lists_and_cell_objects(runtime) -> None:
             "operation": "append_rows",
             "rows": [
                 ["D", 4],
-                {"cells": [{"inputValue": {"type": "text_value", "value": "E"}}, {}, ]},
+                {
+                    "cells": [
+                        {"inputValue": {"type": "text_value", "value": "E"}},
+                        {},
+                    ]
+                },
             ],
         },
     )
@@ -131,9 +140,7 @@ async def test_append_rows_accepts_lists_and_cell_objects(runtime) -> None:
 
 
 async def test_append_row_with_non_dict_cell_is_stringified(runtime) -> None:
-    planned = await plan(
-        runtime, {"operation": "append_rows", "rows": [{"cells": ["F", 6]}]}
-    )
+    planned = await plan(runtime, {"operation": "append_rows", "rows": [{"cells": ["F", 6]}]})
     assert planned.after["content"]["rows"][3]["cells"][1]["inputValue"]["value"] == "6"
 
 
@@ -175,25 +182,38 @@ async def test_replace_without_rows_only_updates_metadata(runtime) -> None:
 @pytest.mark.parametrize(
     ("table", "message"),
     [
-        ({"rows": [{"cells": [{"mergeRange": {"mergeRowSpan": 1, "mergeColSpan": 1}}, {}]}]
-          }, None),
-        ({"rows": [{"cells": [{"mergeRange": {"mergeRowSpan": 0, "mergeColSpan": 1}}, {}]}]},
-         "merge range is invalid"),
-        ({"rows": [{"cells": [{"mergeRange": {"mergeRowSpan": 1, "mergeColSpan": 3}}, {}]}]},
-         "merge range is invalid"),
-        ({"rows": [{"cells": [{"mergeRange": {"mergeRowSpan": 5, "mergeColSpan": 1}}, {}]}]},
-         "merge range is invalid"),
+        ({"rows": [{"cells": [{"mergeRange": {"mergeRowSpan": 1, "mergeColSpan": 1}}, {}]}]}, None),
+        (
+            {"rows": [{"cells": [{"mergeRange": {"mergeRowSpan": 0, "mergeColSpan": 1}}, {}]}]},
+            "merge range is invalid",
+        ),
+        (
+            {"rows": [{"cells": [{"mergeRange": {"mergeRowSpan": 1, "mergeColSpan": 3}}, {}]}]},
+            "merge range is invalid",
+        ),
+        (
+            {"rows": [{"cells": [{"mergeRange": {"mergeRowSpan": 5, "mergeColSpan": 1}}, {}]}]},
+            "merge range is invalid",
+        ),
         ({"rows": [{"cells": [{"mergeRange": "wide"}, {}]}]}, "merge range is invalid"),
         ({"rows": [{"cells": [{"mergeRangeParent": "x"}, {}]}]}, "must be an object"),
-        ({"rows": [{"cells": [{"mergeRangeParent": {"row": 9, "col": 0}}, {}]}]},
-         "outside the table"),
-        ({"rows": [{"cells": [{"mergeRangeParent": {"row": 0, "col": 1}}, {}]}]},
-         "covering merge anchor"),
+        (
+            {"rows": [{"cells": [{"mergeRangeParent": {"row": 9, "col": 0}}, {}]}]},
+            "outside the table",
+        ),
+        (
+            {"rows": [{"cells": [{"mergeRangeParent": {"row": 0, "col": 1}}, {}]}]},
+            "covering merge anchor",
+        ),
         ({"rows": [{"cells": [{"selectorId": 5}, {}]}]}, "selectorId"),
-        ({"rows": [{"cells": [{"inputValue": {"type": "number_value", "value": "1"}}, {}]}]},
-         "text inputValue"),
-        ({"rows": [{"cells": [{"inputValue": {"type": "text_value", "value": 1}}, {}]}]},
-         "text inputValue"),
+        (
+            {"rows": [{"cells": [{"inputValue": {"type": "number_value", "value": "1"}}, {}]}]},
+            "text inputValue",
+        ),
+        (
+            {"rows": [{"cells": [{"inputValue": {"type": "text_value", "value": 1}}, {}]}]},
+            "text inputValue",
+        ),
     ],
 )
 async def test_replace_validates_cell_metadata(runtime, table, message) -> None:
@@ -225,9 +245,7 @@ async def test_apply_sends_versioned_payload_without_evaluated_values(runtime, f
     assert fake.table_version == 2
 
 
-async def test_payload_drops_unknown_cell_and_format_keys_but_keeps_caption(
-    runtime, fake
-) -> None:
+async def test_payload_drops_unknown_cell_and_format_keys_but_keeps_caption(runtime, fake) -> None:
     planned = await plan(
         runtime,
         {
@@ -303,4 +321,3 @@ async def test_table_part_version_mismatch_during_planning_is_a_conflict(runtime
     fake.parts[3]["versionId"] = "tver_other"
     with pytest.raises(ConflictError, match="while its target entry"):
         await plan(runtime, {"operation": "append_rows", "rows": [["D", "4"]]})
-

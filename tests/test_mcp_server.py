@@ -12,9 +12,20 @@ from benchling_agent.mcp_server import build_mcp_server, run_mcp_server
 from benchling_agent.runtime import RuntimePool
 
 READ_TOOLS = {
-    "list_environments", "get_capabilities", "resolve_entry", "get_entry", "inspect_entry",
-    "get_section", "get_part", "get_table", "get_schema", "get_entry_fields", "list_results",
-    "get_result", "list_result_tables", "get_change_status",
+    "list_environments",
+    "get_capabilities",
+    "resolve_entry",
+    "get_entry",
+    "inspect_entry",
+    "get_section",
+    "get_part",
+    "get_table",
+    "get_schema",
+    "get_entry_fields",
+    "list_results",
+    "get_result",
+    "list_result_tables",
+    "get_change_status",
 }
 
 
@@ -127,26 +138,48 @@ async def test_full_entry_pages_parts_results_and_table_rows(client, fake) -> No
     fake.results_page_size = 2
     first = (
         await call(
-            client, "get_entry", env="sandbox", reference=ENTRY_ID, full=True,
-            part_limit=4, result_limit=2, table_row_limit=1,
+            client,
+            "get_entry",
+            env="sandbox",
+            reference=ENTRY_ID,
+            full=True,
+            part_limit=4,
+            result_limit=2,
+            table_row_limit=1,
         )
     )["data"]
     assert [p["id"] for p in first["parts"]][-1] == TABLE_PART
     assert first["pagination"]["parts"] == {
-        "offset": 0, "returned": 4, "total": 6, "next_offset": 4
+        "offset": 0,
+        "returned": 4,
+        "total": 6,
+        "next_offset": 4,
     }
     assert first["pagination"]["results"] == {
-        "offset": 0, "returned": 2, "total": 3, "next_offset": 2
+        "offset": 0,
+        "returned": 2,
+        "total": 3,
+        "next_offset": 2,
     }
     assert first["pagination"]["table_rows"] == {"offset": 0, "limit_per_table": 1}
     assert len(first["tables"][TABLE_PART]["content"]["rows"]) == 1
     assert first["tables"][TABLE_PART]["pagination"] == {
-        "offset": 0, "returned": 1, "total": 3, "next_offset": 1
+        "offset": 0,
+        "returned": 1,
+        "total": 3,
+        "next_offset": 1,
     }
     second = (
         await call(
-            client, "get_entry", env="sandbox", reference=ENTRY_ID, full=True,
-            part_offset=4, part_limit=4, result_offset=2, table_row_offset=1,
+            client,
+            "get_entry",
+            env="sandbox",
+            reference=ENTRY_ID,
+            full=True,
+            part_offset=4,
+            part_limit=4,
+            result_offset=2,
+            table_row_offset=1,
         )
     )["data"]
     assert [p["id"] for p in second["parts"]] == ["docpart_struct1", "docpart_text2"]
@@ -205,15 +238,34 @@ async def test_inspect_entry_summarizes_structure(client) -> None:
 
 
 async def test_get_section_by_title_or_part_id_with_paging(client, fake) -> None:
-    by_title = (await call(client, "get_section", env="sandbox", reference=ENTRY_ID,
-                           section="Results", part_limit=2))["data"]
+    by_title = (
+        await call(
+            client,
+            "get_section",
+            env="sandbox",
+            reference=ENTRY_ID,
+            section="Results",
+            part_limit=2,
+        )
+    )["data"]
     assert [p["id"] for p in by_title["parts"]] == ["docpart_sec2", TABLE_PART]
     assert by_title["pagination"]["parts"] == {
-        "offset": 0, "returned": 2, "total": 4, "next_offset": 2
+        "offset": 0,
+        "returned": 2,
+        "total": 4,
+        "next_offset": 2,
     }
     assert TABLE_PART in by_title["tables"]
-    by_id = (await call(client, "get_section", env="sandbox", reference=ENTRY_ID,
-                        section="docpart_sec2", part_offset=2))["data"]
+    by_id = (
+        await call(
+            client,
+            "get_section",
+            env="sandbox",
+            reference=ENTRY_ID,
+            section="docpart_sec2",
+            part_offset=2,
+        )
+    )["data"]
     assert [p["id"] for p in by_id["parts"]] == ["docpart_struct1", "docpart_text2"]
     assert by_id["tables"] == {}
     missing = await call(client, "get_section", env="sandbox", reference=ENTRY_ID, section="Nope")
@@ -222,21 +274,35 @@ async def test_get_section_by_title_or_part_id_with_paging(client, fake) -> None
 
 async def test_duplicate_section_titles_require_a_part_id(client, fake) -> None:
     fake.parts[0]["title"] = "Results"
-    payload = await call(client, "get_section", env="sandbox", reference=ENTRY_ID,
-                         section="Results")
+    payload = await call(
+        client, "get_section", env="sandbox", reference=ENTRY_ID, section="Results"
+    )
     assert payload["error"]["code"] == "validation_error"
     assert payload["error"]["details"]["part_ids"] == ["docpart_sec1", "docpart_sec2"]
 
 
 async def test_get_part_pages_table_detail_but_not_text(client) -> None:
-    table = (await call(client, "get_part", env="sandbox", reference=ENTRY_ID,
-                        part_id=TABLE_PART, row_offset=1, row_limit=1))["data"]
+    table = (
+        await call(
+            client,
+            "get_part",
+            env="sandbox",
+            reference=ENTRY_ID,
+            part_id=TABLE_PART,
+            row_offset=1,
+            row_limit=1,
+        )
+    )["data"]
     assert table["detail"]["pagination"] == {
-        "offset": 1, "returned": 1, "total": 3, "next_offset": 2
+        "offset": 1,
+        "returned": 1,
+        "total": 3,
+        "next_offset": 2,
     }
     assert table["detail"]["content"]["rows"][0]["cells"][0]["inputValue"]["value"] == "B"
-    text = (await call(client, "get_part", env="sandbox", reference=ENTRY_ID,
-                       part_id=TEXT_PART))["data"]
+    text = (await call(client, "get_part", env="sandbox", reference=ENTRY_ID, part_id=TEXT_PART))[
+        "data"
+    ]
     assert text["detail"] is None
     assert text["part"]["content"]["text"] == "before"
     missing = await call(client, "get_part", env="sandbox", reference=ENTRY_ID, part_id="docpart_x")
@@ -245,8 +311,11 @@ async def test_get_part_pages_table_detail_but_not_text(client) -> None:
 
 async def test_get_table_pages_rows_across_upstream_pages(client, fake) -> None:
     fake.table_page_size = 2
-    page = (await call(client, "get_table", env="sandbox", part_id=TABLE_PART,
-                       row_offset=2, row_limit=5))["data"]
+    page = (
+        await call(
+            client, "get_table", env="sandbox", part_id=TABLE_PART, row_offset=2, row_limit=5
+        )
+    )["data"]
     assert page["pagination"] == {"offset": 2, "returned": 1, "total": 3, "next_offset": None}
     assert page["versionId"] == "tver_1"
     missing = await call(client, "get_table", env="sandbox", part_id="docpart_unknown")
@@ -254,17 +323,31 @@ async def test_get_table_pages_rows_across_upstream_pages(client, fake) -> None:
 
 
 async def test_get_schema_pages_field_definitions(client) -> None:
-    first = (await call(client, "get_schema", env="sandbox", schema_id="entsch_abc123",
-                        field_limit=5))["data"]
+    first = (
+        await call(client, "get_schema", env="sandbox", schema_id="entsch_abc123", field_limit=5)
+    )["data"]
     assert [f["systemName"] for f in first["field_definitions"]] == [
-        "temperature", "notes", "ratio", "flag", "run_date"
+        "temperature",
+        "notes",
+        "ratio",
+        "flag",
+        "run_date",
     ]
     assert first["pagination"] == {"offset": 0, "returned": 5, "total": 12, "next_offset": 5}
-    last = (await call(client, "get_schema", env="sandbox", schema_id="entsch_abc123",
-                       field_offset=10, field_limit=5))["data"]
+    last = (
+        await call(
+            client,
+            "get_schema",
+            env="sandbox",
+            schema_id="entsch_abc123",
+            field_offset=10,
+            field_limit=5,
+        )
+    )["data"]
     assert last["pagination"]["next_offset"] is None and last["pagination"]["returned"] == 2
-    result_schema = (await call(client, "get_schema", env="sandbox",
-                                schema_id="assaysch_abc123"))["data"]
+    result_schema = (await call(client, "get_schema", env="sandbox", schema_id="assaysch_abc123"))[
+        "data"
+    ]
     assert result_schema["schema"]["id"] == "assaysch_abc123"
     missing = await call(client, "get_schema", env="sandbox", schema_id="entsch_none")
     assert missing["error"]["code"] == "not_found"
@@ -283,14 +366,19 @@ async def test_list_results_uses_explicit_cursor_pagination(client, fake) -> Non
     first = (await call(client, "list_results", env="sandbox", entry="EXP-1", page_size=2))["data"]
     assert [r["id"] for r in first["items"]] == ["result_1", "result_2"]
     assert first["next_token"] == "2"
-    second = (await call(client, "list_results", env="sandbox", entry=ENTRY_ID,
-                         cursor=first["next_token"]))["data"]
+    second = (
+        await call(
+            client, "list_results", env="sandbox", entry=ENTRY_ID, cursor=first["next_token"]
+        )
+    )["data"]
     assert [r["id"] for r in second["items"]] == ["result_3"]
     assert second["next_token"] is None
     sent = [c.params for c in fake.calls if c.path.endswith("/result/items")]
     assert sent[0] == {"pageSize": "2", "entry.eq": ENTRY_ID}
     assert sent[1]["nextToken"] == "2"
-    filtered = (await call(client, "list_results", env="sandbox", schema_id="assaysch_none"))["data"]
+    filtered = (await call(client, "list_results", env="sandbox", schema_id="assaysch_none"))[
+        "data"
+    ]
     assert filtered["items"] == []
 
 
@@ -308,14 +396,19 @@ async def test_list_result_tables_pages_targets(client, fake) -> None:
     assert data["items"][0]["schema_id"] == "assaysch_abc123"
     assert data["pagination"] == {"offset": 0, "returned": 1, "total": 1, "next_offset": None}
     assert data["id_namespace"] == "v2_structured_table"
-    past_end = (await call(client, "list_result_tables", env="sandbox", reference=ENTRY_ID,
-                           offset=1))["data"]
+    past_end = (
+        await call(client, "list_result_tables", env="sandbox", reference=ENTRY_ID, offset=1)
+    )["data"]
     assert past_end["items"] == [] and past_end["pagination"]["returned"] == 0
 
 
 async def test_upstream_errors_map_to_envelope_codes(client, fake) -> None:
-    for status, code in ((401, "authentication_error"), (403, "access_denied"),
-                         (404, "not_found"), (400, "validation_error")):
+    for status, code in (
+        (401, "authentication_error"),
+        (403, "access_denied"),
+        (404, "not_found"),
+        (400, "validation_error"),
+    ):
         fake.fail("GET", f"/entry/{ENTRY_ID}", status)
         payload = await call(client, "resolve_entry", env="sandbox", reference=ENTRY_ID)
         assert payload["error"]["code"] == code, status
@@ -331,8 +424,14 @@ async def test_unexpected_local_failures_do_not_leak_internals(client, fake) -> 
 
 
 async def test_plan_and_status_work_but_apply_is_blocked_by_default(client, fake) -> None:
-    planned = await call(client, "plan_changes", env="sandbox", entry=ENTRY_ID, family="document",
-                         specification={"operation": "delete", "from_part_id": TEXT_PART})
+    planned = await call(
+        client,
+        "plan_changes",
+        env="sandbox",
+        entry=ENTRY_ID,
+        family="document",
+        specification={"operation": "delete", "from_part_id": TEXT_PART},
+    )
     assert planned["ok"] is True
     plan_id = planned["data"]["id"]
     blocked = await call(client, "apply_changes", env="sandbox", plan_id=plan_id)
@@ -345,8 +444,14 @@ async def test_plan_and_status_work_but_apply_is_blocked_by_default(client, fake
 
 
 async def test_plan_validation_errors_are_enveloped(client, fake) -> None:
-    payload = await call(client, "plan_changes", env="sandbox", entry=ENTRY_ID,
-                         family="document", specification={"operation": "explode"})
+    payload = await call(
+        client,
+        "plan_changes",
+        env="sandbox",
+        entry=ENTRY_ID,
+        family="document",
+        specification={"operation": "explode"},
+    )
     assert payload["error"]["code"] == "validation_error"
     bad_family = await client.call_tool(
         "plan_changes",
@@ -356,9 +461,18 @@ async def test_plan_validation_errors_are_enveloped(client, fake) -> None:
 
 
 async def test_apply_changes_when_writes_are_enabled(writer, fake) -> None:
-    planned = await call(writer, "plan_changes", env="sandbox", entry=ENTRY_ID, family="table",
-                         specification={"operation": "append_rows",
-                                        "table_part_id": TABLE_PART, "rows": [["D", "4"]]})
+    planned = await call(
+        writer,
+        "plan_changes",
+        env="sandbox",
+        entry=ENTRY_ID,
+        family="table",
+        specification={
+            "operation": "append_rows",
+            "table_part_id": TABLE_PART,
+            "rows": [["D", "4"]],
+        },
+    )
     plan_id = planned["data"]["id"]
     applied = await call(writer, "apply_changes", env="sandbox", plan_id=plan_id)
     assert applied["ok"] is True
@@ -370,14 +484,26 @@ async def test_apply_changes_when_writes_are_enabled(writer, fake) -> None:
 
 
 async def test_apply_conflict_and_partial_completion_are_structured(writer, fake) -> None:
-    stale = await call(writer, "plan_changes", env="sandbox", entry=ENTRY_ID, family="document",
-                       specification={"operation": "delete", "from_part_id": TEXT_PART})
+    stale = await call(
+        writer,
+        "plan_changes",
+        env="sandbox",
+        entry=ENTRY_ID,
+        family="document",
+        specification={"operation": "delete", "from_part_id": TEXT_PART},
+    )
     fake.entry_version += 1
     conflict = await call(writer, "apply_changes", env="sandbox", plan_id=stale["data"]["id"])
     assert conflict["error"]["code"] == "conflict"
     assert conflict["error"]["details"] == {"expected": "ver_1", "actual": "ver_2"}
-    unknown = await call(writer, "plan_changes", env="sandbox", entry=ENTRY_ID, family="document",
-                         specification={"operation": "delete", "from_part_id": TEXT_PART})
+    unknown = await call(
+        writer,
+        "plan_changes",
+        env="sandbox",
+        entry=ENTRY_ID,
+        family="document",
+        specification={"operation": "delete", "from_part_id": TEXT_PART},
+    )
     fake.fail("PATCH", f"/entry/{ENTRY_ID}", 500)
     outcome = await call(writer, "apply_changes", env="sandbox", plan_id=unknown["data"]["id"])
     assert outcome["error"]["code"] == "partial_or_unknown_completion"
@@ -392,13 +518,19 @@ async def test_apply_is_guarded_per_environment(pool, fake, monkeypatch) -> None
     both = RuntimePool(runtimes={"sandbox": pool.get("sandbox"), "other": other})
     try:
         active = Session(build_mcp_server(both, writable_envs={"sandbox"}))
-        planned = await call(active, "plan_changes", env="other", entry=ENTRY_ID,
-                             family="document",
-                             specification={"operation": "delete", "from_part_id": TEXT_PART})
+        planned = await call(
+            active,
+            "plan_changes",
+            env="other",
+            entry=ENTRY_ID,
+            family="document",
+            specification={"operation": "delete", "from_part_id": TEXT_PART},
+        )
         blocked = await call(active, "apply_changes", env="other", plan_id=planned["data"]["id"])
         assert blocked["error"]["code"] == "unsupported_capability"
-        wrong_env = await call(active, "apply_changes", env="sandbox",
-                               plan_id=planned["data"]["id"])
+        wrong_env = await call(
+            active, "apply_changes", env="sandbox", plan_id=planned["data"]["id"]
+        )
         assert wrong_env["error"]["code"] == "validation_error"
         assert fake.writes() == []
     finally:

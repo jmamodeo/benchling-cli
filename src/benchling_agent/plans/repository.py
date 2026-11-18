@@ -74,9 +74,7 @@ class PlanRepository:
     def save_journal(self, journal: ChangeJournal) -> None:
         """Atomically write the journal, replacing any previous version."""
         self.config.ensure()
-        self._atomic_write(
-            self._journal_path(journal.plan_id), journal.model_dump_json(indent=2)
-        )
+        self._atomic_write(self._journal_path(journal.plan_id), journal.model_dump_json(indent=2))
 
     def _plan_path(self, plan_id: str) -> Path:
         self._validate_id(plan_id)

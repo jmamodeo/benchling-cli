@@ -23,6 +23,7 @@ from .base import PlannerBase, PlanParts
 
 class DocumentPlanning(PlannerBase):
     """Planning and applying of document-part changes."""
+
     async def _plan_document(self, entry_id: str, request: dict[str, Any]) -> PlanParts:
         snapshot = await self.service.get_entry(entry_id, full=True)
         operation = request.get("operation")
@@ -37,10 +38,11 @@ class DocumentPlanning(PlannerBase):
                 not isinstance(part, dict) or not isinstance(part.get("contentType"), str)
                 for part in new_parts
             ):
-                raise ValidationError(
-                    "Every inserted document part requires a contentType"
-                )
-            if position not in {"beginning_of_document", "end_of_document"} and position not in by_id:
+                raise ValidationError("Every inserted document part requires a contentType")
+            if (
+                position not in {"beginning_of_document", "end_of_document"}
+                and position not in by_id
+            ):
                 raise ValidationError("Insert position is not a document part")
             before = {"version_id": snapshot["version_id"], "position": position, "parts": []}
             after = {"version_id": "changes_on_apply", "position": position, "parts": new_parts}
@@ -55,7 +57,10 @@ class DocumentPlanning(PlannerBase):
             last = request.get("to_part_id", first)
             selected = self._part_range(parts, first, last)
             destination = request.get("position")
-            if destination not in {"beginning_of_document", "end_of_document"} and destination not in by_id:
+            if (
+                destination not in {"beginning_of_document", "end_of_document"}
+                and destination not in by_id
+            ):
                 raise ValidationError("Move destination is not a document part")
             if destination in {part.get("id") for part in selected}:
                 raise ValidationError("Move destination cannot be inside the source range")
@@ -66,7 +71,10 @@ class DocumentPlanning(PlannerBase):
             original = by_id.get(part_id)
             if not original:
                 raise ValidationError("Text replacement target was not found")
-            if part_type(original).split(".")[-1] not in {"TextDocumentContent", "DocumentPartText"}:
+            if part_type(original).split(".")[-1] not in {
+                "TextDocumentContent",
+                "DocumentPartText",
+            }:
                 raise UnsupportedError("replace_text only supports text document parts")
             if not isinstance(request.get("text"), str):
                 raise ValidationError("replace_text requires text")
@@ -94,7 +102,11 @@ class DocumentPlanning(PlannerBase):
                 "part_ids": [part.get("id") for part in parts if part.get("id")],
             },
             ["server-enforced document version check"],
-            (["Text replacement requires two versioned requests and can partially complete"] if operation == "replace_text" else []),
+            (
+                ["Text replacement requires two versioned requests and can partially complete"]
+                if operation == "replace_text"
+                else []
+            ),
         )
 
     async def _apply_document(self, plan: ChangePlan, journal: ChangeJournal) -> dict[str, Any]:
@@ -183,7 +195,9 @@ class DocumentPlanning(PlannerBase):
             "part_id_discovery": discovered,
         }
 
-    def _part_range(self, parts: list[dict[str, Any]], first: Any, last: Any) -> list[dict[str, Any]]:
+    def _part_range(
+        self, parts: list[dict[str, Any]], first: Any, last: Any
+    ) -> list[dict[str, Any]]:
         ids = [part.get("id") for part in parts]
         try:
             start, end = ids.index(first), ids.index(last)

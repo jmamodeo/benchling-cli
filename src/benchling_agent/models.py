@@ -38,20 +38,21 @@ class Envelope(BaseModel, Generic[T]):
         return cls(ok=True, data=data, meta=meta)
 
     @classmethod
-    def failure(
-        cls, error: BenchlingAgentError, **meta: Any
-    ) -> Envelope[dict[str, Any]]:
+    def failure(cls, error: BenchlingAgentError, **meta: Any) -> Envelope[dict[str, Any]]:
         """Build an ok=False envelope from an error; no data is included."""
-        return cast(Envelope[dict[str, Any]], cls(
-            ok=False,
-            error=ErrorDetail(
-                code=error.code,
-                message=error.message,
-                retryable=error.retryable,
-                details=error.details,
+        return cast(
+            Envelope[dict[str, Any]],
+            cls(
+                ok=False,
+                error=ErrorDetail(
+                    code=error.code,
+                    message=error.message,
+                    retryable=error.retryable,
+                    details=error.details,
+                ),
+                meta=meta,
             ),
-            meta=meta,
-        ))
+        )
 
 
 class AuthMethod(str, Enum):

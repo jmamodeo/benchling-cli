@@ -18,11 +18,7 @@ def comparable_table(table: dict[str, Any], row: int, column: int) -> dict[str, 
     content.pop("__typename", None)
     content.pop("isEvaluated", None)
     content["columnDefinitions"] = [
-        {
-            key: value
-            for key, value in item.items()
-            if key in {"name", "width", "isLocked"}
-        }
+        {key: value for key, value in item.items() if key in {"name", "width", "isLocked"}}
         for item in content.get("columnDefinitions") or []
     ]
     supported = {
@@ -49,9 +45,7 @@ async def run(args: argparse.Namespace) -> None:
         target = await runtime.service.get_table_for_entry(args.entry, args.table_part)
         table = target["table"]
         try:
-            _ = table["content"]["rows"][args.row]["cells"][args.column][
-                "inputValue"
-            ]["value"]
+            _ = table["content"]["rows"][args.row]["cells"][args.column]["inputValue"]["value"]
         except (KeyError, IndexError, TypeError) as exc:
             raise SystemExit("The selected cell is not an editable text-value cell") from exc
 
@@ -76,23 +70,15 @@ async def run(args: argparse.Namespace) -> None:
                 "the browser edit may not have saved."
             )
 
-        before = (await runtime.service.get_table_for_entry(args.entry, args.table_part))[
-            "table"
-        ]
-        original = before["content"]["rows"][args.row]["cells"][args.column][
-            "inputValue"
-        ]["value"]
+        before = (await runtime.service.get_table_for_entry(args.entry, args.table_part))["table"]
+        original = before["content"]["rows"][args.row]["cells"][args.column]["inputValue"]["value"]
         fresh = await runtime.planner.plan(args.entry, "table", specification)
         print(json.dumps({"fresh_plan_id": fresh.id, "diff": fresh.diff}, indent=2))
         if input("Type APPLY to commit this sandbox write: ").strip() != "APPLY":
             raise SystemExit("Fresh plan was not applied.")
         await runtime.planner.apply(fresh.id)
-        after = (await runtime.service.get_table_for_entry(args.entry, args.table_part))[
-            "table"
-        ]
-        actual = after["content"]["rows"][args.row]["cells"][args.column][
-            "inputValue"
-        ]["value"]
+        after = (await runtime.service.get_table_for_entry(args.entry, args.table_part))["table"]
+        actual = after["content"]["rows"][args.row]["cells"][args.column]["inputValue"]["value"]
         if actual != args.value:
             raise SystemExit(f"Target cell mismatch: expected {args.value!r}, got {actual!r}")
         if comparable_table(before, args.row, args.column) != comparable_table(
@@ -107,9 +93,7 @@ async def run(args: argparse.Namespace) -> None:
                 "table",
                 {
                     **specification,
-                    "updates": [
-                        {"row": args.row, "column": args.column, "value": original}
-                    ],
+                    "updates": [{"row": args.row, "column": args.column, "value": original}],
                 },
             )
             if input("Type RESTORE to restore the original cell value: ").strip() != "RESTORE":

@@ -64,7 +64,10 @@ class EnvironmentConfigStore(ConfigStore):
         if not ENV_NAME.match(name) or name not in configured_envs():
             raise ValidationError(
                 "Unknown environment; set BENCHLING_<ENV>_API_ENDPOINT, _CLIENT_ID, and _CLIENT_SECRET",
-                details={"env": name if ENV_NAME.match(name) else None, "available_envs": available_envs()},
+                details={
+                    "env": name if ENV_NAME.match(name) else None,
+                    "available_envs": available_envs(),
+                },
             )
         endpoint, client_id, secret = variables(name)
         missing = [key for key in (endpoint, client_id, secret) if not _value(key)]
@@ -96,6 +99,4 @@ class EnvironmentConfigStore(ConfigStore):
 
 def environment_secrets() -> dict[str, str]:
     """Take a process-local snapshot; never write secrets or tokens to disk."""
-    return {
-        env: secret for env in configured_envs() if (secret := _value(variables(env)[2]))
-    }
+    return {env: secret for env in configured_envs() if (secret := _value(variables(env)[2]))}

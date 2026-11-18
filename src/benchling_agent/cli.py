@@ -110,9 +110,7 @@ def _execute(env: str | None, call: Callable[[Runtime], Awaitable[Any]]) -> None
         _emit(Envelope.failure(exc))
         raise typer.Exit(int(exc.exit_code)) from None
     except Exception as exc:
-        error = UpstreamError(
-            "Unexpected local failure", details={"type": type(exc).__name__}
-        )
+        error = UpstreamError("Unexpected local failure", details={"type": type(exc).__name__})
         _emit(Envelope.failure(error))
         raise typer.Exit(int(ExitCode.UPSTREAM)) from None
 
@@ -299,7 +297,9 @@ def changes_status(ctx: typer.Context, plan_id: str) -> None:
 @mcp_app.command("serve")
 def mcp_serve(
     allow_writes: list[str] = typer.Option(
-        [], "--allow-writes", metavar="ENV",
+        [],
+        "--allow-writes",
+        metavar="ENV",
         help="Allow apply_changes in this environment; repeatable.",
     ),
 ) -> None:

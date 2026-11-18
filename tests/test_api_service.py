@@ -38,17 +38,38 @@ async def test_v2_entry_envelope_and_folder_project_relationship():
         if path == "/api/v3/entry/etr_one":
             return response_for(request, {"id": "etr_one"})
         if path == "/api/v2/entries/etr_one":
-            return response_for(request, {"entry": {"id": "etr_one", "folderId": "lib_one", "days": [{"notes": [
-                {"type": "results_table", "apiId": "strtbl_one", "name": "API table", "assayResultSchemaId": "assaysch_one"},
-                {"type": "lookup_table", "apiId": "strtbl_other"},
-            ]}]}})
+            return response_for(
+                request,
+                {
+                    "entry": {
+                        "id": "etr_one",
+                        "folderId": "lib_one",
+                        "days": [
+                            {
+                                "notes": [
+                                    {
+                                        "type": "results_table",
+                                        "apiId": "strtbl_one",
+                                        "name": "API table",
+                                        "assayResultSchemaId": "assaysch_one",
+                                    },
+                                    {"type": "lookup_table", "apiId": "strtbl_other"},
+                                ]
+                            }
+                        ],
+                    }
+                },
+            )
         if path == "/api/v2/folders/lib_one":
             return response_for(request, {"folder": {"id": "lib_one", "projectId": "src_one"}})
         if path == "/api/v2/projects/src_one":
             return response_for(request, {"project": {"id": "src_one", "name": "Sandbox"}})
         if path == "/api/v2/tasks/task_one":
-            return response_for(request, {"status": "SUCCEEDED", "response": {"assayResults": ["result-uuid"]}})
+            return response_for(
+                request, {"status": "SUCCEEDED", "response": {"assayResults": ["result-uuid"]}}
+            )
         raise AssertionError(path)
+
     api = make_api(handler)
     service = BenchlingService(api)
     tables = await service.list_result_tables("etr_one")
@@ -59,6 +80,7 @@ async def test_v2_entry_envelope_and_folder_project_relationship():
     assert (await service.get_task("task_one"))["status"] == "SUCCEEDED"
     await api.close()
 
+
 from conftest import make_api
 
 
@@ -67,8 +89,7 @@ def response_for(request: httpx.Request, payload: dict, status: int = 200) -> ht
 
 
 @pytest.mark.asyncio
-async def test_full_entry_paginates_parts_and_preserves_unknown_types(
-) -> None:
+async def test_full_entry_paginates_parts_and_preserves_unknown_types() -> None:
     calls: Counter[str] = Counter()
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -202,8 +223,7 @@ def test_section_boundaries_follow_flat_part_order() -> None:
 
 
 @pytest.mark.asyncio
-async def test_entry_fields_are_addressable_by_v3_system_name(
-) -> None:
+async def test_entry_fields_are_addressable_by_v3_system_name() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
         if path == "/api/v3/entry/etr_one":
@@ -327,9 +347,7 @@ async def test_inaccessible_table_is_reported_as_partial() -> None:
                     "items": [
                         {
                             "id": "docpart_table",
-                            "content": {
-                                "__typename": "UnstructuredTableDocumentContentSummary"
-                            },
+                            "content": {"__typename": "UnstructuredTableDocumentContentSummary"},
                         }
                     ],
                     "nextToken": "",

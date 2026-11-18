@@ -95,4 +95,3 @@ class PartialCompletionError(BenchlingAgentError):
 
     code = "partial_or_unknown_completion"
     exit_code = ExitCode.PARTIAL_OR_UNKNOWN
-

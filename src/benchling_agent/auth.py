@@ -43,7 +43,9 @@ class AuthManager:
 
     def status(self, environment: Environment) -> dict[str, Any]:
         """Describe credential state without network calls or exposing secrets."""
-        bundle = self._app_tokens.get((environment.name, environment.base_url, environment.client_id))
+        bundle = self._app_tokens.get(
+            (environment.name, environment.base_url, environment.client_id)
+        )
         return {
             "env": environment.name,
             "method": environment.auth_method.value,
@@ -65,11 +67,14 @@ class AuthManager:
             secret = self.secrets.get(environment.name)
             if not secret or not environment.client_id:
                 raise AuthenticationError("App client credentials are missing")
-            payload = self._token_request(environment, {
-                "grant_type": "client_credentials",
-                "client_id": environment.client_id,
-                "client_secret": secret,
-            })
+            payload = self._token_request(
+                environment,
+                {
+                    "grant_type": "client_credentials",
+                    "client_id": environment.client_id,
+                    "client_secret": secret,
+                },
+            )
             bundle = self._bundle(payload)
             if bundle.token_type.lower() != "bearer":
                 raise UpstreamError("Benchling returned an unsupported token type")

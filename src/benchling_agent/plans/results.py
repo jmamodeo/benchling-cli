@@ -22,6 +22,7 @@ from .fields import FieldNormalization
 
 class ResultsPlanning(FieldNormalization):
     """Planning and submission of new result records."""
+
     async def _plan_results(self, entry_id: str, request: dict[str, Any]) -> PlanParts:
         table_id = request.get("table_id")
         records = request.get("assay_results")
@@ -30,7 +31,9 @@ class ResultsPlanning(FieldNormalization):
         if not isinstance(records, list) or not records:
             raise ValidationError("Result plan requires non-empty assay_results")
         if len(records) > 500:
-            raise ValidationError("Benchling accepts at most 500 results in a notebook table upload")
+            raise ValidationError(
+                "Benchling accepts at most 500 results in a notebook table upload"
+            )
         table = await self.service.get_result_table(entry_id, table_id)
         schema_id = table.get("schema_id")
         if not isinstance(schema_id, str):
@@ -44,7 +47,11 @@ class ResultsPlanning(FieldNormalization):
         client_record_ids: list[str] = []
         projects: dict[str, dict[str, Any]] = {}
         for record in planned:
-            if not isinstance(record, dict) or not record.get("schemaId") or not isinstance(record.get("fields"), dict):
+            if (
+                not isinstance(record, dict)
+                or not record.get("schemaId")
+                or not isinstance(record.get("fields"), dict)
+            ):
                 raise ValidationError("Each result requires schemaId and fields")
             if record["schemaId"] != schema_id:
                 raise ValidationError(
@@ -100,9 +107,7 @@ class ResultsPlanning(FieldNormalization):
                 "entry_id": entry_id,
                 "table_id": table_id,
                 "result_schema_id": schema_id,
-                "result_schema_fields": self._field_definition_fingerprints(
-                    definitions
-                ),
+                "result_schema_fields": self._field_definition_fingerprints(definitions),
             },
             [
                 "verified entry-to-table and table-to-schema relationships",
@@ -114,10 +119,10 @@ class ResultsPlanning(FieldNormalization):
 
     async def _apply_results(self, plan: ChangePlan, journal: ChangeJournal) -> dict[str, Any]:
         if any("id" in record for record in plan.after["records"]):
-            raise ConflictError("This result plan uses an unsupported bulk-table contract; create a new preview")
-        table = await self.service.get_result_table(
-            plan.entry_id, plan.preconditions["table_id"]
-        )
+            raise ConflictError(
+                "This result plan uses an unsupported bulk-table contract; create a new preview"
+            )
+        table = await self.service.get_result_table(plan.entry_id, plan.preconditions["table_id"])
         self._expect(
             table.get("schema_id"),
             plan.preconditions["result_schema_id"],
@@ -125,9 +130,7 @@ class ResultsPlanning(FieldNormalization):
         )
         schema = await self.service.get_schema(plan.preconditions["result_schema_id"])
         self._expect(
-            self._field_definition_fingerprints(
-                schema.get("field_definitions") or []
-            ),
+            self._field_definition_fingerprints(schema.get("field_definitions") or []),
             plan.preconditions.get("result_schema_fields"),
             "result schema fields",
         )

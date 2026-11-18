@@ -65,7 +65,9 @@ class BenchlingAPI:
             raise ValidationError("API path must start with '/'")
         base = f"{self.environment.base_url}/api/v{version}"
         headers = {"Accept": "application/json", **self.auth.headers(self.environment)}
-        if version == 3 and (self.environment.early_access if early_access is None else early_access):
+        if version == 3 and (
+            self.environment.early_access if early_access is None else early_access
+        ):
             headers["EARLY-ACCESS"] = "true"
         attempts = self.max_read_attempts if method == "GET" else 1
         response: httpx.Response | None = None
@@ -180,13 +182,9 @@ class BenchlingAPI:
         if response.status_code == 404:
             raise NotFoundError("Benchling resource was not found", details=details)
         if response.status_code == 409:
-            raise ConflictError(
-                "The Benchling resource changed since it was read", details=details
-            )
+            raise ConflictError("The Benchling resource changed since it was read", details=details)
         if response.status_code == 429:
-            raise UpstreamError(
-                "Benchling rate limit exceeded", details=details, retryable=True
-            )
+            raise UpstreamError("Benchling rate limit exceeded", details=details, retryable=True)
         if response.status_code >= 500 and method != "GET":
             raise PartialCompletionError(
                 "Benchling returned a server error after receiving a write request; completion is unknown",

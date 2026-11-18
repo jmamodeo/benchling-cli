@@ -78,13 +78,20 @@ def is_section(part: dict[str, Any]) -> bool:
 
 def is_unstructured_table(part: dict[str, Any]) -> bool:
     """True for free-form (unstructured) table parts."""
-    return "UnstructuredTableDocumentContent" in part_type(part) or part_type(part) == "DocumentPartUnstructuredTable"
+    return (
+        "UnstructuredTableDocumentContent" in part_type(part)
+        or part_type(part) == "DocumentPartUnstructuredTable"
+    )
 
 
 def is_structured_table(part: dict[str, Any]) -> bool:
     """True for any structured table part (results, registration, inventory); excludes unstructured."""
     kind = part_type(part)
-    return ("StructuredTableDocumentContent" in kind or kind.startswith("DocumentPart") and "StructuredTable" in kind) and "Unstructured" not in kind
+    return (
+        "StructuredTableDocumentContent" in kind
+        or kind.startswith("DocumentPart")
+        and "StructuredTable" in kind
+    ) and "Unstructured" not in kind
 
 
 def field_definition_type(definition: dict[str, Any]) -> str:
@@ -294,9 +301,7 @@ class BenchlingService:
             "version_id": snapshot["version_id"],
             "section": target,
             "parts": [part for part in snapshot["parts"] if part.get("id") in ids],
-            "tables": {
-                key: value for key, value in snapshot["tables"].items() if key in ids
-            },
+            "tables": {key: value for key, value in snapshot["tables"].items() if key in ids},
         }
 
     async def get_part(self, reference: str, part_id: str) -> dict[str, Any]:
@@ -344,9 +349,7 @@ class BenchlingService:
         detail["pagination"] = {"rows": len(rows), "complete": True}
         return detail
 
-    async def get_table_for_entry(
-        self, reference: str, part_id: str
-    ) -> dict[str, Any]:
+    async def get_table_for_entry(self, reference: str, part_id: str) -> dict[str, Any]:
         """Resolve and verify that an unstructured table part belongs to one entry."""
         resolved = await self.resolve_entry(reference)
         matches = [
@@ -374,10 +377,7 @@ class BenchlingService:
                 details={"part_id": part_id, "type": part_type(part)},
             )
         table = await self.get_table(part_id)
-        part_version = (
-            part.get("versionId")
-            or (part.get("versionMetadata") or {}).get("versionId")
-        )
+        part_version = part.get("versionId") or (part.get("versionMetadata") or {}).get("versionId")
         table_version = table.get("versionId")
         if part_version and table_version and part_version != table_version:
             raise ConflictError(
@@ -408,7 +408,9 @@ class BenchlingService:
     async def get_entry_fields(self, reference: str) -> dict[str, Any]:
         """Return an entry's custom fields keyed by raw and system name, with schema, project and result tables."""
         resolved = await self.resolve_entry(reference)
-        entry = self._v2_object(await self.api.request("GET", f"/entries/{resolved['entry_id']}", version=2), "entry")
+        entry = self._v2_object(
+            await self.api.request("GET", f"/entries/{resolved['entry_id']}", version=2), "entry"
+        )
         schema_ref = entry.get("schema")
         schema_detail: dict[str, Any] | None = None
         definitions: list[dict[str, Any]] = []
@@ -444,7 +446,9 @@ class BenchlingService:
     def _v2_object(self, payload: dict[str, Any], key: str) -> dict[str, Any]:
         obj = payload.get(key, payload)
         if not isinstance(obj, dict) or not obj.get("id"):
-            raise UpstreamError("V2 response did not contain the expected object", details={"object": key})
+            raise UpstreamError(
+                "V2 response did not contain the expected object", details={"object": key}
+            )
         return obj
 
     async def _entry_project_id(self, entry: dict[str, Any]) -> str | None:
@@ -452,7 +456,9 @@ class BenchlingService:
         if project.get("id"):
             return str(project["id"])
         if entry.get("folderId"):
-            folder = self._v2_object(await self.api.request("GET", f"/folders/{entry['folderId']}", version=2), "folder")
+            folder = self._v2_object(
+                await self.api.request("GET", f"/folders/{entry['folderId']}", version=2), "folder"
+            )
             return folder.get("projectId")
         return None
 
@@ -469,19 +475,23 @@ class BenchlingService:
                 if table_id in seen:
                     raise UpstreamError("Benchling returned a duplicate result-table identifier")
                 seen.add(table_id)
-                tables.append({
-                    "entry_id": entry["id"],
-                    "table_id": table_id,
-                    "name": note.get("name"),
-                    "schema_id": note.get("assayResultSchemaId"),
-                    "columns": note.get("columns") or [],
-                })
+                tables.append(
+                    {
+                        "entry_id": entry["id"],
+                        "table_id": table_id,
+                        "name": note.get("name"),
+                        "schema_id": note.get("assayResultSchemaId"),
+                        "columns": note.get("columns") or [],
+                    }
+                )
         return tables
 
     async def list_result_tables(self, reference: str) -> dict[str, Any]:
         """List the V2 Results tables embedded in an entry, with its project ID."""
         resolved = await self.resolve_entry(reference)
-        entry = self._v2_object(await self.api.request("GET", f"/entries/{resolved['entry_id']}", version=2), "entry")
+        entry = self._v2_object(
+            await self.api.request("GET", f"/entries/{resolved['entry_id']}", version=2), "entry"
+        )
         return {
             "resolved": resolved,
             "project_id": await self._entry_project_id(entry),
@@ -492,7 +502,9 @@ class BenchlingService:
 
     async def get_result_table(self, entry_id: str, table_id: str) -> dict[str, Any]:
         """Find an explicit V2 Results table within one entry."""
-        entry = self._v2_object(await self.api.request("GET", f"/entries/{entry_id}", version=2), "entry")
+        entry = self._v2_object(
+            await self.api.request("GET", f"/entries/{entry_id}", version=2), "entry"
+        )
         matches: list[dict[str, Any]] = []
         for day in entry.get("days") or []:
             for note in day.get("notes") or []:
@@ -519,7 +531,9 @@ class BenchlingService:
 
     async def get_project(self, project_id: str) -> dict[str, Any]:
         """Fetch a V2 project; raises UpstreamError if the response lacks an object ID."""
-        return self._v2_object(await self.api.request("GET", f"/projects/{project_id}", version=2), "project")
+        return self._v2_object(
+            await self.api.request("GET", f"/projects/{project_id}", version=2), "project"
+        )
 
     async def get_task(self, task_id: str) -> dict[str, Any]:
         """Fetch a V2 task; raises UpstreamError if the response has no string status."""
@@ -572,12 +586,14 @@ class BenchlingService:
                 await self.api.request("GET", path, version=version, params=params)
                 checks.append({"name": name, "ok": True})
             except Exception as exc:
-                checks.append({
-                    "name": name,
-                    "ok": False,
-                    "error": getattr(exc, "message", str(exc)),
-                    "code": getattr(exc, "code", type(exc).__name__),
-                })
+                checks.append(
+                    {
+                        "name": name,
+                        "ok": False,
+                        "error": getattr(exc, "message", str(exc)),
+                        "code": getattr(exc, "code", type(exc).__name__),
+                    }
+                )
         by_name = {check["name"]: check["ok"] for check in checks}
         v3_ok = by_name.get("v3_entries", False)
         v2_ok = by_name.get("v2_entries", False)
@@ -598,9 +614,7 @@ class BenchlingService:
             "ok": all(check["ok"] for check in checks),
         }
 
-    async def _assemble_snapshot(
-        self, entry: dict[str, Any], version: str
-    ) -> EntrySnapshot:
+    async def _assemble_snapshot(self, entry: dict[str, Any], version: str) -> EntrySnapshot:
         entry_id = str(entry["id"])
         parts = [
             item

@@ -63,9 +63,7 @@ async def test_unknown_plan_id_is_rejected(runtime) -> None:
         await runtime.planner.apply("a" * 32)
 
 
-async def test_plan_cannot_be_used_from_another_environment(
-    runtime, fake, monkeypatch
-) -> None:
+async def test_plan_cannot_be_used_from_another_environment(runtime, fake, monkeypatch) -> None:
     monkeypatch.setenv("BENCHLING_OTHER_API_ENDPOINT", "https://other-tenant.benchling.com")
     monkeypatch.setenv("BENCHLING_OTHER_CLIENT_ID", "client")
     monkeypatch.setenv("BENCHLING_OTHER_CLIENT_SECRET", "secret")

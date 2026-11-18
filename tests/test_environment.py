@@ -37,7 +37,14 @@ def clean_env(monkeypatch):
 
 
 def configure(monkeypatch, env="dev", host="tenant", secret="sensitive-test-secret"):
-    for key, value in zip(variables(env), (f"https://{host}.benchling.com/", f"{env}-client" if env != "dev" else "test-client", secret)):
+    for key, value in zip(
+        variables(env),
+        (
+            f"https://{host}.benchling.com/",
+            f"{env}-client" if env != "dev" else "test-client",
+            secret,
+        ),
+    ):
         monkeypatch.setenv(key, value)
 
 
@@ -75,7 +82,10 @@ def test_multiple_environments_discovered_with_separate_secrets(tmp_path, monkey
     assert store.resolve("test").base_url == "https://other.benchling.com"
     with pytest.raises(AuthenticationError) as partial:
         store.resolve("prod")
-    assert partial.value.details["missing_variables"] == ["BENCHLING_PROD_CLIENT_ID", "BENCHLING_PROD_CLIENT_SECRET"]
+    assert partial.value.details["missing_variables"] == [
+        "BENCHLING_PROD_CLIENT_ID",
+        "BENCHLING_PROD_CLIENT_SECRET",
+    ]
     assert environment_secrets() == {"dev": "sensitive-test-secret", "test": "other-secret"}
 
 
@@ -94,7 +104,14 @@ def test_partial_environment_reports_names_not_values(tmp_path, monkeypatch):
     assert "sensitive-test-secret" not in str(caught.value.details)
 
 
-@pytest.mark.parametrize("url", ["http://tenant.benchling.com", "https://user:secret@tenant.benchling.com", "https://tenant.benchling.com/path"])
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://tenant.benchling.com",
+        "https://user:secret@tenant.benchling.com",
+        "https://tenant.benchling.com/path",
+    ],
+)
 def test_invalid_endpoint_redacted(tmp_path, monkeypatch, url):
     configure(monkeypatch)
     monkeypatch.setenv(VARIABLES[0], url)
@@ -118,11 +135,18 @@ def test_app_tokens_cached_renewed_and_not_persisted(tmp_path, monkeypatch):
             "client_id": ["test-client"],
             "client_secret": ["sensitive-test-secret"],
         }
-        return httpx.Response(200, json={"access_token": f"token-{count}", "token_type": "bearer", "expires_in": 900})
+        return httpx.Response(
+            200, json={"access_token": f"token-{count}", "token_type": "bearer", "expires_in": 900}
+        )
 
-    auth = AuthManager(environment_secrets(), http=httpx.Client(transport=httpx.MockTransport(handler)))
+    auth = AuthManager(
+        environment_secrets(), http=httpx.Client(transport=httpx.MockTransport(handler))
+    )
     with ThreadPoolExecutor(max_workers=2) as pool:
-        assert list(pool.map(lambda _: auth.headers(environment), range(2))) == [{"Authorization": "Bearer token-1"}] * 2
+        assert (
+            list(pool.map(lambda _: auth.headers(environment), range(2)))
+            == [{"Authorization": "Bearer token-1"}] * 2
+        )
     assert count == 1
     bundle = auth._app_tokens[(environment.name, environment.base_url, environment.client_id)]
     bundle.expires_at = datetime.now(UTC) - timedelta(seconds=1)
@@ -133,9 +157,14 @@ def test_app_tokens_cached_renewed_and_not_persisted(tmp_path, monkeypatch):
 def test_token_error_cannot_echo_secret(tmp_path, monkeypatch):
     configure(monkeypatch)
     config = EnvironmentConfigStore(tmp_path)
-    auth = AuthManager(environment_secrets(), http=httpx.Client(transport=httpx.MockTransport(
-        lambda _: httpx.Response(401, json={"error": "sensitive-test-secret"})
-    )))
+    auth = AuthManager(
+        environment_secrets(),
+        http=httpx.Client(
+            transport=httpx.MockTransport(
+                lambda _: httpx.Response(401, json={"error": "sensitive-test-secret"})
+            )
+        ),
+    )
     with pytest.raises(AuthenticationError) as caught:
         auth.headers(config.resolve("dev"))
     assert caught.value.details == {"status": 401}
@@ -180,12 +209,22 @@ def test_mcp_missing_environment_uses_stderr(monkeypatch):
 async def test_mcp_uses_environment_app_identity(tmp_path, monkeypatch):
     configure(monkeypatch)
     monkeypatch.setenv("BENCHLING_AGENT_HOME", str(tmp_path / "unused"))
-    auth_http = httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(200, json={"access_token": "access", "expires_in": 900})))
+    auth_http = httpx.Client(
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(200, json={"access_token": "access", "expires_in": 900})
+        )
+    )
+
     def read_handler(request):
         assert request.headers["Authorization"] == "Bearer access"
         key = "items" if request.url.path.startswith("/api/v3/") else "entries"
         return httpx.Response(200, json={key: [], "nextToken": ""})
-    runtime = Runtime("dev", auth_http=auth_http, async_http=httpx.AsyncClient(transport=httpx.MockTransport(read_handler)))
+
+    runtime = Runtime(
+        "dev",
+        auth_http=auth_http,
+        async_http=httpx.AsyncClient(transport=httpx.MockTransport(read_handler)),
+    )
     pool = RuntimePool(runtimes={"dev": runtime})
     try:
         async with Client(build_mcp_server(pool)) as client:
@@ -216,9 +255,11 @@ async def test_mcp_routes_each_call_to_its_env(tmp_path, monkeypatch):
 
     auth_http = httpx.Client(transport=httpx.MockTransport(token_handler))
     async_http = httpx.AsyncClient(transport=httpx.MockTransport(read_handler))
-    pool = RuntimePool(runtimes={
-        env: Runtime(env, auth_http=auth_http, async_http=async_http) for env in ("dev", "test")
-    })
+    pool = RuntimePool(
+        runtimes={
+            env: Runtime(env, auth_http=auth_http, async_http=async_http) for env in ("dev", "test")
+        }
+    )
     try:
         async with Client(build_mcp_server(pool, writable_envs={"dev"})) as client:
             listed = await client.call_tool("list_environments", {})
@@ -234,7 +275,10 @@ async def test_mcp_routes_each_call_to_its_env(tmp_path, monkeypatch):
             blocked = await client.call_tool("apply_changes", {"env": "test", "plan_id": "a" * 32})
             assert blocked.structured_content["error"]["code"] == "unsupported_capability"
             unknown = await client.call_tool("get_capabilities", {"env": "prod"})
-            assert unknown.structured_content["error"]["details"]["available_envs"] == ["dev", "test"]
+            assert unknown.structured_content["error"]["details"]["available_envs"] == [
+                "dev",
+                "test",
+            ]
     finally:
         await pool.close()
         auth_http.close()

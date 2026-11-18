@@ -32,8 +32,12 @@ def mutations(fake):
         {"operation": "delete", "from_part_id": TEXT_PART, "to_part_id": "docpart_nope"},
         {"operation": "delete", "from_part_id": "docpart_text2", "to_part_id": TEXT_PART},
         {"operation": "move", "from_part_id": TEXT_PART, "position": "docpart_nope"},
-        {"operation": "move", "from_part_id": "docpart_sec1", "to_part_id": "docpart_sec2",
-         "position": TEXT_PART},
+        {
+            "operation": "move",
+            "from_part_id": "docpart_sec1",
+            "to_part_id": "docpart_sec2",
+            "position": TEXT_PART,
+        },
         {"operation": "replace_text", "part_id": "docpart_nope", "text": "x"},
         {"operation": "replace_text", "part_id": TEXT_PART},
         {"operation": "replace_text", "part_id": TEXT_PART, "text": 7},
@@ -129,9 +133,7 @@ async def test_discovery_survives_unexpected_local_errors(runtime, fake) -> None
     assert discovery["error"] == {"code": "local_discovery_error", "type": "RuntimeError"}
 
 
-async def test_delete_range_removes_inclusive_parts_and_reports_their_ids(
-    runtime, fake
-) -> None:
+async def test_delete_range_removes_inclusive_parts_and_reports_their_ids(runtime, fake) -> None:
     planned = await plan(
         runtime, {"operation": "delete", "from_part_id": "docpart_sec2", "to_part_id": TABLE_PART}
     )
@@ -169,24 +171,32 @@ async def test_move_range_to_destination(runtime, fake) -> None:
     assert planned.after["position"] == "beginning_of_document"
     await runtime.planner.apply(planned.id)
     assert fake.part_ids() == [
-        "docpart_sec2", TABLE_PART, "docpart_struct1", "docpart_sec1", TEXT_PART, "docpart_text2",
+        "docpart_sec2",
+        TABLE_PART,
+        "docpart_struct1",
+        "docpart_sec1",
+        TEXT_PART,
+        "docpart_text2",
     ]
     mutation = mutations(fake)[0]
     assert mutation["operationType"] == "move"
     assert mutation["destinationCoordinates"] == {"position": "beginning_of_document"}
 
 
-async def test_replace_text_preserves_existing_formatting_unless_overridden(
-    runtime, fake
-) -> None:
+async def test_replace_text_preserves_existing_formatting_unless_overridden(runtime, fake) -> None:
     kept = await plan(runtime, {"operation": "replace_text", "part_id": TEXT_PART, "text": "new"})
     assert kept.after["part"]["formats"] == [{"type": "bold", "start": 0, "end": 3}]
     assert kept.after["part"]["contentType"] == "text"
     assert kept.warnings and "partially complete" in kept.warnings[0]
     overridden = await plan(
         runtime,
-        {"operation": "replace_text", "part_id": TEXT_PART, "text": "new", "formats": [],
-         "indentation": 2},
+        {
+            "operation": "replace_text",
+            "part_id": TEXT_PART,
+            "text": "new",
+            "formats": [],
+            "indentation": 2,
+        },
     )
     assert overridden.after["part"]["formats"] == []
     assert overridden.after["part"]["indentation"] == 2
@@ -305,5 +315,3 @@ async def test_server_rejects_stale_version_mid_apply(runtime, fake) -> None:
         await runtime.planner.apply(planned.id)
     assert TEXT_PART in fake.part_ids()
     assert (await runtime.planner.status(planned.id))["journal"]["status"] == "failed"
-
-

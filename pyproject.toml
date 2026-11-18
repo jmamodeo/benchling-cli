@@ -85,10 +85,13 @@ asyncio_default_fixture_loop_scope = "function"
 line-length = 100
 target-version = "py311"
 
+[tool.ruff.format]
+quote-style = "double"
+
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 ignore = [
-  "E501",  # long lines are tolerated; formatter is not enforced
+  "E501",  # the formatter wraps code; long strings and comments are tolerated
   "B008",  # typer uses call expressions in argument defaults
   "B905",  # zip() strictness would change behavior
   "UP042", # str-mixin enums are part of the public API

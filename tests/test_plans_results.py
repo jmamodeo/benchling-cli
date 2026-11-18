@@ -43,7 +43,9 @@ async def plan(runtime, records, table_id=TABLE):
         (TABLE, [record(fields={"ct": {"value": "high"}})], "wrong type"),
     ],
 )
-async def test_invalid_result_plans_are_rejected(runtime, fake, table_id, records, expected) -> None:
+async def test_invalid_result_plans_are_rejected(
+    runtime, fake, table_id, records, expected
+) -> None:
     with pytest.raises(ValidationError, match=expected):
         await runtime.planner.plan(
             ENTRY_ID, "results", {"table_id": table_id, "assay_results": records}
@@ -85,9 +87,7 @@ async def test_plan_resolves_project_and_warns_when_unscoped(runtime) -> None:
 
 
 async def test_apply_posts_normalized_records_once(runtime, fake) -> None:
-    planned = await plan(
-        runtime, [record(fields={"assayfield_ct": {"value": 7}}), record()]
-    )
+    planned = await plan(runtime, [record(fields={"assayfield_ct": {"value": 7}}), record()])
     applied = await runtime.planner.apply(planned.id)
     (payload,) = fake.bulk_payloads
     assert payload["tableId"] == TABLE
@@ -144,9 +144,7 @@ async def test_status_maps_remote_task_state(runtime, fake, remote, state) -> No
     assert status["journal"]["result"]["state"] == state
 
 
-async def test_status_surfaces_task_lookup_errors_without_losing_the_journal(
-    runtime, fake
-) -> None:
+async def test_status_surfaces_task_lookup_errors_without_losing_the_journal(runtime, fake) -> None:
     planned = await plan(runtime, [record()])
     await runtime.planner.apply(planned.id)
     fake.fail("GET", "/tasks/", 403)
