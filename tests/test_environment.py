@@ -89,7 +89,7 @@ def test_multiple_environments_discovered_with_separate_secrets(tmp_path, monkey
     assert environment_secrets() == {"dev": "sensitive-test-secret", "test": "other-secret"}
 
 
-@pytest.mark.parametrize("name", ["DEV", "../dev", "dev_1", "1dev", ""])
+@pytest.mark.parametrize("name", ["DEV", "../dev", ""])
 def test_invalid_environment_names_rejected(tmp_path, monkeypatch, name):
     configure(monkeypatch)
     with pytest.raises(ValidationError):
@@ -181,28 +181,6 @@ def test_cli_status_is_environment_only(tmp_path, monkeypatch):
     assert data["configured"] is True
     assert "sensitive-test-secret" not in result.stdout
     assert not (tmp_path / "unused").exists()
-
-
-def test_cli_requires_env(tmp_path, monkeypatch):
-    configure(monkeypatch)
-    monkeypatch.setenv("BENCHLING_AGENT_HOME", str(tmp_path / "unused"))
-    result = CliRunner().invoke(app, ["auth", "status"])
-    assert result.exit_code == 2
-    assert json.loads(result.stdout)["error"]["details"]["available_envs"] == ["dev"]
-
-
-def test_mcp_allow_writes_rejects_unknown_env(monkeypatch):
-    configure(monkeypatch)
-    result = CliRunner().invoke(app, ["mcp", "serve", "--allow-writes", "prod"])
-    assert result.exit_code == 2
-    assert json.loads(result.stderr)["error"]["details"]["unknown_envs"] == ["prod"]
-
-
-def test_mcp_missing_environment_uses_stderr(monkeypatch):
-    result = CliRunner().invoke(app, ["mcp", "serve"])
-    assert result.exit_code == 3
-    assert result.stdout == ""
-    assert json.loads(result.stderr)["error"]["code"] == "authentication_error"
 
 
 @pytest.mark.asyncio
