@@ -76,6 +76,19 @@ def build_mcp_server(
         ),
     )
 
+    _register_environment_tools(mcp, pool, writable_envs)
+    _register_entry_tools(mcp, pool)
+    _register_result_tools(mcp, pool)
+    _register_change_tools(mcp, pool, writable_envs)
+    return mcp
+
+
+_Safe = Callable[[str, Callable[[Runtime], Coroutine[Any, Any, Any]]], Coroutine[Any, Any, Envelope[Any]]]
+
+
+def _make_safe(pool: RuntimePool) -> _Safe:
+    """Build the runner that turns every tool failure into a failure envelope."""
+
     def meta(active: Runtime | None) -> dict[str, Any]:
         """Envelope metadata identifying the env and tenant, empty if no runtime resolved."""
         if active is None:
@@ -97,6 +110,15 @@ def build_mcp_server(
             )
             return Envelope.failure(error, **meta(active))
 
+    return safe
+
+
+def _register_environment_tools(
+    mcp: MCPServer, pool: RuntimePool, writable_envs: set[str] | frozenset[str]
+) -> None:
+    """Register the environment and capability tools."""
+    safe = _make_safe(pool)
+
     @mcp.tool(annotations=_annotations(True))
     async def list_environments() -> Envelope[Any]:
         """List configured environments, their tenants, and whether writes are allowed."""
@@ -116,6 +138,10 @@ def build_mcp_server(
     async def get_capabilities(env: str) -> Envelope[Any]:
         """Check authentication, API availability, and supported edit types."""
         return await safe(env, lambda rt: rt.service.doctor())
+
+def _register_entry_tools(mcp: MCPServer, pool: RuntimePool) -> None:
+    """Register the entry, section, part and table read tools."""
+    safe = _make_safe(pool)
 
     @mcp.tool(annotations=_annotations(True))
     async def resolve_entry(env: str, reference: str) -> Envelope[Any]:
@@ -265,6 +291,10 @@ def build_mcp_server(
 
         return await safe(env, call)
 
+def _register_result_tools(mcp: MCPServer, pool: RuntimePool) -> None:
+    """Register the schema and result read tools."""
+    safe = _make_safe(pool)
+
     @mcp.tool(annotations=_annotations(True))
     async def get_schema(
         env: str, schema_id: str, field_offset: int = 0, field_limit: int = 250
@@ -341,6 +371,12 @@ def build_mcp_server(
 
         return await safe(env, call)
 
+def _register_change_tools(
+    mcp: MCPServer, pool: RuntimePool, writable_envs: set[str] | frozenset[str]
+) -> None:
+    """Register the plan, apply and status tools."""
+    safe = _make_safe(pool)
+
     @mcp.tool(annotations=_annotations(False))
     async def plan_changes(
         env: str, entry: str, family: PlanFamily, specification: dict[str, Any]
@@ -366,8 +402,6 @@ def build_mcp_server(
     async def get_change_status(env: str, plan_id: str) -> Envelope[Any]:
         """Read an immutable plan and its local execution journal."""
         return await safe(env, lambda rt: rt.planner.status(plan_id))
-
-    return mcp
 
 
 def run_mcp_server(*, writable_envs: set[str] | frozenset[str] = frozenset()) -> None:
