@@ -47,7 +47,7 @@ class EnvironmentConfigStore(ConfigStore):
     """Resolve environments from BENCHLING_<ENV>_* variables.
 
     The inherited directories hold write plans and journals, not credentials.
-    Profiles saved by previous versions are never read.
+    Files saved by previous versions are never read.
     """
 
     def resolve(self, name: str | None) -> Environment:
