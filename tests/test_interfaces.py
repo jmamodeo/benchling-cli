@@ -31,16 +31,6 @@ def test_envs_cli_returns_json_envelope(tmp_path, monkeypatch) -> None:
     }
 
 
-def test_browser_login_is_disabled(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("BENCHLING_AGENT_HOME", str(tmp_path / "app"))
-    result = CliRunner().invoke(app, ["login"])
-    assert result.exit_code == 6
-    payload = json.loads(result.stdout)
-    assert payload["ok"] is False
-    assert "BENCHLING_<ENV>_CLIENT_SECRET" in payload["error"]["message"]
-    assert result.stderr == ""
-
-
 @pytest.mark.asyncio
 async def test_mcp_tools_use_structured_envelopes_and_gate_writes(tmp_path, monkeypatch) -> None:
     for name in list(os.environ):

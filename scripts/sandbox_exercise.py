@@ -43,7 +43,7 @@ def comparable_table(table: dict[str, Any], row: int, column: int) -> dict[str, 
 
 
 async def run(args: argparse.Namespace) -> None:
-    runtime = Runtime(args.profile)
+    runtime = Runtime(args.env)
     try:
         target = await runtime.service.get_table_for_entry(args.entry, args.table_part)
         table = target["table"]
@@ -123,7 +123,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Exercise stale-plan rejection and a targeted write in a sandbox entry."
     )
-    parser.add_argument("--profile", required=True)
+    parser.add_argument("--env", required=True)
     parser.add_argument("--entry", required=True)
     parser.add_argument("--table-part", required=True)
     parser.add_argument("--row", type=int, required=True)

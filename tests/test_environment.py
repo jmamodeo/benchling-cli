@@ -58,9 +58,9 @@ def test_environment_layout_and_no_legacy_fallback(tmp_path, monkeypatch):
     with pytest.raises(ValidationError) as missing:
         env.resolve(None)
     assert missing.value.details["available_envs"] == ["dev"]
-    profile = env.resolve("dev")
-    assert profile.base_url == "https://tenant.benchling.com"
-    assert profile.auth_method == AuthMethod.CLIENT_CREDENTIALS
+    environment = env.resolve("dev")
+    assert environment.base_url == "https://tenant.benchling.com"
+    assert environment.auth_method == AuthMethod.CLIENT_CREDENTIALS
     assert "sensitive-test-secret" not in json.dumps(env.metadata())
     with pytest.raises(ValidationError):
         env.resolve("sandbox")
@@ -106,7 +106,7 @@ def test_invalid_endpoint_redacted(tmp_path, monkeypatch, url):
 def test_app_tokens_cached_renewed_and_not_persisted(tmp_path, monkeypatch):
     configure(monkeypatch)
     config = EnvironmentConfigStore(tmp_path / "unused")
-    profile = config.resolve("dev")
+    environment = config.resolve("dev")
     count = 0
 
     def handler(request):
@@ -122,11 +122,11 @@ def test_app_tokens_cached_renewed_and_not_persisted(tmp_path, monkeypatch):
 
     auth = AuthManager(environment_secrets(), http=httpx.Client(transport=httpx.MockTransport(handler)))
     with ThreadPoolExecutor(max_workers=2) as pool:
-        assert list(pool.map(lambda _: auth.headers(profile), range(2))) == [{"Authorization": "Bearer token-1"}] * 2
+        assert list(pool.map(lambda _: auth.headers(environment), range(2))) == [{"Authorization": "Bearer token-1"}] * 2
     assert count == 1
-    bundle = auth._app_tokens[(profile.name, profile.base_url, profile.client_id)]
+    bundle = auth._app_tokens[(environment.name, environment.base_url, environment.client_id)]
     bundle.expires_at = datetime.now(UTC) - timedelta(seconds=1)
-    assert auth.headers(profile) == {"Authorization": "Bearer token-2"}
+    assert auth.headers(environment) == {"Authorization": "Bearer token-2"}
     assert not config.root.exists()
 
 
@@ -160,8 +160,6 @@ def test_cli_requires_env(tmp_path, monkeypatch):
     result = CliRunner().invoke(app, ["auth", "status"])
     assert result.exit_code == 2
     assert json.loads(result.stdout)["error"]["details"]["available_envs"] == ["dev"]
-    legacy_alias = CliRunner().invoke(app, ["-p", "dev", "auth", "status"])
-    assert legacy_alias.exit_code == 0
 
 
 def test_mcp_allow_writes_rejects_unknown_env(monkeypatch):
@@ -231,7 +229,7 @@ async def test_mcp_routes_each_call_to_its_env(tmp_path, monkeypatch):
             for env, host in (("test", "other.benchling.com"), ("dev", "tenant.benchling.com")):
                 hosts.clear()
                 result = await client.call_tool("get_capabilities", {"env": env})
-                assert result.structured_content["meta"]["profile"] == env
+                assert result.structured_content["meta"]["env"] == env
                 assert hosts and set(hosts) == {host}
             blocked = await client.call_tool("apply_changes", {"env": "test", "plan_id": "a" * 32})
             assert blocked.structured_content["error"]["code"] == "unsupported_capability"

@@ -132,8 +132,8 @@ class BenchlingService:
         self.api = api
 
     @property
-    def profile_name(self) -> str:
-        return self.api.profile.name
+    def env(self) -> str:
+        return self.api.environment.name
 
     async def resolve_entry(self, reference: str) -> dict[str, Any]:
         reference = reference.strip()
@@ -142,10 +142,10 @@ class BenchlingService:
             parsed_id = reference
         elif reference.startswith("https://"):
             parsed = urlparse(reference)
-            if parsed.netloc != urlparse(self.api.profile.base_url).netloc:
+            if parsed.netloc != urlparse(self.api.environment.base_url).netloc:
                 raise ValidationError(
                     "Entry URL belongs to a different tenant",
-                    details={"profile_tenant": self.api.profile.base_url, "url": reference},
+                    details={"environment_tenant": self.api.environment.base_url, "url": reference},
                 )
             match = ENTRY_ID_IN_URL.search(parsed.path)
             parsed_id = match.group(1) if match else None
@@ -542,10 +542,10 @@ class BenchlingService:
         v3_ok = by_name.get("v3_entries", False)
         v2_ok = by_name.get("v2_entries", False)
         return {
-            "profile": self.api.profile.name,
-            "tenant_url": self.api.profile.base_url,
-            "auth_method": self.api.profile.auth_method.value,
-            "early_access_header": self.api.profile.early_access,
+            "env": self.api.environment.name,
+            "tenant_url": self.api.environment.base_url,
+            "auth_method": self.api.environment.auth_method.value,
+            "early_access_header": self.api.environment.early_access,
             "checks": checks,
             "capabilities": {
                 "document_parts": v3_ok,

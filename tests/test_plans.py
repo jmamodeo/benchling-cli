@@ -6,13 +6,13 @@ import pytest
 
 from benchling_agent.config import ConfigStore
 from benchling_agent.errors import ConflictError, PartialCompletionError, ValidationError
-from benchling_agent.models import AuthMethod, PlanFamily, Profile
+from benchling_agent.models import AuthMethod, Environment, PlanFamily
 from benchling_agent.plans import ChangePlanner, PlanRepository
 
 
 class FakeAPI:
     def __init__(self) -> None:
-        self.profile = Profile(
+        self.environment = Environment(
             name="sandbox",
             tenant_url="https://tenant.benchling.com",
             auth_method=AuthMethod.CLIENT_CREDENTIALS,

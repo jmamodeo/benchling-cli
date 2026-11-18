@@ -51,7 +51,7 @@ class AuthMethod(str, Enum):
     CLIENT_CREDENTIALS = "client_credentials"
 
 
-class Profile(BaseModel):
+class Environment(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
@@ -141,7 +141,7 @@ class ChangePlan(BaseModel):
     schema_version: Literal["1.0"] = "1.0"
     id: str
     created_at: datetime
-    profile: str
+    env: str
     tenant_url: str
     entry_id: str
     family: PlanFamily

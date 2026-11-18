@@ -14,7 +14,7 @@ from .services import BenchlingService
 class Runtime:
     def __init__(
         self,
-        profile_name: str | None,
+        env: str | None,
         *,
         config: EnvironmentConfigStore | None = None,
         secrets: Mapping[str, str] | None = None,
@@ -23,9 +23,9 @@ class Runtime:
     ) -> None:
         self.config = config or EnvironmentConfigStore()
         self.secrets = secrets if secrets is not None else environment_secrets()
-        self.profile = self.config.resolve(profile_name)
+        self.environment = self.config.resolve(env)
         self.auth = AuthManager(self.secrets, http=auth_http)
-        self.api = BenchlingAPI(self.profile, self.auth, http=async_http)
+        self.api = BenchlingAPI(self.environment, self.auth, http=async_http)
         self.service = BenchlingService(self.api)
         self.repository = PlanRepository(self.config)
         self.planner = ChangePlanner(self.service, self.api, self.repository)
@@ -56,7 +56,7 @@ class RuntimePool:
         runtime = self._runtimes.get(env)
         if runtime is None:
             runtime = Runtime(env, config=self.config, secrets=self.secrets)
-            self._runtimes[runtime.profile.name] = runtime
+            self._runtimes[runtime.environment.name] = runtime
         return runtime
 
     async def close(self) -> None:

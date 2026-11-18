@@ -8,7 +8,7 @@ from pydantic import ValidationError as ModelValidationError
 
 from .config import ConfigStore
 from .errors import AuthenticationError, ValidationError
-from .models import AuthMethod, Profile
+from .models import AuthMethod, Environment
 
 SUFFIXES = ("API_ENDPOINT", "CLIENT_ID", "CLIENT_SECRET")
 ENV_NAME = re.compile(r"^[a-z][a-z0-9]{0,31}$")
@@ -47,7 +47,7 @@ class EnvironmentConfigStore(ConfigStore):
     Profiles saved by previous versions are never read.
     """
 
-    def resolve(self, name: str | None) -> Profile:
+    def resolve(self, name: str | None) -> Environment:
         if not name:
             raise ValidationError(
                 "An environment is required; pass --env NAME",
@@ -66,7 +66,7 @@ class EnvironmentConfigStore(ConfigStore):
                 details={"env": name, "missing_variables": missing},
             )
         try:
-            return Profile.model_validate(
+            return Environment.model_validate(
                 {
                     "name": name,
                     "tenant_url": _value(endpoint),

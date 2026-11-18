@@ -17,7 +17,7 @@ from .errors import (
     UpstreamError,
     ValidationError,
 )
-from .models import Profile
+from .models import Environment
 from .tls import verified_context
 
 
@@ -26,13 +26,13 @@ class BenchlingAPI:
 
     def __init__(
         self,
-        profile: Profile,
+        environment: Environment,
         auth: AuthManager,
         *,
         http: httpx.AsyncClient | None = None,
         max_read_attempts: int = 3,
     ) -> None:
-        self.profile = profile
+        self.environment = environment
         self.auth = auth
         self.http = http or httpx.AsyncClient(timeout=30.0, verify=verified_context())
         self._owns_http = http is None
@@ -55,9 +55,9 @@ class BenchlingAPI:
         method = method.upper()
         if not path.startswith("/"):
             raise ValidationError("API path must start with '/'")
-        base = f"{self.profile.base_url}/api/v{version}"
-        headers = {"Accept": "application/json", **self.auth.headers(self.profile)}
-        if version == 3 and (self.profile.early_access if early_access is None else early_access):
+        base = f"{self.environment.base_url}/api/v{version}"
+        headers = {"Accept": "application/json", **self.auth.headers(self.environment)}
+        if version == 3 and (self.environment.early_access if early_access is None else early_access):
             headers["EARLY-ACCESS"] = "true"
         attempts = self.max_read_attempts if method == "GET" else 1
         response: httpx.Response | None = None

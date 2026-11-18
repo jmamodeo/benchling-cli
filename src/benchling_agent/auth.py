@@ -8,7 +8,7 @@ from typing import Any
 import httpx
 
 from .errors import AuthenticationError, UpstreamError
-from .models import Profile, TokenBundle
+from .models import Environment, TokenBundle
 from .tls import verified_context
 
 
@@ -31,35 +31,35 @@ class AuthManager:
         if self._owns_http:
             self.http.close()
 
-    def headers(self, profile: Profile) -> dict[str, str]:
-        return self._app_headers(profile)
+    def headers(self, environment: Environment) -> dict[str, str]:
+        return self._app_headers(environment)
 
-    def status(self, profile: Profile) -> dict[str, Any]:
-        bundle = self._app_tokens.get((profile.name, profile.base_url, profile.client_id))
+    def status(self, environment: Environment) -> dict[str, Any]:
+        bundle = self._app_tokens.get((environment.name, environment.base_url, environment.client_id))
         return {
-            "profile": profile.name,
-            "method": profile.auth_method.value,
-            "configured": bool(profile.client_id and self.secrets.get(profile.name)),
+            "env": environment.name,
+            "method": environment.auth_method.value,
+            "configured": bool(environment.client_id and self.secrets.get(environment.name)),
             "access_token_usable": bundle.usable() if bundle else False,
-            "tenant_url": profile.base_url,
+            "tenant_url": environment.base_url,
             "credential_source": "environment",
             "identity": "app",
         }
 
-    def _app_headers(self, profile: Profile) -> dict[str, str]:
+    def _app_headers(self, environment: Environment) -> dict[str, str]:
         # Client credentials issue no refresh token. A long-lived MCP process
         # requests a new access token on expiry; each CLI has its own cache.
         with self._app_lock:
-            cache_key = (profile.name, profile.base_url, profile.client_id)
+            cache_key = (environment.name, environment.base_url, environment.client_id)
             bundle = self._app_tokens.get(cache_key)
             if bundle and bundle.usable():
                 return {"Authorization": f"Bearer {bundle.access_token}"}
-            secret = self.secrets.get(profile.name)
-            if not secret or not profile.client_id:
+            secret = self.secrets.get(environment.name)
+            if not secret or not environment.client_id:
                 raise AuthenticationError("App client credentials are missing")
-            payload = self._token_request(profile, {
+            payload = self._token_request(environment, {
                 "grant_type": "client_credentials",
-                "client_id": profile.client_id,
+                "client_id": environment.client_id,
                 "client_secret": secret,
             })
             bundle = self._bundle(payload)
@@ -68,17 +68,17 @@ class AuthManager:
             self._app_tokens[cache_key] = bundle
             return {"Authorization": f"Bearer {bundle.access_token}"}
 
-    def _token_request(self, profile: Profile, data: dict[str, str]) -> dict[str, Any]:
+    def _token_request(self, environment: Environment, data: dict[str, str]) -> dict[str, Any]:
         try:
             response = self.http.post(
-                f"{profile.base_url}/oauth/token",
+                f"{environment.base_url}/oauth/token",
                 data=data,
                 headers={"Accept": "application/json"},
             )
         except httpx.HTTPError as exc:
             raise UpstreamError(
                 "Could not reach the Benchling token endpoint",
-                details={"profile": profile.name, "reason": str(exc)},
+                details={"env": environment.name, "reason": str(exc)},
                 retryable=True,
             ) from exc
         if response.status_code >= 400:

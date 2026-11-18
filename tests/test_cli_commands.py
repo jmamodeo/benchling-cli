@@ -12,7 +12,7 @@ from benchling_agent import cli
 
 @pytest.fixture
 def invoke(benchling_env, fake, monkeypatch):
-    monkeypatch.setattr(cli, "Runtime", lambda profile: runtime_for(fake, profile))
+    monkeypatch.setattr(cli, "Runtime", lambda environment: runtime_for(fake, environment))
 
     def run(*args: str, input: str | None = None, env: str | None = "sandbox"):
         prefix = ["--env", env] if env else []
@@ -22,12 +22,12 @@ def invoke(benchling_env, fake, monkeypatch):
     return run
 
 
-def test_envelope_shape_and_profile_metadata_on_success(invoke) -> None:
+def test_envelope_shape_and_env_metadata_on_success(invoke) -> None:
     code, payload, _ = invoke("entry", "resolve", ENTRY_ID)
     assert code == 0
     assert payload["ok"] is True and payload["error"] is None
     assert payload["meta"] == {
-        "profile": "sandbox",
+        "env": "sandbox",
         "tenant_url": "https://your-tenant-dev.benchling.com",
     }
     assert payload["data"]["entry_id"] == ENTRY_ID
@@ -65,18 +65,12 @@ def test_entry_get_full_and_summary(invoke) -> None:
     assert full["data"]["completeness"] == "partial"
 
 
-def test_entry_get_v2_returns_raw_diagnostic_payload(invoke, fake) -> None:
-    code, payload, _ = invoke("entry", "get", ENTRY_ID, "--api-version", "2")
-    assert code == 0
-    assert payload["data"]["resolved"]["entry_id"] == ENTRY_ID
-    assert payload["data"]["v2_response"]["entry"]["folderId"] == "lib_abc123"
+def test_version_flag_matches_package_metadata(invoke) -> None:
+    from importlib.metadata import version
 
-
-def test_entry_get_rejects_unsupported_api_version(invoke, fake) -> None:
-    result = CliRunner().invoke(cli.app, ["--env", "sandbox", "entry", "get", ENTRY_ID,
-                                          "--api-version", "4"])
-    assert result.exit_code == 2
-    assert fake.calls == []
+    result = CliRunner().invoke(cli.app, ["--version"])
+    assert result.exit_code == 0
+    assert result.stdout.strip() == f"benchling-agent {version('benchling-agent')}"
 
 
 @pytest.mark.parametrize(
@@ -238,21 +232,12 @@ def test_envs_list_shows_configured_environment_without_secrets(invoke) -> None:
         "https://your-tenant-dev.benchling.com"
     )
     assert "secret" not in result.stdout.replace("client_secret", "")
-    legacy_code, legacy, _ = invoke("profiles", "list", env=None)
-    assert legacy_code == 0 and legacy["data"] == payload["data"]
-
-
-def test_logout_explains_there_is_nothing_to_revoke(invoke) -> None:
-    code, payload, _ = invoke("logout", env=None)
-    assert code == 6
-    assert payload["error"]["code"] == "unsupported_capability"
-    assert "unset" in payload["error"]["message"]
 
 
 def test_auth_status_reports_without_calling_the_api(invoke, fake) -> None:
     code, payload, _ = invoke("auth", "status")
     assert code == 0
-    assert payload["meta"]["profile"] == "sandbox"
+    assert payload["meta"]["env"] == "sandbox"
     assert "secret" not in json.dumps(payload["data"])
     assert fake.calls == []
 

@@ -96,7 +96,7 @@ async def test_list_environments_reports_write_permission(pool, benchling_env, m
 async def test_capabilities_reports_each_api_check(client, fake) -> None:
     payload = await call(client, "get_capabilities", env="sandbox")
     assert payload["ok"] is True
-    assert payload["meta"]["profile"] == "sandbox"
+    assert payload["meta"]["env"] == "sandbox"
     assert payload["data"]["capabilities"]["entry_fields"] is True
     fake.fail("GET", "/entry/items", 403)
     degraded = (await call(client, "get_capabilities", env="sandbox"))["data"]
@@ -186,7 +186,7 @@ async def test_invalid_pagination_arguments_return_validation_envelopes(
     payload = await call(client, tool, env="sandbox", **arguments)
     assert payload["ok"] is False
     assert payload["error"]["code"] == "validation_error"
-    assert payload["meta"]["profile"] == "sandbox"
+    assert payload["meta"]["env"] == "sandbox"
     assert fake.writes() == []
 
 

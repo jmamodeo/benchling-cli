@@ -80,7 +80,7 @@ def build_mcp_server(
     def meta(active: Runtime | None) -> dict[str, Any]:
         if active is None:
             return {}
-        return {"profile": active.profile.name, "tenant_url": active.profile.base_url}
+        return {"env": active.environment.name, "tenant_url": active.environment.base_url}
 
     async def safe(
         env: str, call: Callable[[Runtime], Coroutine[Any, Any, Any]]
@@ -340,10 +340,10 @@ def build_mcp_server(
     async def apply_changes(env: str, plan_id: str) -> Envelope[Any]:
         """Explicitly apply a previously previewed plan when writes are enabled for env."""
         async def call(rt: Runtime) -> dict[str, Any]:
-            if rt.profile.name not in writable_envs:
+            if rt.environment.name not in writable_envs:
                 raise UnsupportedError(
-                    f"MCP writes are disabled for {rt.profile.name}; restart with "
-                    f"`benchling mcp serve --allow-writes {rt.profile.name}`"
+                    f"MCP writes are disabled for {rt.environment.name}; restart with "
+                    f"`benchling mcp serve --allow-writes {rt.environment.name}`"
                 )
             return await rt.planner.apply(plan_id)
 

@@ -62,8 +62,8 @@ class ChangePlanner(DocumentPlanning, TablePlanning, FieldsPlanning, ResultsPlan
             "schema_version": "1.0",
             "id": uuid.uuid4().hex,
             "created_at": datetime.now(UTC).isoformat(),
-            "profile": self.api.profile.name,
-            "tenant_url": self.api.profile.base_url,
+            "env": self.api.environment.name,
+            "tenant_url": self.api.environment.base_url,
             "entry_id": entry_id,
             "family": family.value,
             "request": request,
@@ -103,10 +103,10 @@ class ChangePlanner(DocumentPlanning, TablePlanning, FieldsPlanning, ResultsPlan
 
     async def _apply_locked(self, plan_id: str) -> dict[str, Any]:
         plan = self.repository.load_plan(plan_id)
-        if plan.profile != self.api.profile.name or plan.tenant_url != self.api.profile.base_url:
+        if plan.env != self.api.environment.name or plan.tenant_url != self.api.environment.base_url:
             raise ValidationError(
-                "Plan belongs to a different profile or tenant",
-                details={"plan_profile": plan.profile, "active_profile": self.api.profile.name},
+                "Plan belongs to a different environment or tenant",
+                details={"plan_env": plan.env, "active_env": self.api.environment.name},
             )
         journal = self.repository.load_journal(plan_id)
         if journal.status != PlanStatus.PENDING:
@@ -191,10 +191,10 @@ class ChangePlanner(DocumentPlanning, TablePlanning, FieldsPlanning, ResultsPlan
 
     async def status(self, plan_id: str) -> dict[str, Any]:
         plan = self.repository.load_plan(plan_id)
-        if plan.profile != self.api.profile.name or plan.tenant_url != self.api.profile.base_url:
+        if plan.env != self.api.environment.name or plan.tenant_url != self.api.environment.base_url:
             raise ValidationError(
-                "Plan belongs to a different profile or tenant",
-                details={"plan_profile": plan.profile, "active_profile": self.api.profile.name},
+                "Plan belongs to a different environment or tenant",
+                details={"plan_env": plan.env, "active_env": self.api.environment.name},
             )
         journal = self.repository.load_journal(plan_id)
         status: dict[str, Any] = {
