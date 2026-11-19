@@ -64,9 +64,9 @@ async def test_unknown_plan_id_is_rejected(runtime) -> None:
 
 
 async def test_plan_cannot_be_used_from_another_environment(runtime, fake, monkeypatch) -> None:
-    monkeypatch.setenv("BENCHLING_OTHER_API_ENDPOINT", "https://other-tenant.benchling.com")
-    monkeypatch.setenv("BENCHLING_OTHER_CLIENT_ID", "client")
-    monkeypatch.setenv("BENCHLING_OTHER_CLIENT_SECRET", "secret")
+    from conftest import configure_env
+
+    configure_env("other", "https://other-tenant.benchling.com", secret="other-secret-value")
     other = runtime_for(fake, "other")
     try:
         planned = await delete_plan(runtime)

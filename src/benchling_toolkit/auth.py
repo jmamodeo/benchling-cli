@@ -11,6 +11,7 @@ import httpx
 
 from .errors import AuthenticationError, UpstreamError
 from .models import Environment, TokenBundle
+from .redact import redact_text, register_secret
 from .tls import verified_context
 
 
@@ -23,7 +24,9 @@ class AuthManager:
         *,
         http: httpx.Client | None = None,
     ) -> None:
-        self.secrets = secrets
+        self.secrets = dict(secrets)
+        for secret in self.secrets.values():
+            register_secret(secret)
         self.http = http or httpx.Client(timeout=30.0, verify=verified_context())
         self._owns_http = http is None
         self._app_tokens: dict[tuple[str, str, str | None], TokenBundle] = {}
@@ -46,14 +49,17 @@ class AuthManager:
         bundle = self._app_tokens.get(
             (environment.name, environment.base_url, environment.client_id)
         )
+        secret_present = bool(self.secrets.get(environment.name))
         return {
             "env": environment.name,
             "method": environment.auth_method.value,
-            "configured": bool(environment.client_id and self.secrets.get(environment.name)),
-            "access_token_usable": bundle.usable() if bundle else False,
+            "configured": bool(environment.client_id and secret_present),
+            "secret_present": secret_present,
             "tenant_url": environment.base_url,
-            "credential_source": "environment",
+            "client_id": environment.client_id,
+            "credential_source": "keyring",
             "identity": "app",
+            "access_token_cached": bundle.usable() if bundle else False,
         }
 
     def _app_headers(self, environment: Environment) -> dict[str, str]:
@@ -91,7 +97,7 @@ class AuthManager:
         except httpx.HTTPError as exc:
             raise UpstreamError(
                 "Could not reach the Benchling token endpoint",
-                details={"env": environment.name, "reason": str(exc)},
+                details={"env": environment.name, "reason": redact_text(str(exc))},
                 retryable=True,
             ) from exc
         if response.status_code >= 400:
@@ -111,9 +117,11 @@ class AuthManager:
                 "Benchling returned an incomplete token response",
                 details={"keys": sorted(payload)},
             )
+        access_token = str(payload["access_token"])
+        register_secret(access_token)
         now = datetime.now(UTC)
         return TokenBundle(
-            access_token=payload["access_token"],
+            access_token=access_token,
             token_type=payload.get("token_type", "Bearer"),
             expires_at=now + timedelta(seconds=int(payload["expires_in"])),
         )

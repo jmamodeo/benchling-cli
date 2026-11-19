@@ -313,7 +313,7 @@ def test_envs_list_shows_configured_environment_without_secrets(invoke) -> None:
     assert payload["data"]["environments"]["sandbox"]["tenant_url"].startswith(
         "https://your-tenant-dev.benchling.com"
     )
-    assert "secret" not in result.stdout.replace("client_secret", "")
+    assert "sandbox-client-secret" not in result.stdout
 
 
 def test_envs_list_is_an_empty_envelope_when_nothing_is_configured(monkeypatch) -> None:
@@ -332,29 +332,38 @@ def test_envs_list_is_an_empty_envelope_when_nothing_is_configured(monkeypatch) 
 
 
 def test_mcp_serve_reports_startup_errors_as_json_on_stderr(invoke, monkeypatch) -> None:
+    from benchling_toolkit.keychain import Keychain
+
     unknown = CliRunner().invoke(cli.app, ["mcp", "serve", "--allow-writes", "prod"])
     assert unknown.exit_code == 2
     assert json.loads(unknown.stderr)["error"]["details"]["unknown_envs"] == ["prod"]
 
-    monkeypatch.delenv("BENCHLING_SANDBOX_CLIENT_SECRET")
+    Keychain().delete("sandbox")
     missing = CliRunner().invoke(cli.app, ["mcp", "serve"])
     assert missing.exit_code == 3
     assert missing.stdout == ""
     assert json.loads(missing.stderr)["error"]["code"] == "authentication_error"
+    assert "sandbox-client-secret" not in missing.stderr
 
 
 def test_auth_status_reports_without_calling_the_api(invoke, fake) -> None:
-    code, payload, _ = invoke("auth", "status")
+    code, payload, result = invoke("auth", "status")
     assert code == 0
     assert payload["meta"]["env"] == "sandbox"
-    assert "secret" not in json.dumps(payload["data"])
+    row = payload["data"]["environments"]["sandbox"]
+    assert row["secret_present"] is True
+    assert row["credential_source"] == "keyring"
+    assert "sandbox-client-secret" not in result.stdout
     assert fake.calls == []
 
 
-def test_invalid_endpoint_variable_fails_validation_without_echoing_value(
-    invoke, monkeypatch
-) -> None:
-    monkeypatch.setenv("BENCHLING_SANDBOX_API_ENDPOINT", "http://insecure.example/")
+def test_invalid_saved_endpoint_fails_validation_without_echoing_value(invoke) -> None:
+    from benchling_toolkit.environment import EnvironmentConfigStore
+
+    path = EnvironmentConfigStore().environments_path
+    saved = json.loads(path.read_text())
+    saved["environments"]["sandbox"]["tenant_url"] = "http://insecure.example/"
+    path.write_text(json.dumps(saved))
     code, payload, result = invoke("auth", "status")
     assert code == 2
     assert "insecure.example" not in result.stdout

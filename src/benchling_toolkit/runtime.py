@@ -8,7 +8,8 @@ import httpx
 
 from .api import BenchlingAPI
 from .auth import AuthManager
-from .environment import EnvironmentConfigStore, environment_secrets
+from .environment import EnvironmentConfigStore
+from .keychain import Keychain
 from .plans import ChangePlanner, PlanRepository
 from .services import BenchlingService
 
@@ -26,8 +27,8 @@ class Runtime:
         auth_http: httpx.Client | None = None,
     ) -> None:
         self.config = config or EnvironmentConfigStore()
-        self.secrets = secrets if secrets is not None else environment_secrets()
         self.environment = self.config.resolve(env)
+        self.secrets = secrets if secrets is not None else load_secrets(self.environment.name)
         self.auth = AuthManager(self.secrets, http=auth_http)
         self.api = BenchlingAPI(self.environment, self.auth, http=async_http)
         self.service = BenchlingService(self.api)
@@ -51,11 +52,11 @@ class RuntimePool:
         runtimes: dict[str, Runtime] | None = None,
     ) -> None:
         self.config = config or EnvironmentConfigStore()
-        self.secrets = secrets if secrets is not None else environment_secrets()
+        self.secrets = secrets
         self._runtimes: dict[str, Runtime] = dict(runtimes or {})
 
     def available(self) -> list[str]:
-        """Sorted names of cached runtimes plus environments configured in the process env."""
+        """Sorted names of cached runtimes plus environments saved in environments.json."""
         return sorted(set(self._runtimes) | set(self.config.metadata()))
 
     def get(self, env: str) -> Runtime:
@@ -71,3 +72,11 @@ class RuntimePool:
         runtimes, self._runtimes = list(self._runtimes.values()), {}
         for runtime in runtimes:
             await runtime.close()
+
+
+def load_secrets(name: str, keychain: Keychain | None = None) -> dict[str, str]:
+    """Read one environment's client secret from the OS keychain."""
+    secret = (keychain or Keychain()).get(name)
+    if secret is None:
+        return {}
+    return {name: secret}

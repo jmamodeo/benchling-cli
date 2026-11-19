@@ -96,16 +96,17 @@ async def test_unknown_env_returns_structured_error_with_choices(client, fake) -
 
 
 async def test_list_environments_reports_write_permission(pool, benchling_env, monkeypatch) -> None:
-    monkeypatch.setenv("BENCHLING_OTHER_API_ENDPOINT", "https://other-tenant.benchling.com")
-    monkeypatch.setenv("BENCHLING_OTHER_CLIENT_ID", "client")
-    monkeypatch.setenv("BENCHLING_OTHER_CLIENT_SECRET", "secret")
+    from conftest import configure_env
+
+    configure_env("other", "https://other-tenant.benchling.com", secret="other-secret-value")
     active = Session(build_mcp_server(pool, writable_envs={"other"}))
     data = (await call(active, "list_environments"))["data"]["environments"]
     assert {name: item["writes_allowed"] for name, item in data.items()} == {
         "other": True,
         "sandbox": False,
     }
-    assert "secret" not in json.dumps(data)
+    assert "other-secret-value" not in json.dumps(data)
+    assert "sandbox-client-secret" not in json.dumps(data)
 
 
 async def test_capabilities_reports_each_api_check(client, fake) -> None:
@@ -515,9 +516,9 @@ async def test_apply_conflict_and_partial_completion_are_structured(writer, fake
 
 
 async def test_apply_is_guarded_per_environment(pool, fake, monkeypatch) -> None:
-    monkeypatch.setenv("BENCHLING_OTHER_API_ENDPOINT", "https://other-tenant.benchling.com")
-    monkeypatch.setenv("BENCHLING_OTHER_CLIENT_ID", "client")
-    monkeypatch.setenv("BENCHLING_OTHER_CLIENT_SECRET", "secret")
+    from conftest import configure_env
+
+    configure_env("other", "https://other-tenant.benchling.com", secret="other-secret-value")
     other = runtime_for(fake, "other")
     both = RuntimePool(runtimes={"sandbox": pool.get("sandbox"), "other": other})
     try:
@@ -550,9 +551,7 @@ def test_serve_rejects_unknown_writable_env(benchling_env) -> None:
     }
 
 
-def test_serve_requires_at_least_one_environment(monkeypatch) -> None:
-    for name in ("API_ENDPOINT", "CLIENT_ID", "CLIENT_SECRET"):
-        monkeypatch.delenv(f"BENCHLING_SANDBOX_{name}", raising=False)
+def test_serve_requires_at_least_one_environment() -> None:
     with pytest.raises(AuthenticationError, match="No environments configured"):
         run_mcp_server()
 

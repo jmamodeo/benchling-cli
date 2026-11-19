@@ -15,7 +15,7 @@ An electronic lab notebook is a scientific record, so letting an AI agent write 
 
 - Public Benchling API only; it never automates the browser.
 - Four change families: document text, unstructured tables, entry fields, and assay results.
-- Several environments at once, configured through environment variables only.
+- Several environments at once. Each one is saved with `benchling auth login`; the client secret stays in the OS keychain.
 - One versioned JSON envelope and stable exit codes for both interfaces.
 
 ## Demo
@@ -137,57 +137,65 @@ apply_changes(env="demo", plan_id=...) ->
 
 ## Install
 
-The package is not published to PyPI. The distribution name is `benchling-toolkit` and the import package is `benchling_toolkit`. Install from source with [`uv`](https://docs.astral.sh/uv/) and Python 3.11 or newer.
+The distribution name is `benchling-toolkit` and the import package is `benchling_toolkit`. Install the CLI onto your PATH with [`uv`](https://docs.astral.sh/uv/) and Python 3.11 or newer:
 
 ```console
-git clone https://github.com/jmamodeo/benchling-toolkit.git
-cd benchling-toolkit
-uv sync
-uv run benchling --help
+uv tool install benchling-toolkit
+benchling --help
 ```
 
-Examples below omit the `uv run` prefix; use it, or activate `.venv`, when running them. Add `--extra dev` to `uv sync` to install the test and lint tools.
+`uv sync` in a git checkout installs the package into that project's virtualenv only. It does not put `benchling` on PATH. From a checkout, run `uv run benchling`, or activate `.venv`. The package is not published to PyPI yet; until a release is published, install the command from a checkout with `uv tool install .`. Add `--extra dev` to `uv sync` when you need the test and lint tools.
 
 ## Configuration
 
-Each environment is configured by three variables named `BENCHLING_<ENV>_*`. Any number of environments may be set at once:
+Run `benchling auth login` in your own terminal. The client secret is read from a hidden prompt, or from stdin with `--secret-stdin`, and is never accepted as an argument, so it does not pass through an agent, a shell history entry, or an MCP client config.
 
 ```console
-export BENCHLING_DEV_API_ENDPOINT="https://your-tenant-dev.benchling.com/"
-export BENCHLING_DEV_CLIENT_ID="your-app-client-id"
-export BENCHLING_DEV_CLIENT_SECRET="your-app-client-secret"
-export BENCHLING_TEST_API_ENDPOINT="https://your-tenant-test.benchling.com/"
-export BENCHLING_TEST_CLIENT_ID="your-app-client-id"
-export BENCHLING_TEST_CLIENT_SECRET="your-app-client-secret"
+benchling auth login --env dev
+# Tenant URL: https://your-tenant.benchling.com
+# Client ID: your-app-client-id
+# Client secret (not echoed):
 ```
 
-The application uses OAuth `client_credentials` against `/oauth/token`, acting as the **app**, with the app's permissions and audit identity—not the signed-in browser user. The app must already have access to the entry's project. Tokens remain in process memory, cached per environment, and are renewed before expiry in a long-running MCP process. Nothing is saved to disk or the OS keychain, and profiles saved by previous versions are never read. Missing or partial variables produce an explicit authentication error; there is no fallback.
+Login requests an OAuth `client_credentials` token before it saves anything. On success it writes the tenant URL and client ID to `environments.json` (mode 0600) under the state directory, and stores the client secret in the OS keychain under the service name `benchling-toolkit`. The username in the keychain is the environment name. Access tokens stay in process memory and are renewed before expiry in a long-running MCP process. If no usable keychain is available (for example a headless Linux session without Secret Service), login fails with an actionable error. There is no plaintext file fallback.
 
-Environment names are the lowercase `<ENV>` part (letters and digits only). The environment is required on every command; there is no default:
+The toolkit acts as the **app**, with the app's permissions and audit identity, not the signed-in browser user. Profiles saved by previous versions are never read.
+
+Environment names are lowercase letters and digits. The environment is required on every API command; there is no default. `-e` is short for `--env`.
 
 ```console
+benchling auth login --env test
 benchling envs list
-benchling --env dev auth status
+benchling auth status
+benchling --env dev auth status --check
 benchling --env test doctor
+benchling auth logout --env dev
 ```
 
-`auth status` checks local configuration only; `doctor` makes read-only API checks. `-e` is short for `--env`. To disconnect, unset the environment's variables in the calling shell and restart any MCP process; this does not revoke the app remotely.
+`auth status` lists saved environments and whether a keychain secret is present. It never prints the secret. `--check` requests a token and reports success or failure without printing or saving it. `doctor` makes read-only API checks. `auth logout` removes the `environments.json` record and the keychain secret; it does not revoke the app in Benchling.
 
-`.env.example` contains the layout with placeholders. The CLI does **not** automatically load `.env` files: provide environment variables through your shell or MCP client's environment configuration. Never commit actual secrets or include them in command examples. Rotate any secret exposed in chat or logs before using it long-term.
+`BENCHLING_TOOLKIT_HOME` overrides the state directory (the platform config directory plus `benchling-toolkit` otherwise). It does not hold secrets. HTTPS uses the operating system's certificate trust store, with certificate-chain and hostname verification enabled. No insecure TLS fallback is available.
 
-HTTPS uses the operating system's certificate trust store, with certificate-chain and hostname verification enabled. No insecure TLS fallback is available.
+## Least privilege
+
+Create two Benchling apps and save them as two environments:
+
+- A read-only app, via `benchling auth login --env read`. Use this for agents and everyday MCP sessions. Do not pass `--allow-writes read`.
+- A write app, via `benchling auth login --env write`. Start a server that may apply changes with `benchling mcp serve --allow-writes write` only.
+
+In Benchling, grant each app access only to the specific projects it should see. `--allow-writes` is a local switch on the MCP server. It cannot widen the access the Benchling app was given.
 
 ## Quickstart
 
 ```console
-export BENCHLING_DEV_API_ENDPOINT="https://your-tenant-dev.benchling.com/"
-export BENCHLING_DEV_CLIENT_ID="your-app-client-id"
-export BENCHLING_DEV_CLIENT_SECRET="your-app-client-secret"
-
-benchling envs list
+uv tool install benchling-toolkit
+benchling auth login --env dev
+benchling auth status
 benchling --env dev doctor
 benchling --env dev entry resolve EXP-0001
 ```
+
+`auth login` prompts for `https://your-tenant.benchling.com`, the client ID, and the client secret. Run it in your own terminal.
 
 ## CLI examples
 
@@ -239,14 +247,14 @@ Table upload plans use local correlation UUIDs; the tenant assigns the actual re
 
 ## MCP server
 
-Configure an MCP client to inherit the `BENCHLING_<ENV>_*` variables for every environment an AI agent may use (or supply them through the client's secure environment configuration). One server serves all configured environments. The `benchling` command below starts that read-only-by-default server:
+One server serves every environment saved with `auth login`. The client config carries no secrets; the server reads the same `environments.json` file and OS keychain as the CLI. Log in in your own terminal before starting the server.
 
 ```json
 {
   "mcpServers": {
     "benchling": {
-      "command": "benchling",
-      "args": ["mcp", "serve"]
+      "command": "uvx",
+      "args": ["--from", "benchling-toolkit", "benchling", "mcp", "serve"]
     }
   }
 }
@@ -271,6 +279,7 @@ flowchart TD
     PLANNER --> API["BenchlingAPI: httpx, retries, pagination"]
     SVC --> API
     API --> AUTH["OAuth client credentials, in-memory tokens"]
+    AUTH --> KEY[("OS keychain: client secret")]
     API --> BENCHLING[("Benchling REST V2 and V3")]
     AUTH --> BENCHLING
 ```
@@ -284,8 +293,10 @@ flowchart TD
 | `plans/document.py`, `plans/table.py`, `plans/fields.py`, `plans/results.py` | One planning/apply mixin per change family |
 | `plans/repository.py` | Plan and journal persistence, checksums, JSON diff |
 | `api.py` | HTTP client for Benchling REST V2/V3: retries for reads, never for writes |
-| `auth.py` | OAuth client-credentials token handling |
-| `environment.py`, `config.py`, `runtime.py` | Environment discovery, state directories, per-environment runtimes |
+| `auth.py` | OAuth client-credentials tokens, kept in memory |
+| `credentials.py`, `keychain.py` | Login, logout, status, and OS keychain storage |
+| `environment.py`, `config.py`, `runtime.py` | `environments.json`, state directories, per-environment runtimes |
+| `redact.py` | Removes client secrets and access tokens from errors and journals |
 | `models.py`, `errors.py` | Envelope, plan and journal models, error types and exit codes |
 | `tls.py` | OS trust-store TLS |
 
@@ -298,16 +309,16 @@ flowchart TD
 - **Writes are never retried.** A write that times out or fails with a server error leaves the journal in `unknown`/`partial` state for a person to reconcile; reads are retried with bounded backoff.
 - **Read-only MCP by default.** `apply_changes` is refused unless the server was started with `--allow-writes ENV` for that environment. `plan_changes` stays available because it only reads Benchling and writes a local preview.
 - **Explicit environment on every call.** There is no default environment, so a command or tool call cannot reach a tenant by omission.
-- **Credentials stay in memory.** Environment variables only; no files, no keychain, error details never echo secrets, and TLS verification uses the OS trust store with no insecure fallback.
+- **Secrets stay in the OS keychain.** The tenant URL and client ID are stored in `environments.json` with mode 0600. Access tokens stay in process memory. Error envelopes and journals are scrubbed, and TLS verification uses the OS trust store with no insecure fallback. There is no plaintext secret file.
 
 ## Design decisions and tradeoffs
 
 - **Plan/apply instead of one-call edit tools.** An AI agent reviews a concrete diff before anything is written, and replays are impossible. The cost is an extra step and some local state to manage.
-- **Environment variables only, no default environment.** Nothing sensitive is stored and the target tenant is always explicit. The cost is verbosity and no keychain convenience.
+- **OS keychain, no default environment.** The client secret is stored by the operating system and the target tenant is always explicit. The cost is a keychain dependency and no headless plaintext fallback.
 - **App identity, not user identity.** OAuth client credentials give the toolkit its own permissions and audit identity, separate from any person's. The app must be granted access to each project it touches.
 - **One service layer, two interfaces.** The CLI and MCP server call the same typed services and return the same envelope, so behavior is specified and tested once. The cost is a more verbose, JSON-first CLI.
 - **Honest handling of API limits.** Benchling's document API cannot edit table cells individually, so table edits send a complete replacement that preserves supported cell fields; evaluated values are cleared. Replacing text is an insert followed by a delete and can end in a reported partial completion.
-- **Local, single-machine state.** Plans, journals and locks are plain files under the application directory (`BENCHLING_TOOLKIT_HOME` overrides it). That keeps the tool dependency-free but means concurrency control does not extend across machines.
+- **Local, single-machine state.** Plans, journals, locks, and `environments.json` are plain files under the application directory (`BENCHLING_TOOLKIT_HOME` overrides it). Client secrets are in the OS keychain for that user. Concurrency control does not extend across machines.
 - **Offline tests against a stateful fake.** The suite runs the real client, services and planner against an in-process fake Benchling API instead of stubbing each call. This tests behavior end to end; the cost is that the fake can drift from the real API, which is why the opt-in sandbox exercise exists.
 
 ## JSON envelope and exit codes
@@ -337,11 +348,11 @@ uv run mypy
 uv run pytest --cov
 ```
 
-The suite has 199 test functions (357 collected cases, parametrization included) and reaches 98% branch coverage. CI enforces a `fail_under` floor of 96% in `pyproject.toml`, and also builds the sdist and wheel, runs `twine check`, and smoke-tests the built wheel.
+The suite has 231 test functions (389 collected cases, parametrization included) and reaches 98% branch coverage. CI enforces a `fail_under` floor of 96% in `pyproject.toml`, and also builds the sdist and wheel, runs `twine check`, and smoke-tests the built wheel.
 
 ### Opt-in sandbox exercise
 
-Offline tests never require credentials. After configuring a sandbox entry that you control, the interactive exercise below creates a plan, pauses for a browser edit to invalidate it, verifies the conflict, and then applies and verifies one selected-cell update. Add `--restore` to preview and explicitly restore the original input afterward.
+Offline tests never require credentials. For a live sandbox, run `benchling auth login --env dev` in your own terminal first. The exercise below then creates a plan, pauses for a browser edit to invalidate it, verifies the conflict, and applies and verifies one selected-cell update. Add `--restore` to preview and explicitly restore the original input afterward.
 
 ```console
 uv run python scripts/sandbox_exercise.py \

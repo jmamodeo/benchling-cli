@@ -3,49 +3,28 @@ from __future__ import annotations
 import json
 import os
 import ssl
+import stat
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from urllib.parse import parse_qs
 
 import httpx
 import pytest
+from conftest import configure_env
 from mcp import Client
 from typer.testing import CliRunner
 
 from benchling_toolkit.auth import AuthManager
 from benchling_toolkit.cli import app
-from benchling_toolkit.environment import (
-    EnvironmentConfigStore,
-    available_envs,
-    environment_secrets,
-    variables,
-)
+from benchling_toolkit.environment import ENV_NAME, EnvironmentConfigStore, write_private
 from benchling_toolkit.errors import AuthenticationError, ValidationError
+from benchling_toolkit.keychain import SERVICE_NAME, Keychain
 from benchling_toolkit.mcp_server import build_mcp_server
-from benchling_toolkit.models import AuthMethod
+from benchling_toolkit.models import AuthMethod, Environment
 from benchling_toolkit.runtime import Runtime, RuntimePool
 from benchling_toolkit.tls import verified_context
 
-VARIABLES = variables("dev")
-
-
-@pytest.fixture(autouse=True)
-def clean_env(monkeypatch):
-    for name in list(os.environ):
-        if name.startswith("BENCHLING_") and name != "BENCHLING_TOOLKIT_HOME":
-            monkeypatch.delenv(name, raising=False)
-
-
-def configure(monkeypatch, env="dev", host="tenant", secret="sensitive-test-secret"):
-    for key, value in zip(
-        variables(env),
-        (
-            f"https://{host}.benchling.com/",
-            f"{env}-client" if env != "dev" else "test-client",
-            secret,
-        ),
-    ):
-        monkeypatch.setenv(key, value)
+SECRET = "sensitive-test-secret"
 
 
 def test_tls_verification_remains_enabled():
@@ -54,147 +33,240 @@ def test_tls_verification_remains_enabled():
     assert context.check_hostname is True
 
 
-def test_environment_layout_and_no_legacy_fallback(tmp_path, monkeypatch):
-    (tmp_path / "profiles.json").write_text(
-        '{"version": 1, "profiles": {"dev": {"name": "dev", "tenant_url": "https://old.benchling.com"}}}'
+def test_environment_file_ignores_legacy_files_and_variables(monkeypatch):
+    home = EnvironmentConfigStore()
+    home.ensure()
+    (home.root / "profiles.json").write_text(
+        '{"version": 1, "profiles": {"dev": {"tenant_url": "https://old.benchling.com"}}}'
     )
-    env = EnvironmentConfigStore(tmp_path)
-    with pytest.raises(ValidationError):
-        env.resolve("dev")
-    configure(monkeypatch)
+    monkeypatch.setenv("BENCHLING_DEV_API_ENDPOINT", "https://ignored.benchling.com/")
+    monkeypatch.setenv("BENCHLING_DEV_CLIENT_ID", "ignored-client")
+    monkeypatch.setenv("BENCHLING_DEV_CLIENT_SECRET", SECRET)
     with pytest.raises(ValidationError) as missing:
-        env.resolve(None)
-    assert missing.value.details["available_envs"] == ["dev"]
-    environment = env.resolve("dev")
-    assert environment.base_url == "https://tenant.benchling.com"
+        home.resolve("dev")
+    assert missing.value.details["available_envs"] == []
+    configure_env("dev", "https://your-tenant.benchling.com/", "dev-client", SECRET)
+    with pytest.raises(ValidationError) as required:
+        home.resolve(None)
+    assert required.value.details["available_envs"] == ["dev"]
+    environment = home.resolve("dev")
+    assert environment.base_url == "https://your-tenant.benchling.com"
     assert environment.auth_method == AuthMethod.CLIENT_CREDENTIALS
-    assert "sensitive-test-secret" not in json.dumps(env.metadata())
+    assert environment.client_id == "dev-client"
+    raw = home.environments_path.read_text()
+    assert SECRET not in raw
+    assert "ignored-client" not in raw
+    assert stat.S_IMODE(home.environments_path.stat().st_mode) == 0o600
+    assert Keychain().get("dev") == SECRET
     with pytest.raises(ValidationError):
-        env.resolve("sandbox")
+        home.resolve("sandbox")
 
 
-def test_multiple_environments_discovered_with_separate_secrets(tmp_path, monkeypatch):
-    configure(monkeypatch)
-    configure(monkeypatch, env="test", host="other", secret="other-secret")
-    monkeypatch.setenv("BENCHLING_PROD_API_ENDPOINT", "https://prod.benchling.com/")
-    assert available_envs() == ["dev", "test"]
-    store = EnvironmentConfigStore(tmp_path)
-    assert store.resolve("test").base_url == "https://other.benchling.com"
-    with pytest.raises(AuthenticationError) as partial:
-        store.resolve("prod")
-    assert partial.value.details["missing_variables"] == [
-        "BENCHLING_PROD_CLIENT_ID",
-        "BENCHLING_PROD_CLIENT_SECRET",
-    ]
-    assert environment_secrets() == {"dev": "sensitive-test-secret", "test": "other-secret"}
+def test_multiple_environments_keep_separate_secrets():
+    configure_env("dev", "https://your-tenant.benchling.com/", "dev-client", SECRET)
+    configure_env(
+        "test", "https://other-tenant.benchling.com/", "test-client", "other-secret-value"
+    )
+    store = EnvironmentConfigStore()
+    assert store.configured_names() == ["dev", "test"]
+    assert store.resolve("test").base_url == "https://other-tenant.benchling.com"
+    saved = json.dumps(store.metadata())
+    assert SECRET not in saved
+    assert "other-secret-value" not in saved
+    assert Keychain().get("dev") == SECRET
+    assert Keychain().get("test") == "other-secret-value"
 
 
 @pytest.mark.parametrize("name", ["DEV", "../dev", ""])
-def test_invalid_environment_names_rejected(tmp_path, monkeypatch, name):
-    configure(monkeypatch)
+def test_invalid_environment_names_rejected(name):
+    configure_env("dev", "https://your-tenant.benchling.com/", secret=SECRET)
     with pytest.raises(ValidationError):
-        EnvironmentConfigStore(tmp_path).resolve(name)
+        EnvironmentConfigStore().resolve(name)
 
 
-def test_partial_environment_reports_names_not_values(tmp_path, monkeypatch):
-    monkeypatch.setenv(VARIABLES[2], "sensitive-test-secret")
-    with pytest.raises(AuthenticationError) as caught:
-        EnvironmentConfigStore(tmp_path).resolve("dev")
-    assert caught.value.details["missing_variables"] == list(VARIABLES[:2])
-    assert "sensitive-test-secret" not in str(caught.value.details)
+def test_missing_secret_still_resolves_the_saved_environment():
+    configure_env("dev", "https://your-tenant.benchling.com/", secret=None)
+    environment = EnvironmentConfigStore().resolve("dev")
+    auth = AuthManager({})
+    with pytest.raises(AuthenticationError):
+        auth.headers(environment)
+    assert auth.status(environment)["secret_present"] is False
+    assert SECRET not in json.dumps(auth.status(environment))
 
 
 @pytest.mark.parametrize(
     "url",
     [
-        "http://tenant.benchling.com",
-        "https://user:secret@tenant.benchling.com",
-        "https://tenant.benchling.com/path",
+        "http://your-tenant.benchling.com",
+        "https://user:sensitive-test-secret@your-tenant.benchling.com",
+        "https://your-tenant.benchling.com/path",
     ],
 )
-def test_invalid_endpoint_redacted(tmp_path, monkeypatch, url):
-    configure(monkeypatch)
-    monkeypatch.setenv(VARIABLES[0], url)
+def test_invalid_saved_endpoint_is_redacted(url):
+    store = EnvironmentConfigStore()
+    store.ensure()
+    write_private(
+        store.environments_path,
+        json.dumps(
+            {
+                "version": 1,
+                "environments": {"dev": {"tenant_url": url, "client_id": "dev-client"}},
+            }
+        ),
+    )
     with pytest.raises(ValidationError) as caught:
-        EnvironmentConfigStore(tmp_path).resolve("dev")
+        store.resolve("dev")
     assert url not in str(caught.value)
+    assert SECRET not in str(caught.value.details)
 
 
-def test_app_tokens_cached_renewed_and_not_persisted(tmp_path, monkeypatch):
-    configure(monkeypatch)
-    config = EnvironmentConfigStore(tmp_path / "unused")
-    environment = config.resolve("dev")
+def test_private_write_cleans_up_when_replace_or_open_fails(tmp_path, monkeypatch):
+    target = tmp_path / "nested" / "environments.json"
+
+    def refuse_fdopen(fd, mode="r", encoding=None):
+        raise OSError("fdopen failed")
+
+    monkeypatch.setattr(os, "fdopen", refuse_fdopen)
+    with pytest.raises(OSError, match="fdopen"):
+        write_private(target, "{}\n")
+    monkeypatch.undo()
+
+    def refuse_replace(src, dst):
+        raise OSError("replace failed")
+
+    monkeypatch.setattr(os, "replace", refuse_replace)
+    with pytest.raises(OSError, match="replace"):
+        write_private(target, "{}\n")
+    assert not target.exists()
+    assert not list(target.parent.glob(".environments.json.tmp"))
+
+
+def test_private_write_survives_a_permissive_umask_and_chmod_failure(tmp_path, monkeypatch):
+    target = tmp_path / "environments.json"
+    previous = os.umask(0)
+    try:
+        write_private(target, "{}\n")
+    finally:
+        os.umask(previous)
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600
+
+    def refuse(*args, **kwargs):
+        raise OSError("chmod denied")
+
+    monkeypatch.setattr(os, "chmod", refuse)
+    write_private(target, "{}\n")
+    assert target.read_text() == "{}\n"
+
+
+def test_corrupt_environment_file_does_not_echo_its_contents(tmp_path):
+    store = EnvironmentConfigStore(tmp_path)
+    store.ensure()
+    store.environments_path.write_text('{"version": 1, "environments": ' + SECRET, encoding="utf-8")
+    with pytest.raises(ValidationError) as caught:
+        store.resolve("dev")
+    assert SECRET not in str(caught.value.details)
+    store.environments_path.write_text('{"version": 9, "environments": {}}', encoding="utf-8")
+    with pytest.raises(ValidationError, match="unsupported version"):
+        store.configured_names()
+
+
+def test_app_tokens_cached_renewed_and_not_persisted(tmp_path):
+    environment = Environment(
+        name="dev",
+        tenant_url="https://your-tenant.benchling.com/",
+        auth_method=AuthMethod.CLIENT_CREDENTIALS,
+        client_id="test-client",
+    )
     count = 0
 
     def handler(request):
         nonlocal count
         count += 1
-        assert str(request.url) == "https://tenant.benchling.com/oauth/token"
+        assert str(request.url) == "https://your-tenant.benchling.com/oauth/token"
         assert parse_qs(request.content.decode()) == {
             "grant_type": ["client_credentials"],
             "client_id": ["test-client"],
-            "client_secret": ["sensitive-test-secret"],
+            "client_secret": [SECRET],
         }
         return httpx.Response(
-            200, json={"access_token": f"token-{count}", "token_type": "bearer", "expires_in": 900}
+            200,
+            json={
+                "access_token": f"memory-only-access-token-{count}",
+                "token_type": "bearer",
+                "expires_in": 900,
+            },
         )
 
     auth = AuthManager(
-        environment_secrets(), http=httpx.Client(transport=httpx.MockTransport(handler))
+        {environment.name: SECRET}, http=httpx.Client(transport=httpx.MockTransport(handler))
     )
     with ThreadPoolExecutor(max_workers=2) as pool:
         assert (
             list(pool.map(lambda _: auth.headers(environment), range(2)))
-            == [{"Authorization": "Bearer token-1"}] * 2
+            == [{"Authorization": "Bearer memory-only-access-token-1"}] * 2
         )
     assert count == 1
     bundle = auth._app_tokens[(environment.name, environment.base_url, environment.client_id)]
     bundle.expires_at = datetime.now(UTC) - timedelta(seconds=1)
-    assert auth.headers(environment) == {"Authorization": "Bearer token-2"}
-    assert not config.root.exists()
+    assert auth.headers(environment) == {"Authorization": "Bearer memory-only-access-token-2"}
+    assert auth.status(environment)["access_token_cached"] is True
+    assert not (tmp_path / "token").exists()
+    assert ENV_NAME.match("dev")
 
 
-def test_token_error_cannot_echo_secret(tmp_path, monkeypatch):
-    configure(monkeypatch)
-    config = EnvironmentConfigStore(tmp_path)
+def test_token_error_cannot_echo_secret():
+    environment = Environment(
+        name="dev",
+        tenant_url="https://your-tenant.benchling.com/",
+        auth_method=AuthMethod.CLIENT_CREDENTIALS,
+        client_id="test-client",
+    )
     auth = AuthManager(
-        environment_secrets(),
+        {environment.name: SECRET},
         http=httpx.Client(
             transport=httpx.MockTransport(
-                lambda _: httpx.Response(401, json={"error": "sensitive-test-secret"})
+                lambda _: httpx.Response(401, json={"error": SECRET, "client_secret": SECRET})
             )
         ),
     )
     with pytest.raises(AuthenticationError) as caught:
-        auth.headers(config.resolve("dev"))
+        auth.headers(environment)
     assert caught.value.details == {"status": 401}
+    assert SECRET not in json.dumps(caught.value.details)
 
 
-def test_cli_status_is_environment_only(tmp_path, monkeypatch):
-    configure(monkeypatch)
-    monkeypatch.setenv("BENCHLING_TOOLKIT_HOME", str(tmp_path / "unused"))
+def test_cli_status_lists_the_environment_without_a_secret_or_network(monkeypatch, tmp_path):
+    configure_env("dev", "https://your-tenant.benchling.com/", "dev-client", SECRET)
     result = CliRunner().invoke(app, ["--env", "dev", "auth", "status"])
-    assert result.exit_code == 0
-    data = json.loads(result.stdout)["data"]
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.stdout)
+    data = payload["data"]["environments"]["dev"]
     assert data["identity"] == "app"
-    assert data["credential_source"] == "environment"
+    assert data["credential_source"] == "keyring"
     assert data["configured"] is True
-    assert "sensitive-test-secret" not in result.stdout
-    assert not (tmp_path / "unused").exists()
+    assert data["secret_present"] is True
+    assert data["client_id"] == "dev-client"
+    assert "token_check" not in data
+    assert SECRET not in result.stdout
+    assert SECRET not in result.stderr
+    listed = json.dumps(EnvironmentConfigStore().metadata())
+    assert SECRET not in listed
+    assert SERVICE_NAME == "benchling-toolkit"
 
 
 @pytest.mark.asyncio
-async def test_mcp_uses_environment_app_identity(tmp_path, monkeypatch):
-    configure(monkeypatch)
-    monkeypatch.setenv("BENCHLING_TOOLKIT_HOME", str(tmp_path / "unused"))
+async def test_mcp_uses_saved_app_identity(monkeypatch):
+    configure_env("dev", "https://your-tenant.benchling.com/", "dev-client", SECRET)
     auth_http = httpx.Client(
         transport=httpx.MockTransport(
-            lambda _: httpx.Response(200, json={"access_token": "access", "expires_in": 900})
+            lambda _: httpx.Response(
+                200, json={"access_token": "memory-only-access-token", "expires_in": 900}
+            )
         )
     )
 
     def read_handler(request):
-        assert request.headers["Authorization"] == "Bearer access"
+        assert request.headers["Authorization"] == "Bearer memory-only-access-token"
         key = "items" if request.url.path.startswith("/api/v3/") else "entries"
         return httpx.Response(200, json={key: [], "nextToken": ""})
 
@@ -207,19 +279,22 @@ async def test_mcp_uses_environment_app_identity(tmp_path, monkeypatch):
     try:
         async with Client(build_mcp_server(pool)) as client:
             result = await client.call_tool("get_capabilities", {"env": "dev"})
+            rendered = json.dumps(result.structured_content)
             assert result.structured_content["ok"] is True
             assert result.structured_content["data"]["auth_method"] == "client_credentials"
-            assert "sensitive-test-secret" not in json.dumps(result.structured_content)
+            assert SECRET not in rendered
+            assert "memory-only-access-token" not in rendered
     finally:
         await pool.close()
         auth_http.close()
 
 
 @pytest.mark.asyncio
-async def test_mcp_routes_each_call_to_its_env(tmp_path, monkeypatch):
-    configure(monkeypatch)
-    configure(monkeypatch, env="test", host="other", secret="other-secret")
-    monkeypatch.setenv("BENCHLING_TOOLKIT_HOME", str(tmp_path / "unused"))
+async def test_mcp_routes_each_call_to_its_env():
+    configure_env("dev", "https://your-tenant.benchling.com/", "dev-client", SECRET)
+    configure_env(
+        "test", "https://other-tenant.benchling.com/", "test-client", "other-secret-value"
+    )
     hosts: list[str] = []
 
     def token_handler(request):
@@ -242,10 +317,16 @@ async def test_mcp_routes_each_call_to_its_env(tmp_path, monkeypatch):
         async with Client(build_mcp_server(pool, writable_envs={"dev"})) as client:
             listed = await client.call_tool("list_environments", {})
             assert listed.structured_content["data"]["environments"] == {
-                "dev": {"tenant_url": "https://tenant.benchling.com/", "writes_allowed": True},
-                "test": {"tenant_url": "https://other.benchling.com/", "writes_allowed": False},
+                "dev": {"tenant_url": "https://your-tenant.benchling.com/", "writes_allowed": True},
+                "test": {
+                    "tenant_url": "https://other-tenant.benchling.com/",
+                    "writes_allowed": False,
+                },
             }
-            for env, host in (("test", "other.benchling.com"), ("dev", "tenant.benchling.com")):
+            for env, host in (
+                ("test", "other-tenant.benchling.com"),
+                ("dev", "your-tenant.benchling.com"),
+            ):
                 hosts.clear()
                 result = await client.call_tool("get_capabilities", {"env": env})
                 assert result.structured_content["meta"]["env"] == env
@@ -257,6 +338,8 @@ async def test_mcp_routes_each_call_to_its_env(tmp_path, monkeypatch):
                 "dev",
                 "test",
             ]
+            rendered = json.dumps(listed.structured_content)
+            assert SECRET not in rendered and "other-secret-value" not in rendered
     finally:
         await pool.close()
         auth_http.close()

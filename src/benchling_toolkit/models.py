@@ -10,6 +10,7 @@ from typing import Any, Generic, Literal, TypeVar, cast
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
 
 from .errors import BenchlingAgentError
+from .redact import redact, redact_text
 
 T = TypeVar("T")
 
@@ -40,17 +41,21 @@ class Envelope(BaseModel, Generic[T]):
     @classmethod
     def failure(cls, error: BenchlingAgentError, **meta: Any) -> Envelope[dict[str, Any]]:
         """Build an ok=False envelope from an error; no data is included."""
+        details = redact(error.details)
+        if not isinstance(details, dict):
+            details = {}
+        redacted_meta = redact(meta)
         return cast(
             Envelope[dict[str, Any]],
             cls(
                 ok=False,
                 error=ErrorDetail(
                     code=error.code,
-                    message=error.message,
+                    message=redact_text(error.message),
                     retryable=error.retryable,
-                    details=error.details,
+                    details=details,
                 ),
-                meta=meta,
+                meta=redacted_meta if isinstance(redacted_meta, dict) else {},
             ),
         )
 

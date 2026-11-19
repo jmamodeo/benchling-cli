@@ -3,19 +3,56 @@ from __future__ import annotations
 import os
 
 import httpx
+import keyring
 import pytest
 import pytest_asyncio
 from fake_benchling import TENANT, FakeBenchling
+from memory_keyring import MemoryKeyring
 
 from benchling_toolkit.api import BenchlingAPI
 from benchling_toolkit.auth import AuthManager
+from benchling_toolkit.environment import EnvironmentConfigStore
+from benchling_toolkit.keychain import Keychain
 from benchling_toolkit.models import AuthMethod, Environment
+from benchling_toolkit.redact import clear_registered_secrets
 from benchling_toolkit.runtime import Runtime, RuntimePool
+
+SANDBOX_SECRET = "sandbox-client-secret"
 
 
 @pytest.fixture(autouse=True)
 def isolated_home(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("BENCHLING_TOOLKIT_HOME", str(tmp_path / "app"))
+
+
+@pytest.fixture(autouse=True)
+def memory_keyring() -> MemoryKeyring:
+    """Install a fresh in-memory keychain and drop secrets tracked for redaction."""
+    clear_registered_secrets()
+    backend = MemoryKeyring()
+    keyring.set_keyring(backend)
+    yield backend
+    clear_registered_secrets()
+    keyring.set_keyring(keyring.backends.fail.Keyring())
+
+
+def configure_env(
+    name: str,
+    tenant_url: str,
+    client_id: str = "client",
+    secret: str | None = SANDBOX_SECRET,
+) -> Environment:
+    """Save a non-secret environment record and, when given, its keychain secret."""
+    environment = Environment(
+        name=name,
+        tenant_url=tenant_url,
+        auth_method=AuthMethod.CLIENT_CREDENTIALS,
+        client_id=client_id,
+    )
+    EnvironmentConfigStore().upsert(environment)
+    if secret is not None:
+        Keychain().set(name, secret)
+    return environment
 
 
 def make_environment(name: str = "sandbox") -> Environment:
@@ -56,9 +93,7 @@ def benchling_env(monkeypatch) -> None:
     for name in list(os.environ):
         if name.startswith("BENCHLING_") and name != "BENCHLING_TOOLKIT_HOME":
             monkeypatch.delenv(name)
-    monkeypatch.setenv("BENCHLING_SANDBOX_API_ENDPOINT", TENANT)
-    monkeypatch.setenv("BENCHLING_SANDBOX_CLIENT_ID", "client")
-    monkeypatch.setenv("BENCHLING_SANDBOX_CLIENT_SECRET", "secret")
+    configure_env("sandbox", TENANT, "client", SANDBOX_SECRET)
 
 
 @pytest.fixture
