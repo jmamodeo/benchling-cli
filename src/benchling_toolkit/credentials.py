@@ -11,7 +11,7 @@ from pydantic import ValidationError as ModelValidationError
 from .auth import AuthManager
 from .environment import ENV_NAME, EnvironmentConfigStore, invalid_environment_name, write_private
 from .errors import AuthenticationError, BenchlingAgentError, ValidationError
-from .keychain import Keychain
+from .keychain import Keychain, bind_login_fix
 from .models import AuthMethod, Environment, explain_environment_error
 from .redact import redact_text, register_secret
 from .tls import verified_context
@@ -45,6 +45,41 @@ def build_environment(name: str, tenant_url: str, client_id: str) -> Environment
     return environment
 
 
+def login_fix_values(
+    store: EnvironmentConfigStore,
+    name: str,
+    tenant_url: str | None,
+    client_id: str | None,
+) -> tuple[str | None, str | None]:
+    """Tenant URL and client ID to print in a keychain fix command.
+
+    A supplied tenant URL is normalized. A supplied client ID is trimmed.
+    Either one that was omitted comes from environments.json when ``name`` is
+    already configured. A value that cannot be used is left unset.
+    """
+    saved_url, saved_client = _saved_login_fields(store, name)
+    supplied_url = _command_tenant_url(tenant_url) if tenant_url and tenant_url.strip() else None
+    supplied_client = client_id.strip() if client_id and client_id.strip() else None
+    return supplied_url or saved_url, supplied_client or saved_client
+
+
+def _command_tenant_url(value: str) -> str | None:
+    try:
+        return build_environment("dev", value, "client").base_url
+    except BenchlingAgentError:
+        return None
+
+
+def _saved_login_fields(store: EnvironmentConfigStore, name: str) -> tuple[str | None, str | None]:
+    if not store.environments_path.exists():
+        return None, None
+    try:
+        environment = store.resolve(name)
+    except BenchlingAgentError:
+        return None, None
+    return environment.base_url, environment.client_id
+
+
 def login(
     store: EnvironmentConfigStore,
     keychain: Keychain,
@@ -64,24 +99,29 @@ def login(
         raise ValidationError("Client secret is required", details={"env": name})
     register_secret(secret)
     environment = build_environment(name, tenant_url, client_id)
-    keychain.require()
-    if store.environments_path.exists():
-        store.configured_names()
-    _verify_token(environment, secret, http)
-    previous_secret = keychain.get(name)
-    previous_file = _read_file(store)
-    try:
-        keychain.set(name, secret)
-        store.upsert(environment)
-    except BenchlingAgentError:
-        _rollback(store, keychain, name, previous_secret, previous_file)
-        raise
-    except Exception as exc:
-        _rollback(store, keychain, name, previous_secret, previous_file)
-        raise AuthenticationError(
-            "Could not save the environment after authentication succeeded",
-            details={"env": name, "reason": type(exc).__name__},
-        ) from exc
+    with bind_login_fix(
+        env=environment.name,
+        tenant_url=environment.base_url,
+        client_id=environment.client_id,
+    ):
+        keychain.require()
+        if store.environments_path.exists():
+            store.configured_names()
+        _verify_token(environment, secret, http)
+        previous_secret = keychain.get(name)
+        previous_file = _read_file(store)
+        try:
+            keychain.set(name, secret)
+            store.upsert(environment)
+        except BenchlingAgentError:
+            _rollback(store, keychain, name, previous_secret, previous_file)
+            raise
+        except Exception as exc:
+            _rollback(store, keychain, name, previous_secret, previous_file)
+            raise AuthenticationError(
+                "Could not save the environment after authentication succeeded",
+                details={"env": name, "reason": type(exc).__name__},
+            ) from exc
     return environment
 
 

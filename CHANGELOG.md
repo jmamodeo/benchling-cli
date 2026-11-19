@@ -8,6 +8,7 @@ All notable changes to this project are documented here. The format is based on
 
 ### Fixed
 
+- During `auth login`, the keychain error's `dbus-run-session` command fills in the environment name, the normalized tenant URL, and the client ID that were passed or already saved. Each value is shell-quoted. `$KEYRING_PASSWORD` and `$BENCHLING_CLIENT_SECRET` stay variable references. Omitted values, and errors from other commands, keep the placeholders.
 - The keychain error is the cause, one fix command, and a pointer to the README Headless Linux section. `dbus-run-session` also runs `benchling auth login` in that same shell. It says `DBUS_SESSION_BUS_ADDRESS` is unset only when it is unset, and says the bus has no Secret Service when the variable is set but the bus has no keyring. The MCP client `env` block and cron note is included only when `benchling mcp serve` raises the error.
 - The README Headless Linux section no longer says `gnome-keyring-daemon --unlock` prints `DBUS_SESSION_BUS_ADDRESS`. It shows a long-lived `dbus-daemon --session --fork` bus that MCP, later shells, and cron can share, notes a systemd user bus, and says a wrong `KEYRING_PASSWORD` for an existing login keyring hangs the first keyring call.
 - Closing MCP stdin after a tool call exits 0 and does not print `MCP server failed to start` / `Event loop is closed`.
