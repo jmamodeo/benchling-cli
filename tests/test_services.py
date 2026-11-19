@@ -3,14 +3,14 @@ from __future__ import annotations
 import pytest
 from fake_benchling import ENTRY_ID, TABLE_PART, TEXT_PART
 
-from benchling_agent.errors import (
+from benchling_toolkit.errors import (
     ConflictError,
     NotFoundError,
     UnsupportedError,
     UpstreamError,
     ValidationError,
 )
-from benchling_agent.services import (
+from benchling_toolkit.services import (
     build_sections,
     entry_version,
     field_definition_type,

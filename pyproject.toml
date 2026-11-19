@@ -3,9 +3,9 @@ requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "benchling-agent"
+name = "benchling-toolkit"
 dynamic = ["version"]
-description = "Agent-friendly Benchling CLI and local MCP server"
+description = "Safe, auditable tools for AI agents working in Benchling"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
@@ -57,23 +57,23 @@ Issues = "https://github.com/jmamodeo/benchling-cli/issues"
 Changelog = "https://github.com/jmamodeo/benchling-cli/blob/main/CHANGELOG.md"
 
 [project.scripts]
-benchling = "benchling_agent.cli:main"
+benchling = "benchling_toolkit.cli:main"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
 
 [tool.setuptools.dynamic]
-version = { attr = "benchling_agent.__version__" }
+version = { attr = "benchling_toolkit.__version__" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-benchling_agent = ["py.typed"]
+benchling_toolkit = ["py.typed"]
 
 [tool.setuptools.data-files]
-"share/benchling-agent/schemas" = ["schemas/*.json"]
-"share/benchling-agent/contracts" = ["contracts/*.json"]
+"share/benchling-toolkit/schemas" = ["schemas/*.json"]
+"share/benchling-toolkit/contracts" = ["contracts/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -100,7 +100,7 @@ ignore = [
 
 [tool.mypy]
 python_version = "3.11"
-files = ["src/benchling_agent"]
+files = ["src/benchling_toolkit"]
 plugins = ["pydantic.mypy"]
 check_untyped_defs = true
 disallow_untyped_defs = true
@@ -118,7 +118,7 @@ init_typed = true
 warn_required_dynamic_aliases = true
 
 [tool.coverage.run]
-source = ["benchling_agent"]
+source = ["benchling_toolkit"]
 branch = true
 
 [tool.coverage.report]

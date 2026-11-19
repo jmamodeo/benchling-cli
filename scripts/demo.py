@@ -26,9 +26,9 @@ sys.path.insert(0, str(ROOT / "tests"))
 
 from fake_benchling import ENTRY_ID, TABLE_PART, TENANT, FakeBenchling  # noqa: E402
 
-from benchling_agent import cli  # noqa: E402
-from benchling_agent.mcp_server import build_mcp_server  # noqa: E402
-from benchling_agent.runtime import Runtime, RuntimePool  # noqa: E402
+from benchling_toolkit import cli  # noqa: E402
+from benchling_toolkit.mcp_server import build_mcp_server  # noqa: E402
+from benchling_toolkit.runtime import Runtime, RuntimePool  # noqa: E402
 
 fake = FakeBenchling()
 
@@ -95,7 +95,7 @@ def main() -> None:
 
 def _demo() -> None:
     home = tempfile.mkdtemp(prefix="benchling-demo-")
-    os.environ["BENCHLING_AGENT_HOME"] = home
+    os.environ["BENCHLING_TOOLKIT_HOME"] = home
     os.environ["BENCHLING_DEMO_API_ENDPOINT"] = TENANT
     os.environ["BENCHLING_DEMO_CLIENT_ID"] = "demo-client-id"
     os.environ["BENCHLING_DEMO_CLIENT_SECRET"] = "demo-client-secret"

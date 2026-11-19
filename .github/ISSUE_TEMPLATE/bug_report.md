@@ -14,7 +14,7 @@ labels: bug
 
 ## Environment
 
-- benchling-agent version:
+- benchling-toolkit version:
 - Python version:
 - OS:
 - Interface (CLI / MCP client):

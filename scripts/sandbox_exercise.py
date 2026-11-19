@@ -8,8 +8,8 @@ import json
 from copy import deepcopy
 from typing import Any
 
-from benchling_agent.errors import ConflictError
-from benchling_agent.runtime import Runtime
+from benchling_toolkit.errors import ConflictError
+from benchling_toolkit.runtime import Runtime
 
 
 def comparable_table(table: dict[str, Any], row: int, column: int) -> dict[str, Any]:
