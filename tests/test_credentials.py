@@ -4,6 +4,7 @@ import io
 import json
 import logging
 import os
+import shlex
 import stat
 
 import httpx
@@ -211,6 +212,198 @@ def test_missing_keyring_fails_before_prompting_and_names_a_fix(monkeypatch) -> 
     )
     assert "HOME, LOGNAME" not in message
     assert not EnvironmentConfigStore().environments_path.exists()
+
+
+def _dbus_keychain_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    keyring.set_keyring(keyring.backends.fail.Keyring())
+    monkeypatch.setattr("benchling_toolkit.keychain.sys.platform", "linux")
+    monkeypatch.setattr("benchling_toolkit.keychain.provider_installed", lambda: True)
+    monkeypatch.setattr("benchling_toolkit.keychain.secret_service_reachable", lambda: False)
+
+
+def _login_fix_args(message: str) -> list[str]:
+    """Return the argv of the login pipeline inside the printed dbus command."""
+    command = next(line for line in message.splitlines() if line.startswith("dbus-run-session"))
+    outer = shlex.split(command)
+    assert outer[:4] == ["dbus-run-session", "--", "sh", "-c"]
+    return shlex.split(outer[4])
+
+
+def _flag(argv: list[str], name: str) -> str:
+    return argv[argv.index(name) + 1]
+
+
+def test_login_keychain_error_fills_in_the_supplied_values(monkeypatch: pytest.MonkeyPatch) -> None:
+    _dbus_keychain_failure(monkeypatch)
+    result = CliRunner().invoke(
+        cli.app,
+        [
+            "auth",
+            "login",
+            "--env",
+            "lab",
+            "--tenant-url",
+            "your-tenant.benchling.com/api/v3",
+            "--client-id",
+            "app-client",
+            "--secret-stdin",
+        ],
+        input=SECRET,
+    )
+    assert result.exit_code == 3
+    message = json.loads(result.stdout)["error"]["message"]
+    args = _login_fix_args(message)
+    assert _flag(args, "--env") == "lab"
+    assert _flag(args, "--tenant-url") == "https://your-tenant.benchling.com"
+    assert _flag(args, "--client-id") == "app-client"
+    assert "$KEYRING_PASSWORD" in message
+    assert "$BENCHLING_CLIENT_SECRET" in message
+    assert SECRET not in message
+    assert "--client-id CLIENT" not in message
+
+
+def test_login_keychain_error_keeps_placeholders_for_omitted_flags(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _dbus_keychain_failure(monkeypatch)
+    monkeypatch.setattr(
+        "benchling_toolkit.cli.getpass.getpass",
+        lambda prompt="": (_ for _ in ()).throw(AssertionError("prompted")),
+    )
+    result = CliRunner().invoke(
+        cli.app,
+        ["auth", "login", "--env", "lab", "--client-id", "app-client"],
+    )
+    assert result.exit_code == 3
+    args = _login_fix_args(json.loads(result.stdout)["error"]["message"])
+    assert _flag(args, "--env") == "lab"
+    assert _flag(args, "--tenant-url") == "https://your-tenant.benchling.com"
+    assert _flag(args, "--client-id") == "app-client"
+
+    invalid = CliRunner().invoke(
+        cli.app,
+        [
+            "auth",
+            "login",
+            "--env",
+            "lab",
+            "--tenant-url",
+            "http://your-tenant.benchling.com",
+            "--client-id",
+            "app-client",
+            "--secret-stdin",
+        ],
+        input=SECRET,
+    )
+    assert invalid.exit_code == 3
+    invalid_message = json.loads(invalid.stdout)["error"]["message"]
+    invalid_args = _login_fix_args(invalid_message)
+    assert _flag(invalid_args, "--tenant-url") == "https://your-tenant.benchling.com"
+    assert "http://" not in invalid_message
+    assert SECRET not in invalid_message
+
+
+def test_login_keychain_error_uses_a_saved_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    configure_env("lab", "https://other-tenant.benchling.com/api/v2/", "saved-client", secret=None)
+    _dbus_keychain_failure(monkeypatch)
+    monkeypatch.setattr(
+        "benchling_toolkit.cli.getpass.getpass",
+        lambda prompt="": (_ for _ in ()).throw(AssertionError("prompted")),
+    )
+    result = CliRunner().invoke(cli.app, ["auth", "login", "--env", "lab"])
+    assert result.exit_code == 3
+    args = _login_fix_args(json.loads(result.stdout)["error"]["message"])
+    assert _flag(args, "--env") == "lab"
+    assert _flag(args, "--tenant-url") == "https://other-tenant.benchling.com"
+    assert _flag(args, "--client-id") == "saved-client"
+
+    overridden = CliRunner().invoke(
+        cli.app,
+        [
+            "auth",
+            "login",
+            "--env",
+            "lab",
+            "--tenant-url",
+            "https://your-tenant.benchling.com/",
+            "--client-id",
+            "app-client",
+            "--secret-stdin",
+        ],
+        input=SECRET,
+    )
+    overridden_args = _login_fix_args(json.loads(overridden.stdout)["error"]["message"])
+    assert _flag(overridden_args, "--tenant-url") == "https://your-tenant.benchling.com"
+    assert _flag(overridden_args, "--client-id") == "app-client"
+    assert SECRET not in overridden.stdout
+
+
+def test_login_keychain_error_does_not_copy_a_different_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    configure_env("lab", "https://other-tenant.benchling.com/", "saved-client", secret=None)
+    _dbus_keychain_failure(monkeypatch)
+    result = CliRunner().invoke(
+        cli.app,
+        ["auth", "login", "--env", "demo", "--client-id", "app-client"],
+    )
+    assert result.exit_code == 3
+    message = json.loads(result.stdout)["error"]["message"]
+    args = _login_fix_args(message)
+    assert _flag(args, "--env") == "demo"
+    assert _flag(args, "--tenant-url") == "https://your-tenant.benchling.com"
+    assert _flag(args, "--client-id") == "app-client"
+    assert "saved-client" not in message
+    assert "other-tenant" not in message
+
+
+def test_login_keychain_error_quotes_a_client_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    _dbus_keychain_failure(monkeypatch)
+    client_id = "app'id"
+    result = CliRunner().invoke(
+        cli.app,
+        [
+            "auth",
+            "login",
+            "--env",
+            "lab",
+            "--tenant-url",
+            "https://your-tenant.benchling.com",
+            "--client-id",
+            client_id,
+            "--secret-stdin",
+        ],
+        input=SECRET,
+    )
+    assert result.exit_code == 3
+    message = json.loads(result.stdout)["error"]["message"]
+    # The id is quoted inside the script, and the script is quoted for sh -c.
+    # Splitting both layers yields the original value and does not run it.
+    assert _flag(_login_fix_args(message), "--client-id") == client_id
+    assert "--client-id app'id" not in message
+    assert "$BENCHLING_CLIENT_SECRET" in message
+    assert SECRET not in message
+
+
+def test_keychain_error_outside_login_keeps_placeholders(monkeypatch: pytest.MonkeyPatch) -> None:
+    configure_env("lab", "https://other-tenant.benchling.com/", "saved-client", secret=None)
+    _dbus_keychain_failure(monkeypatch)
+    result = CliRunner().invoke(cli.app, ["auth", "status"])
+    assert result.exit_code == 3
+    message = json.loads(result.stdout)["error"]["message"]
+    args = _login_fix_args(message)
+    assert _flag(args, "--env") == "dev"
+    assert _flag(args, "--tenant-url") == "https://your-tenant.benchling.com"
+    assert _flag(args, "--client-id") == "CLIENT"
+    assert "saved-client" not in message
+    assert "other-tenant" not in message
+
+    from benchling_toolkit.keychain import dbus_login_command
+
+    placeholder = dbus_login_command()
+    assert "--env dev " in placeholder
+    assert "--client-id CLIENT " in placeholder
+    assert shlex.split(shlex.split(placeholder)[4])  # inner script parses
 
 
 def test_login_rolls_back_when_the_file_cannot_be_saved(monkeypatch) -> None:

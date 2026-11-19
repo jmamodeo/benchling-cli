@@ -7,9 +7,13 @@ name. There is no plaintext file fallback.
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from contextvars import ContextVar
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 import keyring
@@ -21,13 +25,9 @@ from .redact import register_secret
 SERVICE_NAME = "benchling-toolkit"
 _SECRET_SERVICE_NAME = "org.freedesktop.secrets"
 _UNLOCK = "gnome-keyring-daemon --unlock --components=secrets"
-_LOGIN = (
-    'printf "%s" "$BENCHLING_CLIENT_SECRET" | benchling auth login --env dev '
-    "--tenant-url https://your-tenant.benchling.com --client-id CLIENT --secret-stdin"
-)
-# dbus-run-session exits with its shell, and the bus exits with it. The login
-# has to be in that same shell or the secret is stored on a bus that is already gone.
-_SESSION = f'dbus-run-session -- sh -c \'printf "%s\\n" "$KEYRING_PASSWORD" | {_UNLOCK}; {_LOGIN}\''
+_PLACEHOLDER_ENV = "dev"
+_PLACEHOLDER_URL = "https://your-tenant.benchling.com"
+_PLACEHOLDER_CLIENT = "CLIENT"
 _INSTALL = "sudo apt-get install -y gnome-keyring dbus"
 _README = "See the README section Headless Linux."
 # Shown only for `benchling mcp serve`. CLI login already has a terminal session.
@@ -38,6 +38,19 @@ _MCP_ENV = (
 )
 # Set for the lifetime of run_mcp_server, including its keychain check.
 _in_mcp_serve: ContextVar[bool] = ContextVar("benchling_in_mcp_serve", default=False)
+
+
+@dataclass(frozen=True)
+class _LoginFix:
+    """Values already known when a keychain error interrupts login."""
+
+    env: str | None = None
+    tenant_url: str | None = None
+    client_id: str | None = None
+
+
+# Set only around `benchling auth login`. Other commands keep the placeholders.
+_login_fix: ContextVar[_LoginFix | None] = ContextVar("benchling_login_fix", default=None)
 NO_KEYRING_MESSAGE = (
     "No usable OS keychain is available because no Secret Service backend is installed.\n"
     f"{_INSTALL}\n"
@@ -169,11 +182,65 @@ def _cause(cause: str) -> str:
     return "No usable OS keychain is available because no Secret Service backend is installed."
 
 
+def _shell_value(value: str | None, placeholder: str) -> str:
+    """Quote a supplied flag value. An omitted value stays a shell-safe placeholder."""
+    if value is None or not value.strip():
+        return placeholder
+    return shlex.quote(value.strip())
+
+
+def dbus_login_command(
+    *,
+    env: str | None = None,
+    tenant_url: str | None = None,
+    client_id: str | None = None,
+) -> str:
+    """Unlock the keyring and log in inside one ``dbus-run-session``.
+
+    ``env``, ``tenant_url``, and ``client_id`` are shell-quoted. Omitted values
+    stay placeholders. ``$KEYRING_PASSWORD`` and ``$BENCHLING_CLIENT_SECRET``
+    stay variable references; this command never contains a secret value.
+    """
+    login = (
+        'printf "%s" "$BENCHLING_CLIENT_SECRET" | benchling auth login '
+        f"--env {_shell_value(env, _PLACEHOLDER_ENV)} "
+        f"--tenant-url {_shell_value(tenant_url, _PLACEHOLDER_URL)} "
+        f"--client-id {_shell_value(client_id, _PLACEHOLDER_CLIENT)} "
+        "--secret-stdin"
+    )
+    # The session exits with its shell, and the bus exits with it. Login has to
+    # be in that same shell or the secret is stored on a bus that is already gone.
+    script = f'printf "%s\\n" "$KEYRING_PASSWORD" | {_UNLOCK}; {login}'
+    return f"dbus-run-session -- sh -c {shlex.quote(script)}"
+
+
+@contextmanager
+def bind_login_fix(
+    *,
+    env: str | None,
+    tenant_url: str | None,
+    client_id: str | None,
+) -> Iterator[None]:
+    """Use these login values in a keychain error raised inside the block."""
+    token = _login_fix.set(_LoginFix(env=env, tenant_url=tenant_url, client_id=client_id))
+    try:
+        yield
+    finally:
+        _login_fix.reset(token)
+
+
 def _fix_command(cause: str) -> str:
     """One command. The README has the rest, including a long-lived bus."""
     if cause == "no_backend":
         return _INSTALL
-    return _SESSION
+    current = _login_fix.get()
+    if current is None:
+        return dbus_login_command()
+    return dbus_login_command(
+        env=current.env,
+        tenant_url=current.tenant_url,
+        client_id=current.client_id,
+    )
 
 
 def keychain_message(cause: str) -> str:

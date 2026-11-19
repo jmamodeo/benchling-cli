@@ -222,7 +222,7 @@ Put that same `DBUS_SESSION_BUS_ADDRESS` in the environment of later shells, cro
 
 If `systemctl --user status` works, a user bus is often already listening at `unix:path=$XDG_RUNTIME_DIR/bus`. Export `DBUS_SESSION_BUS_ADDRESS` to that socket, then unlock the keyring. SSH and cron do not receive the user session's environment on their own. `loginctl enable-linger "$USER"` keeps the systemd user session after logout so that bus can stay up.
 
-If the collection is locked, or the session bus has no `org.freedesktop.secrets` name, the error is the cause, one `dbus-run-session` command that unlocks the keyring and logs in inside that shell, and a pointer here. If no provider is installed, the command is `sudo apt-get install -y gnome-keyring dbus`. The note about the MCP client `env` block and cron is included only when `benchling mcp serve` raises the error. macOS and Windows use the system keychain and do not need this session.
+If the collection is locked, or the session bus has no `org.freedesktop.secrets` name, the error is the cause, one `dbus-run-session` command that unlocks the keyring and logs in inside that shell, and a pointer here. During `auth login` that command uses the environment name, the normalized tenant URL, and the client ID you passed, or the ones already saved for that environment. A value you did not supply stays a placeholder (`--env dev`, `https://your-tenant.benchling.com`, `CLIENT`). `$KEYRING_PASSWORD` and `$BENCHLING_CLIENT_SECRET` stay shell variables. `auth status`, `mcp serve`, and other commands keep the placeholders. If no provider is installed, the command is `sudo apt-get install -y gnome-keyring dbus`. The note about the MCP client `env` block and cron is included only when `benchling mcp serve` raises the error. macOS and Windows use the system keychain and do not need this session.
 
 `BENCHLING_TOOLKIT_HOME` overrides the state directory (the platform config directory plus `benchling-toolkit` otherwise). It does not hold secrets. HTTPS uses the operating system's certificate trust store, with certificate-chain and hostname verification enabled. No insecure TLS fallback is available.
 
@@ -416,7 +416,7 @@ uv run mypy
 uv run pytest --cov
 ```
 
-The suite has 259 test functions (403 collected cases, parametrization included) and reaches 98% branch coverage. CI enforces a `fail_under` floor of 96% in `pyproject.toml`, and also builds the sdist and wheel, runs `twine check`, and smoke-tests the built wheel.
+The suite has 265 test functions (409 collected cases, parametrization included) and reaches 98% branch coverage. CI enforces a `fail_under` floor of 96% in `pyproject.toml`, and also builds the sdist and wheel, runs `twine check`, and smoke-tests the built wheel.
 
 ### Opt-in sandbox exercise
 
