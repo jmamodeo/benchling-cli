@@ -481,7 +481,17 @@ uv run mypy
 uv run pytest --cov
 ```
 
-The suite has 370 test functions (594 collected cases, parametrization included) and reaches 97% branch coverage. CI enforces a `fail_under` floor of 96% in `pyproject.toml`, and also builds the sdist and wheel, runs `twine check`, and smoke-tests the built wheel.
+The suite has 396 test functions (620 collected cases, parametrization included) and reaches 97% branch coverage. CI enforces a `fail_under` floor of 96% in `pyproject.toml`, and also builds the sdist and wheel, runs `twine check`, and smoke-tests the built wheel.
+
+### Public OpenAPI drift
+
+`.github/workflows/openapi-drift.yml` runs every Monday at 12:00 UTC and from the Actions tab (`workflow_dispatch`). It downloads the public V3 spec from the URL stored in `contracts/openapi-manifest.json` and fails when the SHA-256 differs. The failure names each path in that file's `routes_used` list whose operation or referenced definition changed. The job uses the public spec only: no tenant and no credentials.
+
+```console
+uv run python scripts/check_openapi_drift.py
+```
+
+`--spec-file` compares a local copy. The script's tests use fixture specs and stay offline.
 
 ### Opt-in sandbox exercise
 

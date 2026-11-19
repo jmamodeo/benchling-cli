@@ -1,0 +1,27 @@
+name: OpenAPI drift
+
+# Downloads the public V3 spec URL recorded in contracts/openapi-manifest.json.
+# The public spec needs no tenant and no credentials.
+on:
+  schedule:
+    # Monday 12:00 UTC. GitHub may delay scheduled runs.
+    - cron: "0 12 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  v3-spec:
+    name: Public V3 spec
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      - name: Set up Python
+        run: uv python install 3.12
+      - name: Install dependencies
+        run: uv sync --extra dev --python 3.12
+      - name: Compare the public V3 spec with the vendored manifest
+        run: uv run python scripts/check_openapi_drift.py

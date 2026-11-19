@@ -8,6 +8,7 @@ All notable changes to this project are documented here. The format is based on
 
 ### Added
 
+- A weekly GitHub Actions workflow, `.github/workflows/openapi-drift.yml`, downloads the public V3 OpenAPI spec from the URL in `contracts/openapi-manifest.json` and fails when the SHA-256 differs. The failure names each `routes_used` path whose operation or referenced definition changed. The workflow also runs on `workflow_dispatch`. The public spec needs no tenant and no credentials. `scripts/check_openapi_drift.py` performs the comparison. Its tests use fixture specs and stay offline.
 - `ARCHITECTURE.md` explains the plan, apply, and journal flow, with a sequence diagram.
 - `docs/threat-model.md` covers credentials, stale or replayed plans, write scoping, and agent misuse. It names the code for each control and the cases that code does not close.
 - The README embeds a GIF of the offline fixture demo and links an asciinema cast built from the same `scripts/demo.py` output. The session uses the in-process fake API. No live tenant is contacted.
