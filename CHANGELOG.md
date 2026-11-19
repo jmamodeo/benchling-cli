@@ -17,6 +17,18 @@ All notable changes to this project are documented here. The format is based on
 
 ### Added
 
+- `benchling entry list` and the MCP tool `list_entries` list entries by project, folder, schema, modified date range, and exact name. Filters are server-side. A folder filter uses V2 `GET /entries`, because V3 `GET /entry/items` ignores `folderId`. The other filters use V3 unless a folder is set, in which case the whole query stays on V2. Pages default to 50, cap at 100, and return `next_token`.
+- `benchling schema list` and the MCP tool `list_schemas` list entry, result, and run schemas (`/entry-schema/items`, `/result-schema/items`, `/run-schema/items`), following every upstream page up to the caller's limit.
+- `schema get` and `get_schema` include each dropdown field's options from `/dropdown/{id}` and `/dropdown/{id}/options/items`.
+- `contracts/list-parameters.json` records the query parameters entry and schema lists may send. Tests reject a list call that adds a parameter outside that list. Write bodies are checked against the vendored OpenAPI snapshots.
+
+### Fixed
+
+- A document move that would not leave the entry starting with a section fails in preview with `Entry must start with a section`, before a plan is saved or anything is written.
+- Apply journal events record the raw HTTP status of each write (`http_status`).
+
+### Added
+
 - `benchling auth login` accepts `--tenant-url` and `--client-id`. Together with `--secret-stdin`, login runs with no terminal and does not call `getpass`, so there is no echo warning. A missing value with no terminal is one error that names the flags.
 - Keychain failures name the cause (no Secret Service backend, D-Bus session not reachable, or a locked collection) and the headless Linux commands (`dbus-run-session` and `gnome-keyring-daemon --unlock --components=secrets`). README has a Headless Linux section. There is still no plaintext fallback.
 - `benchling mcp serve --verbose` turns request logging on. It is off by default.

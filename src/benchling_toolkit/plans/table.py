@@ -15,7 +15,7 @@ from ..models import (
     ChangePlan,
 )
 from ..services import entry_version
-from .base import PlannerBase, PlanParts
+from .base import PlannerBase, PlanParts, write_event_details
 
 _EVALUATION_WARNING = (
     "Updating a cell or appending rows resets table evaluation until "
@@ -160,7 +160,7 @@ class TablePlanning(PlannerBase):
                 "Entry version changed after the plan was created",
                 details={"expected": expected, "status": exc.details.get("status")},
             ) from exc
-        self._event(journal, stage, "succeeded", {"response": response})
+        self._event(journal, stage, "succeeded", write_event_details(response))
         return {
             "table_part_id": part_id,
             "operation": operation,

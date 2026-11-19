@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlparse
 
+from . import listing
 from .api import BenchlingAPI
 from .errors import ConflictError, NotFoundError, UnsupportedError, UpstreamError, ValidationError
 from .models import CompletenessIssue, EntrySnapshot
@@ -378,12 +379,12 @@ class BenchlingService:
                 "No entry matches the supplied ID",
                 details={"reference": reference},
             )
-        entry = exact[0]
+        found = exact[0]
         return {
             "input": reference,
-            "entry_id": entry["id"],
-            "display_id": entry.get("displayId"),
-            "name": entry.get("name"),
+            "entry_id": found["id"],
+            "display_id": found.get("displayId"),
+            "name": found.get("name"),
             "resolved_by": "display_id",
         }
 
@@ -594,11 +595,13 @@ class BenchlingService:
         return {"resolved": resolved, "part": part, "table": table}
 
     async def get_schema(self, schema_id: str) -> dict[str, Any]:
-        """Return a result or entry schema (chosen by ID prefix) with all its field definitions."""
-        if schema_id.startswith("assaysch_"):
-            base = f"/result-schema/{schema_id}"
-        else:
-            base = f"/entry-schema/{schema_id}"
+        """Return an entry, result, or run schema with its field definitions.
+
+        The collection is chosen from the id prefix: ``assaysch_`` is a result
+        schema, ``runsch_`` is a run schema, and any other id is an entry schema.
+        Dropdown fields include the dropdown and its options.
+        """
+        base = f"/{listing.schema_collection(schema_id)}/{schema_id}"
         schema = await self.api.request("GET", base)
         fields = [
             item
@@ -606,7 +609,59 @@ class BenchlingService:
                 f"{base}/field-definitions/items", params={"pageSize": 100}
             )
         ]
-        return {"schema": schema, "field_definitions": fields}
+        return {"schema": schema, "field_definitions": await self._with_dropdowns(fields)}
+
+    async def _with_dropdowns(self, fields: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Copy field definitions, attaching options for each dropdown field."""
+        cache: dict[str, dict[str, Any]] = {}
+        enriched: list[dict[str, Any]] = []
+        for field in fields:
+            if field_definition_type(field) != "DROPDOWN":
+                enriched.append(field)
+                continue
+            dropdown_id = listing.dropdown_id_of(field)
+            if dropdown_id is None:
+                enriched.append(field)
+                continue
+            if dropdown_id not in cache:
+                cache[dropdown_id] = await listing.load_dropdown(self.api, dropdown_id)
+            enriched.append({**field, "dropdown": cache[dropdown_id]})
+        return enriched
+
+    async def list_entries(
+        self,
+        *,
+        project: object = None,
+        folder: object = None,
+        schema_id: object = None,
+        name: object = None,
+        modified_after: object = None,
+        modified_before: object = None,
+        limit: object = listing.LIST_LIMIT,
+        cursor: object = None,
+    ) -> dict[str, Any]:
+        """Return one page of entries matching the server-side filters."""
+        return await listing.list_entries(
+            self.api,
+            project=project,
+            folder=folder,
+            schema_id=schema_id,
+            name=name,
+            modified_after=modified_after,
+            modified_before=modified_before,
+            limit=limit,
+            cursor=cursor,
+        )
+
+    async def list_schemas(
+        self,
+        *,
+        kind: object = None,
+        limit: object = listing.LIST_LIMIT,
+        cursor: object = None,
+    ) -> dict[str, Any]:
+        """Return one page of entry, result, and run schemas."""
+        return await listing.list_schemas(self.api, kind=kind, limit=limit, cursor=cursor)
 
     async def get_entry_fields(self, reference: str) -> dict[str, Any]:
         """Return an entry's custom fields keyed by raw and system name, with schema, project and result tables."""

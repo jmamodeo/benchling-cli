@@ -261,12 +261,23 @@ benchling --env dev section get etr_abc123 docpart_section1
 benchling --env dev part get etr_abc123 docpart_text1
 benchling --env dev table get docpart_table1
 benchling --env dev schema get entsch_example
+benchling --env dev schema list
+benchling --env dev schema list --kind run --limit 50
 benchling --env dev entry fields get etr_abc123
+benchling --env dev entry list --project src_example --modified-after 2026-01-01
+benchling --env dev entry list --folder lib_example --name "Example entry"
 benchling --env dev results list --entry etr_abc123
 benchling --env dev results tables etr_abc123
 ```
 
 Entry references may be canonical IDs, display IDs, or URLs for the selected tenant. Duplicate section titles must be addressed by part ID.
+
+`entry list` and `schema list` are read-only. They return one page, default 50 and at most 100, plus `next_token`. Pass that token back with `--cursor`. `schema list` reads entry schemas, then result schemas, then run schemas, following every upstream page until the page is full or the lists end. `schema get` adds the options of each dropdown field (`/dropdown/{id}` and `/dropdown/{id}/options/items`). There is no separate dropdown command.
+
+Every `entry list` filter is applied by Benchling. `routing.client_side` is always empty.
+
+- Without `--folder`, the query is V3 `GET /entry/items`. Server-side filters are project (`project.eq`), schema (`schema.eq`), name (`name.anyOf`), and the modified range (`modifiedAt.gte` and `modifiedAt.lte`). Name is an exact case-insensitive match, not a substring. The modified bounds are inclusive. A bare `YYYY-MM-DD` is the start of that UTC day for `--modified-after` and the end of that UTC day for `--modified-before`.
+- V3 entry listing has no folder parameter, and live tenants ignore `folderId` on that route, so this client never sends it there. `--folder` sends the whole query to V2 `GET /entries`. On that route folder (`folderId`), project (`projectId`), schema (`schemaId`), name (`names.anyOf`), and `modifiedAt` are all server-side. V2 takes one `modifiedAt` string; this client sends `>=` and `<=` joined by ` AND ` so the range stays inclusive.
 
 ### Preview and apply changes
 
@@ -328,7 +339,7 @@ On Linux the standard MCP SDK starts the stdio server with only `HOME`, `LOGNAME
 
 Startup failures, including a missing keychain, are a JSON envelope on stderr and a non-zero exit. Stdout is reserved for the MCP protocol. The stderr text names the MCP SDK's default environment and the `env` block. Request logging is off unless you pass `--verbose`.
 
-Every tool except `list_environments` takes a required `env` argument, and each call is authenticated with that environment's credentials. The server is read-only by default. To permit `apply_changes` in specific environments, add `--allow-writes ENV` after `serve` (repeatable, e.g. `--allow-writes dev --allow-writes test`); reads remain available in all environments. A plan can only be applied or checked in the environment that created it. `plan_changes` remains available because it performs remote reads and writes only an immutable local preview. Large entry, section, table, result, and schema responses expose offset/limit or cursor pagination and never silently truncate data.
+Every tool except `list_environments` takes a required `env` argument, and each call is authenticated with that environment's credentials. The server is read-only by default. To permit `apply_changes` in specific environments, add `--allow-writes ENV` after `serve` (repeatable, e.g. `--allow-writes dev --allow-writes test`); reads remain available in all environments. `list_entries` and `list_schemas` are reads, so they work without `--allow-writes`. A plan can only be applied or checked in the environment that created it. `plan_changes` remains available because it performs remote reads and writes only an immutable local preview. Large entry, section, table, result, and schema responses expose offset/limit or cursor pagination and never silently truncate data. `list_entries` and `list_schemas` use `limit` (default 50, maximum 100) and return `next_token` for the following page.
 
 The CLI and MCP tools share the same versioned envelope. Static schemas for the envelope and change specifications live under [`schemas/`](schemas/); MCP also publishes the generated input and output schema for each typed tool during tool discovery.
 
@@ -357,6 +368,7 @@ flowchart TD
 | `cli.py` | Typer command-line interface |
 | `mcp_server.py` | MCP tools, read-only default, write allow-list |
 | `services.py` | Typed read services and entry snapshots |
+| `listing.py` | Paged entry, schema, and dropdown discovery |
 | `plans/planner.py` | `ChangePlanner`: plan, apply (under a per-plan file lock), status, journal |
 | `plans/document.py`, `plans/table.py`, `plans/fields.py`, `plans/results.py` | One planning/apply mixin per change family |
 | `plans/repository.py` | Plan and journal persistence, checksums, JSON diff |
@@ -370,7 +382,8 @@ flowchart TD
 
 ## Safety model
 
-- **Preview, then apply.** `changes plan` only reads Benchling and writes an immutable local plan; nothing changes remotely until `changes apply`.
+- **Preview, then apply.** `changes plan` only reads Benchling and writes an immutable local plan; nothing changes remotely until `changes apply`. A document move that would leave the entry starting with anything other than a section fails in preview, before a plan is saved. Benchling rejects that shape with HTTP 400 `Entry must start with a section`.
+- **Journals record the HTTP status.** Each apply step stores the raw status Benchling returned (`http_status`) next to the response body. A local failure that never reached the API has no status.
 - **Plans are checksummed and scoped.** A plan stores a SHA-256 of its content, verified on load, and is bound to the environment and tenant that created it. The checksum catches accidental corruption; it is not a signature and does not defend against someone who can already write to your state directory.
 - **Version preconditions.** Document edits and table writes send the entry version observed at preview time, and Benchling answers HTTP 409 if it is stale. Table plans re-check that entry version just before writing. A concurrent edit becomes a conflict instead of an overwrite. Entry field updates have no atomic server-side precondition, so the affected values are compared immediately before writing; this is best effort.
 - **Single use.** A plan with any prior attempt cannot be applied again, and a per-plan file lock stops a CLI and an MCP process from applying the same plan concurrently on one machine.
@@ -416,7 +429,7 @@ uv run mypy
 uv run pytest --cov
 ```
 
-The suite has 265 test functions (409 collected cases, parametrization included) and reaches 98% branch coverage. CI enforces a `fail_under` floor of 96% in `pyproject.toml`, and also builds the sdist and wheel, runs `twine check`, and smoke-tests the built wheel.
+The suite has 291 test functions (454 collected cases, parametrization included) and reaches 98% branch coverage. CI enforces a `fail_under` floor of 96% in `pyproject.toml`, and also builds the sdist and wheel, runs `twine check`, and smoke-tests the built wheel.
 
 ### Opt-in sandbox exercise
 
@@ -442,6 +455,7 @@ uv run python scripts/sandbox_exercise.py \
 - Assay result submissions stay pending until a person integrates them in Benchling.
 - State is local to one machine and the package is not published on PyPI.
 - The offline suite uses a synthetic fake; it cannot prove compatibility with every tenant configuration.
+- `entry list --name` is an exact case-insensitive match. It does not search substrings. Folder filters use the V2 entry list because the V3 list ignores `folderId`.
 
 See [API limitations](docs/api-limitations.md) and the [research record](docs/research.md) before enabling writes against production data.
 

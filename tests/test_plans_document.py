@@ -158,6 +158,46 @@ async def test_delete_single_part_defaults_end_of_range_to_start(runtime, fake) 
     assert "docpart_text2" not in fake.part_ids()
 
 
+async def test_move_that_would_not_start_with_a_section_is_rejected_before_apply(
+    runtime, fake
+) -> None:
+    with pytest.raises(ValidationError, match="Entry must start with a section"):
+        await plan(
+            runtime,
+            {
+                "operation": "move",
+                "from_part_id": TEXT_PART,
+                "position": "beginning_of_document",
+            },
+        )
+    with pytest.raises(ValidationError, match="Entry must start with a section"):
+        await plan(
+            runtime,
+            {
+                "operation": "move",
+                "from_part_id": "docpart_sec1",
+                "position": "end_of_document",
+            },
+        )
+    with pytest.raises(ValidationError, match="Entry must start with a section"):
+        await plan(
+            runtime,
+            {
+                "operation": "move",
+                "from_part_id": "docpart_text2",
+                "position": "docpart_sec1",
+            },
+        )
+    assert fake.writes() == []
+    assert not list(runtime.repository.config.plans_dir.glob("*.json"))
+    parked = await plan(
+        runtime,
+        {"operation": "move", "from_part_id": "docpart_sec1", "position": TEXT_PART},
+    )
+    assert parked.after["position"] == TEXT_PART
+    assert fake.writes() == []
+
+
 async def test_move_range_to_destination(runtime, fake) -> None:
     planned = await plan(
         runtime,
@@ -245,6 +285,8 @@ async def test_replace_text_inserts_replacement_then_deletes_original(runtime, f
     assert applied["journal"]["result"]["changed_part_ids"] == [TEXT_PART, "docpart_new1"]
     stages = [event["stage"] for event in applied["journal"]["events"]]
     assert stages == ["apply", "insert_replacement", "delete_original", "apply"]
+    assert applied["journal"]["events"][1]["details"]["http_status"] == 200
+    assert applied["journal"]["events"][2]["details"]["http_status"] == 200
 
 
 async def test_replace_text_partial_failure_keeps_inserted_part_and_journals_it(
@@ -265,6 +307,8 @@ async def test_replace_text_partial_failure_keeps_inserted_part_and_journals_it(
         "insert_replacement",
         "apply",
     ]
+    assert status["journal"]["events"][1]["details"]["http_status"] == 200
+    assert status["journal"]["events"][2]["details"]["http_status"] == 409
     with pytest.raises(ConflictError):
         await runtime.planner.apply(planned.id)
 
@@ -286,7 +330,9 @@ async def test_local_failure_before_any_write_is_a_failed_plan(runtime, fake) ->
     with pytest.raises(UpstreamError) as caught:
         await runtime.planner.apply(planned.id)
     assert caught.value.details["type"] == "RuntimeError"
-    assert (await runtime.planner.status(planned.id))["journal"]["status"] == "failed"
+    journal = (await runtime.planner.status(planned.id))["journal"]
+    assert journal["status"] == "failed"
+    assert "http_status" not in journal["events"][-1]["details"]
 
 
 async def test_server_error_on_write_leaves_plan_in_unknown_state(runtime, fake) -> None:
@@ -295,6 +341,8 @@ async def test_server_error_on_write_leaves_plan_in_unknown_state(runtime, fake)
     with pytest.raises(PartialCompletionError) as caught:
         await runtime.planner.apply(planned.id)
     assert caught.value.details["journal"]["status"] == "unknown"
+    unknown = caught.value.details["journal"]["events"][-1]
+    assert unknown["details"]["http_status"] == 503
     # A 5xx on a write is never retried.
     assert len(fake.writes()) == 1
     with pytest.raises(ConflictError):
@@ -317,4 +365,6 @@ async def test_server_rejects_stale_version_mid_apply(runtime, fake) -> None:
     with pytest.raises(ConflictError):
         await runtime.planner.apply(planned.id)
     assert TEXT_PART in fake.part_ids()
-    assert (await runtime.planner.status(planned.id))["journal"]["status"] == "failed"
+    status = await runtime.planner.status(planned.id)
+    assert status["journal"]["status"] == "failed"
+    assert status["journal"]["events"][-1]["details"]["http_status"] == 409

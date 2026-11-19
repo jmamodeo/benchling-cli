@@ -16,7 +16,7 @@ from ..models import (
     ChangeJournal,
     ChangePlan,
 )
-from .base import PlanParts
+from .base import PlanParts, write_event_details
 from .fields import FieldNormalization
 
 
@@ -164,12 +164,15 @@ class ResultsPlanning(FieldNormalization):
                     "client_record_ids": plan.after.get("client_record_ids", []),
                 },
             )
-        result = {
-            "response": response,
+        recorded = write_event_details(response)
+        result: dict[str, Any] = {
+            "response": recorded["response"],
             "task_id": task_id,
             "record_ids": [],
             "client_record_ids": plan.after.get("client_record_ids", []),
             "state": "submission_pending",
         }
+        if "http_status" in recorded:
+            result["http_status"] = recorded["http_status"]
         self._event(journal, "submit_results", "succeeded", result)
         return result

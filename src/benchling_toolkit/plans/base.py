@@ -18,6 +18,16 @@ from ..services import (
 )
 from .repository import PlanRepository
 
+
+def write_event_details(response: dict[str, Any], **extra: Any) -> dict[str, Any]:
+    """Journal payload for one write: the response body and its raw HTTP status."""
+    status = getattr(response, "status_code", None)
+    details: dict[str, Any] = {"response": dict(response), **extra}
+    if isinstance(status, int):
+        details["http_status"] = status
+    return details
+
+
 # before, after, preconditions, guarantees, warnings
 PlanParts = tuple[dict[str, Any], dict[str, Any], dict[str, Any], list[str], list[str]]
 

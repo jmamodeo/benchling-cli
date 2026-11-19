@@ -24,9 +24,16 @@ Primary sources:
 - [Benchling SDK 1.25.0](https://benchling.com/sdk-docs/1.25.0/index.html): SDK scope and V2 service surface.
 - [MCP Python SDK](https://py.sdk.modelcontextprotocol.io/): stdio server, typed tools, structured output, and in-process testing.
 
-The checksums recorded in `contracts/openapi-manifest.json` identify the exact public specifications reviewed. The YAML snapshots next to that manifest are those files. Tests validate the client's request bodies against them and do not need network access.
+The checksums recorded in `contracts/openapi-manifest.json` identify the exact public specifications reviewed. The YAML snapshots next to that manifest are those files. Tests validate the client's request bodies against them and do not need network access. List query parameters are also checked against `contracts/list-parameters.json`.
 
-A further check on 2026-11-19, against the V3 spec `d2594d47…` and a live tenant, changed four of those decisions:
+A parameter check on 2026-11-19 against those snapshots confirmed:
+
+- V3 `GET /entry/items` documents `project.eq`, `schema.eq`, `name.anyOf`, and `modifiedAt.gt` / `gte` / `lt` / `lte`. It does not document `folderId`. Live tenants ignore `folderId` on that route.
+- V2 `GET /entries` documents `projectId`, `schemaId`, `name`, `names.anyOf`, and one `modifiedAt` comparison string using `>` and `<`. The `listEntries` operation text does not repeat `folderId`, but the V2 components still define `folderIdFilter` (`folderId`, "Restricts results to those in the folder") and the historical SDK sends it. This client sends `folderId` only on V2, and uses `>=` / `<=` so a modified range stays inclusive.
+- V3 schema lists are `GET /entry-schema/items`, `/result-schema/items`, and `/run-schema/items`, each paged with `pageSize` (default 50, maximum 100) and `nextToken`.
+- Dropdowns are `GET /dropdown/{dropdown_id}` and `GET /dropdown/{dropdown_id}/options/items` (unpaginated). A dropdown field points at the dropdown through `dropdownId` or `linkDefinition.id`.
+
+The same day's check of the V3 spec `d2594d47…` and a live tenant set the write contract:
 
 - `GET /document-part-unstructured-table/{id}` returns `rows` as a URL plus `rowCount`. Row pages are `GET .../rows/items` with `pageSize` at most 100. The only version is `versionMetadata.versionId`, and it is the entry version. Cell values use `inputValue.value` with `__typename` `TextValue`.
 - `PATCH /document-part-unstructured-table/{id}` is gone (HTTP 405). Cell edits are `partsMutation.operationType` `update_table_cells`; appended rows are `insert_table_rows`. Both are `PATCH /entry/{id}` and both apply to unstructured tables. A stale entry version is HTTP 409 `Version mismatch`.

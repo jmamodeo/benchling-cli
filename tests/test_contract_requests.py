@@ -118,7 +118,7 @@ async def test_every_client_request_body_matches_the_openapi_schema(runtime, fak
         "document",
         {
             "operation": "move",
-            "from_part_id": "docpart_text2",
+            "from_part_id": "docpart_sec2",
             "position": "beginning_of_document",
         },
     )
@@ -186,3 +186,39 @@ async def test_every_client_request_body_matches_the_openapi_schema(runtime, fak
 async def _apply(runtime, family: str, request: dict[str, Any]) -> None:
     planned = await runtime.planner.plan(ENTRY_ID, family, request)
     await runtime.planner.apply(planned.id)
+
+
+LISTS = json.loads((ROOT / "contracts" / "list-parameters.json").read_text(encoding="utf-8"))
+
+
+async def test_list_query_parameters_stay_inside_the_vendored_allow_list(runtime, fake) -> None:
+    """Entry and schema lists may send only the parameters recorded for each route."""
+    await runtime.service.list_entries(
+        project="src_abc123",
+        schema_id="entsch_abc123",
+        name="Synthetic experiment",
+        modified_after="2026-01-01",
+        modified_before="2026-12-31",
+    )
+    page = await runtime.service.list_schemas(limit=2)
+    await runtime.service.list_schemas(limit=2, cursor=page["next_token"])
+    await runtime.service.list_entries(
+        folder="lib_abc123",
+        project="src_abc123",
+        schema_id="entsch_abc123",
+        name="Synthetic experiment",
+        modified_after="2026-06-01",
+        modified_before="2026-06-30",
+        cursor="0",
+    )
+    allowed = LISTS["routes"]
+    listed = [call for call in fake.calls if f"{call.method} {call.path}" in allowed]
+    assert listed
+    for call in listed:
+        key = f"{call.method} {call.path}"
+        assert set(call.params) <= set(allowed[key]), key
+    v3_entry_lists = [call for call in fake.calls if call.path.endswith("/entry/items")]
+    assert v3_entry_lists
+    assert all("folderId" not in call.params for call in v3_entry_lists)
+    assert "folderId" not in allowed["GET /api/v3/entry/items"]
+    assert any(call.params.get("folderId") == "lib_abc123" for call in fake.calls)

@@ -152,6 +152,10 @@ async def test_apply_sends_normalized_schema_fields_and_updates_entry(runtime, f
     assert fake.entry_fields["Temperature"] == 42
     assert applied["journal"]["result"]["concurrency"] == "best_effort_value_comparison"
     assert applied["journal"]["status"] == "succeeded"
+    updated = next(
+        event for event in applied["journal"]["events"] if event["stage"] == "update_fields"
+    )
+    assert updated["details"]["http_status"] == 200
 
 
 async def test_apply_detects_changed_field_definitions(runtime, fake) -> None:

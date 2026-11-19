@@ -20,7 +20,9 @@ READ_TOOLS = {
     "get_section",
     "get_part",
     "get_table",
+    "list_entries",
     "get_schema",
+    "list_schemas",
     "get_entry_fields",
     "list_results",
     "get_result",
@@ -216,6 +218,10 @@ async def test_full_entry_pages_parts_results_and_table_rows(client, fake) -> No
         ("list_result_tables", {"reference": ENTRY_ID, "limit": 0}),
         ("list_results", {"page_size": 0}),
         ("list_results", {"page_size": 101}),
+        ("list_entries", {"limit": 0}),
+        ("list_entries", {"limit": 101}),
+        ("list_schemas", {"limit": 0}),
+        ("list_schemas", {"kind": "sample"}),
     ],
 )
 async def test_invalid_pagination_arguments_return_validation_envelopes(
@@ -554,6 +560,48 @@ def test_serve_rejects_unknown_writable_env(benchling_env) -> None:
 def test_serve_requires_at_least_one_environment() -> None:
     with pytest.raises(AuthenticationError, match="No environments configured"):
         run_mcp_server()
+
+
+async def test_list_entries_is_read_only_and_routes_folder_filters_to_v2(client, fake) -> None:
+    result = await client.call_tool(
+        "list_entries",
+        {"env": "sandbox", "folder": "lib_abc123", "name": "Late note", "limit": 10},
+    )
+    assert result.is_error is False, result
+    payload = result.structured_content
+    assert set(payload) == {"schema_version", "ok", "data", "error", "meta"}
+    data = payload["data"]
+    assert [item["id"] for item in data["items"]] == ["etr_list4"]
+    assert data["routing"]["api_version"] == 2
+    assert data["routing"]["client_side"] == []
+    assert fake.writes() == []
+    assert all(not call.path.endswith("/entry/items") for call in fake.calls)
+
+
+async def test_list_schemas_pages_without_allow_writes(client, fake) -> None:
+    fake.schema_page_size = 2
+    first = (await call(client, "list_schemas", env="sandbox", limit=2))["data"]
+    assert [item["kind"] for item in first["items"]] == ["entry", "entry"]
+    assert first["next_token"]
+    second = (
+        await call(client, "list_schemas", env="sandbox", limit=50, cursor=first["next_token"])
+    )["data"]
+    ids = [item["id"] for item in first["items"] + second["items"]]
+    assert ids[0] == "entsch_abc123"
+    assert "runsch_two" in ids
+    assert len(ids) == len(set(ids))
+    assert second["next_token"] is None
+    assert fake.writes() == []
+
+
+async def test_get_schema_includes_dropdown_options(client, fake) -> None:
+    data = (await call(client, "get_schema", env="sandbox", schema_id="entsch_choice"))["data"]
+    status = data["field_definitions"][0]
+    assert status["dropdown"]["name"] == "Status"
+    assert status["dropdown"]["options"][0]["id"] == "sfso_open"
+    orphan = data["field_definitions"][2]
+    assert "dropdown" not in orphan
+    assert fake.writes() == []
 
 
 def test_serve_runs_stdio_transport_with_validated_writable_envs(

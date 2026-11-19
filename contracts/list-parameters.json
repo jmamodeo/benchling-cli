@@ -1,0 +1,27 @@
+{
+  "description": "Query parameters this client may send on list routes. A request may use a subset. V3 entry listing has no folder parameter; folderId is only sent to V2 /entries.",
+  "routes": {
+    "GET /api/v3/entry/items": [
+      "pageSize",
+      "nextToken",
+      "project.eq",
+      "schema.eq",
+      "name.anyOf",
+      "modifiedAt.gte",
+      "modifiedAt.lte"
+    ],
+    "GET /api/v2/entries": [
+      "pageSize",
+      "nextToken",
+      "folderId",
+      "projectId",
+      "schemaId",
+      "names.anyOf",
+      "modifiedAt",
+      "displayIds"
+    ],
+    "GET /api/v3/entry-schema/items": ["pageSize", "nextToken"],
+    "GET /api/v3/result-schema/items": ["pageSize", "nextToken"],
+    "GET /api/v3/run-schema/items": ["pageSize", "nextToken"]
+  }
+}

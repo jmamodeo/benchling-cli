@@ -25,6 +25,20 @@ from .redact import redact_text
 from .tls import verified_context
 
 
+class APIPayload(dict[str, Any]):
+    """JSON object from Benchling, with the HTTP status kept beside the body.
+
+    The status is an attribute, not a key, so journals and callers that treat the
+    payload as the response body do not see it unless they read ``status_code``.
+    """
+
+    status_code: int
+
+    def __init__(self, body: dict[str, Any], status_code: int) -> None:
+        super().__init__(body)
+        self.status_code = status_code
+
+
 class BenchlingAPI:
     """Small V2/V3 client with read-only retries and normalized errors."""
 
@@ -56,7 +70,7 @@ class BenchlingAPI:
         params: dict[str, Any] | None = None,
         json: Any = None,
         early_access: bool | None = None,
-    ) -> dict[str, Any]:
+    ) -> APIPayload:
         """Send one request and return the decoded JSON object.
 
         Only GET is retried. A non-GET with no confirmed response raises
@@ -151,7 +165,7 @@ class BenchlingAPI:
             delay = min(0.25 * (2**attempt) + random.random() * 0.1, 2.0)
         await asyncio.sleep(delay)
 
-    def _decode(self, response: httpx.Response, *, method: str, path: str) -> dict[str, Any]:
+    def _decode(self, response: httpx.Response, *, method: str, path: str) -> APIPayload:
         payload: Any
         if response.content:
             try:
@@ -172,7 +186,7 @@ class BenchlingAPI:
                 raise UpstreamError(
                     "Benchling returned an unexpected response shape", details=details
                 )
-            return payload
+            return APIPayload(payload, response.status_code)
         if response.status_code == 400:
             raise ValidationError("Benchling rejected the request", details=details)
         if response.status_code == 401:

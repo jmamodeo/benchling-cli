@@ -151,6 +151,10 @@ async def test_apply_sends_only_the_edited_cells(runtime, fake) -> None:
             }
         ],
     }
+    updated = next(
+        event for event in applied["journal"]["events"] if event["stage"] == "update_table_cells"
+    )
+    assert updated["details"]["http_status"] == 200
     assert fake.table_content["rows"][0]["cells"][1]["inputValue"]["value"] == "3"
     assert fake.entry_version == 2
     assert [event["stage"] for event in applied["journal"]["events"]] == [
