@@ -19,7 +19,7 @@ from typing import Any
 from . import listing
 from .errors import NotFoundError, UpstreamError, ValidationError
 from .redact import redact_text
-from .services import BenchlingService
+from .services import BenchlingService, field_definition_type
 
 _KINDS = {"table", "results-table", "assay-results"}
 _FORMATS = {"json", "csv"}
@@ -29,6 +29,7 @@ _V2_STRUCTURED_TABLE_PREFIX = "strtbl_"
 _V2_STRUCTURED_TABLE_NAMESPACE = "v2_structured_table"
 _V3_DOCUMENT_PART_NAMESPACE = "v3_document_part"
 _NESTED_RESULT_KEYS = {"fields", "schemaFields"}
+_REF_TYPENAMES = {"SchemaFieldDefinitionRef", "FieldDefinition"}
 
 
 async def export_dataset(
@@ -276,12 +277,16 @@ async def _load_assay_results(
     """Read every assay-result page for the optional entry and schema filters."""
     collected = await service.list_all_results(entry=entry, schema_id=schema_id)
     records = collected["items"]
-    names = await _schema_field_names(service, records, collected.get("schema_id"))
+    names, link_flags = await _schema_field_names(service, records, collected.get("schema_id"))
     columns = _assay_columns(records, names)
     source: dict[str, Any] = {}
     _add_text(source, "entry_id", collected.get("entry_id"))
     _add_text(source, "schema_id", collected.get("schema_id"))
-    return columns, [_assay_row(record, columns, names) for record in records], source
+    return (
+        columns,
+        [_assay_row(record, columns, names, link_flags) for record in records],
+        source,
+    )
 
 
 def _add_text(source: dict[str, Any], key: str, value: object) -> None:
@@ -330,13 +335,17 @@ def _table_row(row: dict[str, Any], columns: list[str]) -> dict[str, Any]:
 
 
 def _cell_value(cell: dict[str, Any]) -> Any:
-    """Prefer a computed evaluation, otherwise the value that was entered."""
+    """Prefer a computed evaluation, otherwise the value that was entered.
+
+    A link or entity reference becomes its id, the same scalar assay-result
+    export writes for that field.
+    """
     evaluation = cell.get("evaluationValue")
     if isinstance(evaluation, dict) and evaluation.get("value") is not None:
-        return evaluation["value"]
+        return _unwrap_field(evaluation["value"])
     entered = cell.get("inputValue")
     if isinstance(entered, dict) and "value" in entered:
-        return entered["value"]
+        return _unwrap_field(entered["value"])
     return None
 
 
@@ -368,10 +377,13 @@ def _assay_columns(records: list[dict[str, Any]], names: dict[str, str] | None =
 
 
 def _assay_row(
-    record: dict[str, Any], columns: list[str], names: dict[str, str] | None = None
+    record: dict[str, Any],
+    columns: list[str],
+    names: dict[str, str] | None = None,
+    link_flags: dict[str, bool] | None = None,
 ) -> dict[str, Any]:
     values: dict[str, Any] = {}
-    for name, value in _field_pairs(record, names or {}).items():
+    for name, value in _field_pairs(record, names or {}, link_flags).items():
         values.setdefault(name, value)
     row: dict[str, Any] = {}
     for column in columns:
@@ -382,8 +394,15 @@ def _assay_row(
     return row
 
 
-def _field_pairs(record: dict[str, Any], names: dict[str, str]) -> dict[str, Any]:
+def _field_pairs(
+    record: dict[str, Any],
+    names: dict[str, str],
+    link_flags: dict[str, bool] | None = None,
+) -> dict[str, Any]:
     """Schema-field columns in response order. Later duplicates do not replace earlier ones."""
+    flags = link_flags or {}
+    raw_id = record.get("id")
+    owner_id = raw_id if isinstance(raw_id, str) and raw_id else None
     pairs: dict[str, Any] = {}
     raw = record.get("schemaFields")
     if isinstance(raw, list):
@@ -392,7 +411,7 @@ def _field_pairs(record: dict[str, Any], names: dict[str, str]) -> dict[str, Any
                 continue
             name = _schema_field_name(item, names)
             if name and name not in pairs:
-                pairs[name] = _schema_field_cell(item)
+                pairs[name] = _schema_field_cell(item, owner_id=owner_id, link_flags=flags)
     elif isinstance(raw, dict):
         for key, value in raw.items():
             if isinstance(key, str) and key and key not in pairs:
@@ -430,18 +449,66 @@ def _schema_field_name(item: dict[str, Any], names: dict[str, str]) -> str | Non
     return None
 
 
-def _schema_field_cell(item: dict[str, Any]) -> Any:
-    """Flatten a ``SchemaFieldValue``. A null value may still carry ``linkedEntityId``."""
+def _schema_field_cell(
+    item: dict[str, Any], *, owner_id: str | None, link_flags: dict[str, bool]
+) -> Any:
+    """Flatten a ``SchemaFieldValue``.
+
+    A null value may still name another entity through ``linkedEntityId``. An
+    unset field often carries the owning result's own id there, and that id is
+    not a value. It is kept only for a link field, and only when it differs
+    from ``owner_id``. A null value exports as null; an empty string stays empty.
+    """
     if "value" in item:
         flattened = _unwrap_field(item["value"])
         if flattened is not None:
             return flattened
+    else:
+        flattened = None
     linked = item.get("linkedEntityId")
-    if isinstance(linked, str) and linked:
+    if (
+        isinstance(linked, str)
+        and linked
+        and linked != owner_id
+        and _uses_linked_entity(item.get("fieldDefinition"), link_flags)
+    ):
         return linked
-    if "value" in item:
-        return _unwrap_field(item["value"])
+    return flattened
+
+
+def _uses_linked_entity(definition: object, link_flags: dict[str, bool]) -> bool:
+    """True when this field is a link, or when its type is not known."""
+    field_id = _definition_id(definition)
+    if field_id is not None and field_id in link_flags:
+        return link_flags[field_id]
+    if isinstance(definition, dict):
+        classified = _definition_is_link(definition)
+        if classified is not None:
+            return classified
+    return True
+
+
+def _definition_id(definition: object) -> str | None:
+    if isinstance(definition, str) and definition.strip():
+        return definition.strip()
+    if isinstance(definition, dict):
+        field_id = definition.get("id")
+        if isinstance(field_id, str) and field_id.strip():
+            return field_id.strip()
     return None
+
+
+def _definition_is_link(definition: dict[str, Any]) -> bool | None:
+    """True for a link field, False for another concrete type, None for a bare ref."""
+    kind = field_definition_type(definition)
+    if kind == "LINK" or kind.endswith("_LINK"):
+        return True
+    if kind != "UNKNOWN":
+        return False
+    typename = str(definition.get("__typename") or "").split(".")[-1]
+    if not typename or typename in _REF_TYPENAMES:
+        return None
+    return False
 
 
 def _unwrap_field(value: Any) -> Any:
@@ -499,14 +566,15 @@ def _record_needs_field_names(record: dict[str, Any]) -> bool:
 
 async def _schema_field_names(
     service: BenchlingService, records: list[dict[str, Any]], schema_id: object
-) -> dict[str, str]:
-    """Map field-definition ids to display names for records that need them.
+) -> tuple[dict[str, str], dict[str, bool]]:
+    """Map field-definition ids to display names, and record which ids are links.
 
     A missing schema is skipped. Other read failures propagate, so a schema outage
-    is not written out as raw field ids.
+    is not written out as raw field ids. Link flags are empty when no schema was
+    read. An unknown field may still use a linked id that is not the result id.
     """
     if not any(_record_needs_field_names(record) for record in records):
-        return {}
+        return {}, {}
     schema_ids: list[str] = []
     if isinstance(schema_id, str) and schema_id:
         schema_ids.append(schema_id)
@@ -515,6 +583,7 @@ async def _schema_field_names(
         if record_schema and record_schema not in schema_ids:
             schema_ids.append(record_schema)
     names: dict[str, str] = {}
+    link_flags: dict[str, bool] = {}
     for sid in schema_ids:
         try:
             detail = await service.get_schema(sid)
@@ -523,17 +592,17 @@ async def _schema_field_names(
         for definition in detail.get("field_definitions") or []:
             if not isinstance(definition, dict):
                 continue
-            display = definition.get("name")
             field_id = definition.get("id")
-            if (
-                isinstance(field_id, str)
-                and field_id
-                and isinstance(display, str)
-                and display.strip()
-                and field_id not in names
-            ):
+            if not isinstance(field_id, str) or not field_id:
+                continue
+            if field_id not in link_flags:
+                classified = _definition_is_link(definition)
+                if classified is not None:
+                    link_flags[field_id] = classified
+            display = definition.get("name")
+            if isinstance(display, str) and display.strip() and field_id not in names:
                 names[field_id] = display.strip()
-    return names
+    return names, link_flags
 
 
 def _render(

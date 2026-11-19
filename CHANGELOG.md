@@ -14,6 +14,8 @@ All notable changes to this project are documented here. The format is based on
 ### Fixed
 
 - `export --kind assay-results` writes one column per result-schema field. V3 results keep those values in `schemaFields`, and the column name is the field's display name. Links and entity references are written as ids.
+- An unset assay field stays empty. `linkedEntityId` is written only for a link field when it names a different entity. CSV writes `""` and JSON writes `null`.
+- `export --kind results-table` and `--kind table` flatten link and entity cells to ids, the same values assay-result export writes.
 - `export --part` accepts a `strtbl_…` id from `results tables` when `--entry` is that entry and `--kind` is `results-table`. The id is resolved to the entry's V3 results-table part, or the rows are read as assay results for that entry and schema. A `strtbl_…` id without `--entry`, or with `--kind table`, is a validation error that names the `v3_document_part` id from `entry inspect`.
 - `entry list --name` accepts a name that contains a comma. `name.anyOf` and `names.anyOf` are comma-separated and document no escape, so that name is sent as the V2 `name` parameter together with the other filters.
 - A modified timestamp with no time zone is a validation error. `YYYY-MM-DD` is still the start or end of that UTC day.

@@ -491,10 +491,11 @@ def _register_export_tool(mcp: MCPServer, pool: RuntimePool) -> None:
         part_id for table and results-table is a v3_document_part id (docpart_…)
         from inspect_entry. A v2_structured_table id (strtbl_…) from
         list_result_tables needs entry set to that same entry and kind
-        results-table. The response is a summary only: row count, columns, file
+        results-table.         The response is a summary only: row count, columns, file
         path, and a SHA-256 checksum. Rows are not returned. Pages are read
-        internally. An existing file is left unchanged unless overwrite is true.
-        Benchling is only read.
+        internally. Link and entity values are written as ids. An unset assay
+        field is empty. An existing file is left unchanged unless overwrite is
+        true. Benchling is only read.
         """
         return await safe(
             env,

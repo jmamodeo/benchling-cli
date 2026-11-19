@@ -17,7 +17,13 @@ from typer.testing import CliRunner
 
 from benchling_toolkit import cli
 from benchling_toolkit.errors import NotFoundError, UpstreamError, ValidationError
-from benchling_toolkit.export import _assay_columns, _assay_row, _cell_value, export_dataset
+from benchling_toolkit.export import (
+    _assay_columns,
+    _assay_row,
+    _cell_value,
+    _table_row,
+    export_dataset,
+)
 from benchling_toolkit.mcp_server import build_mcp_server
 
 SUMMARY_KEYS = {
@@ -517,6 +523,194 @@ async def test_assay_export_flattens_v3_schema_fields(runtime, fake, tmp_path) -
     assert "lysis buffer" not in json.dumps(json_summary)
 
 
+async def test_assay_export_leaves_unset_fields_empty(runtime, fake, tmp_path) -> None:
+    """A null schema field stays null. The result's own id is not a field value."""
+    _install_result_fields(fake)
+    fake.field_defs["assaysch_abc123"].extend(
+        [
+            {"name": "No id"},
+            {"id": "", "name": "Blank", "__typename": "TextFieldDefinition"},
+            {"id": "assayfield_mystery"},
+            {
+                "id": "assayfield_tube",
+                "name": "Tube again",
+                "__typename": "AnyEntityLinkFieldDefinition",
+            },
+        ]
+    )
+    fake.results = [
+        _v3_result(
+            "result_1",
+            [
+                _schema_field(
+                    "assayfield_tube",
+                    _link("ObjectLinkValue", "con_abc123"),
+                    linked="result_1",
+                ),
+                _schema_field("assayfield_contents", None, linked="result_1"),
+                _schema_field("assayfield_registry", None, linked="bfi_other"),
+                _schema_field("assayfield_entry", None, linked=ENTRY_ID),
+                _schema_field("assayfield_quantity", None, linked="result_1"),
+                _schema_field(
+                    "assayfield_unit",
+                    {"__typename": "TextValue", "value": ""},
+                    linked="result_1",
+                ),
+            ],
+        ),
+        _v3_result(
+            "result_2",
+            [
+                _schema_field("assayfield_tube", None, linked="result_2"),
+                _schema_field("assayfield_contents", _text("water")),
+                _schema_field("assayfield_registry", None),
+                _schema_field("assayfield_entry", None, linked="result_2"),
+                _schema_field("assayfield_quantity", None, linked="bfi_other"),
+                _schema_field("assayfield_unit", {"__typename": "BooleanValue", "value": False}),
+                _schema_field("assayfield_mystery", None, linked="ent_mystery"),
+            ],
+        ),
+    ]
+    path = tmp_path / "blank.csv"
+    summary = await _export(
+        runtime,
+        path,
+        kind="assay-results",
+        file_format="csv",
+        entry=ENTRY_ID,
+        schema_id="assaysch_abc123",
+    )
+    assert summary["columns"] == [
+        "id",
+        "createdAt",
+        "modifiedAt",
+        "Tube",
+        "Contents",
+        "Registry ID",
+        "Entry",
+        "Quantity",
+        "Quantity Unit",
+        "assayfield_mystery",
+        "archived",
+        "archiveReason",
+        "__typename",
+    ]
+    rows = list(csv.reader(path.read_text(encoding="utf-8").splitlines()))
+    assert rows[1] == [
+        "result_1",
+        "2026-01-01T00:00:00Z",
+        "2026-01-02T00:00:00Z",
+        "con_abc123",
+        "",
+        "",
+        ENTRY_ID,
+        "",
+        "",
+        "",
+        "false",
+        "",
+        "Result",
+    ]
+    assert rows[2][3:10] == ["", "water", "", "", "", "false", "ent_mystery"]
+    assert "result_1" not in rows[1][4:10]
+    assert "result_2" not in rows[2][3:10]
+    json_path = tmp_path / "blank.json"
+    await _export(
+        runtime,
+        json_path,
+        kind="assay-results",
+        file_format="json",
+        schema_id="assaysch_abc123",
+    )
+    document = json.loads(json_path.read_text(encoding="utf-8"))
+    assert document["rows"][0]["Tube"] == "con_abc123"
+    assert document["rows"][0]["Contents"] is None
+    assert document["rows"][0]["Registry ID"] is None
+    assert document["rows"][0]["Entry"] == ENTRY_ID
+    assert document["rows"][0]["Quantity"] is None
+    assert document["rows"][0]["Quantity Unit"] == ""
+    assert document["rows"][1]["Tube"] is None
+    assert document["rows"][1]["Entry"] is None
+    assert document["rows"][1]["Quantity"] is None
+    assert document["rows"][1]["Quantity Unit"] is False
+    assert document["rows"][1]["assayfield_mystery"] == "ent_mystery"
+    assert "con_abc123" not in json.dumps(summary)
+
+
+async def test_results_table_export_flattens_link_cells(runtime, fake, tmp_path) -> None:
+    """A listed results table writes link cells as ids, in JSON and CSV."""
+    fake.add_results_table("docpart_links")
+    spec = fake.results_parts["docpart_links"]
+    spec["columnDefinitions"] = [
+        {"name": "Tube"},
+        {"name": "Contents"},
+        {"name": "Quantity"},
+    ]
+    spec["rows"] = [
+        {
+            "id": "strow_1",
+            "cells": [
+                {
+                    "inputValue": {
+                        "__typename": "ObjectLinkValue",
+                        "value": {"__typename": "Container", "id": "con_abc123"},
+                    }
+                },
+                {
+                    "inputValue": {
+                        "__typename": "ObjectLinkListValue",
+                        "value": [
+                            {"__typename": "Container", "id": "con_abc123"},
+                            {"__typename": "Container", "id": "con_def456"},
+                        ],
+                    }
+                },
+                {"inputValue": {"__typename": "TextValue", "value": ""}},
+            ],
+        }
+    ]
+    fake.parts.append(
+        _results_part("docpart_links", name="Assay results", schema_id="assaysch_abc123")
+    )
+    json_path = tmp_path / "links.json"
+    summary = await _export(
+        runtime,
+        json_path,
+        kind="results-table",
+        file_format="json",
+        part_id="strtbl_example",
+        entry=ENTRY_ID,
+    )
+    assert summary["row_count"] == 1
+    assert summary["columns"] == ["Tube", "Contents", "Quantity"]
+    assert summary["source"]["part_id"] == "docpart_links"
+    assert summary["source"]["table_id"] == "strtbl_example"
+    document = json.loads(json_path.read_text(encoding="utf-8"))
+    assert document["rows"] == [
+        {
+            "Tube": "con_abc123",
+            "Contents": ["con_abc123", "con_def456"],
+            "Quantity": "",
+        }
+    ]
+    assert "Container" not in json_path.read_text(encoding="utf-8")
+    assert "con_abc123" not in json.dumps(summary)
+    csv_path = tmp_path / "links.csv"
+    csv_summary = await _export(
+        runtime,
+        csv_path,
+        kind="results-table",
+        file_format="csv",
+        part_id="docpart_links",
+    )
+    assert list(csv.reader(csv_path.read_text(encoding="utf-8").splitlines())) == [
+        ["Tube", "Contents", "Quantity"],
+        ["con_abc123", '["con_abc123","con_def456"]', ""],
+    ]
+    assert csv_summary["checksum"] == hashlib.sha256(csv_path.read_bytes()).hexdigest()
+    assert fake.writes() == []
+
+
 async def test_assay_export_keeps_values_when_the_schema_cannot_be_read(
     runtime, fake, tmp_path
 ) -> None:
@@ -981,6 +1175,156 @@ def test_cell_and_field_helpers_cover_empty_values() -> None:
     )
     assert _cell_value({}) is None
     assert _cell_value({"inputValue": {"value": ""}}) == ""
+    assert (
+        _cell_value(
+            {
+                "evaluationValue": {
+                    "value": {"id": "con_eval", "__typename": "Container"},
+                },
+                "inputValue": {"value": "typed"},
+            }
+        )
+        == "con_eval"
+    )
+    assert _cell_value({"inputValue": {"value": False}}) is False
+    assert _cell_value({"evaluationValue": {"value": 0}}) == 0
+    assert _table_row(
+        {
+            "cells": [
+                {
+                    "inputValue": {
+                        "value": {"id": "con_abc123", "__typename": "Container"},
+                    }
+                },
+                {
+                    "inputValue": {
+                        "value": [
+                            {"id": "con_abc123", "__typename": "Container"},
+                            {"id": "con_def456", "type": "entity"},
+                        ]
+                    }
+                },
+                {"inputValue": {"value": ""}},
+            ]
+        },
+        ["Tube", "Contents", "Quantity"],
+    ) == {
+        "Tube": "con_abc123",
+        "Contents": ["con_abc123", "con_def456"],
+        "Quantity": "",
+    }
+    linked = {
+        "id": "result_1",
+        "schemaFields": [
+            {
+                "fieldDefinition": {
+                    "id": "assayfield_text",
+                    "name": "Note",
+                    "__typename": "TextFieldDefinition",
+                },
+                "value": None,
+                "linkedEntityId": "bfi_other",
+            },
+            {
+                "fieldDefinition": {
+                    "id": "assayfield_link",
+                    "name": "Sample",
+                    "__typename": "EntryLinkFieldDefinition",
+                },
+                "value": None,
+                "linkedEntityId": "etr_other",
+            },
+            {
+                "fieldDefinition": {
+                    "id": "assayfield_forced",
+                    "name": "Forced",
+                    "__typename": "EntryLinkFieldDefinition",
+                },
+                "value": None,
+                "linkedEntityId": "etr_forced",
+            },
+            {
+                "fieldDefinition": "assayfield_unknown",
+                "value": None,
+                "linkedEntityId": "seq_abc123",
+            },
+            {
+                "fieldDefinition": {
+                    "id": "assayfield_decimal",
+                    "name": "Amount",
+                    "__typename": "DecimalFieldDefinition",
+                },
+                "value": None,
+                "linkedEntityId": "bfi_amount",
+            },
+            {
+                "fieldDefinition": {"type": "entity_link", "name": "Custom"},
+                "value": None,
+                "linkedEntityId": "ent_abc123",
+            },
+            {
+                "fieldDefinition": {"name": "Bare"},
+                "linkedEntityId": "ent_bare",
+            },
+            {
+                "fieldDefinition": {
+                    "__typename": "SchemaFieldDefinitionRef",
+                    "id": "assayfield_ref",
+                },
+                "value": None,
+                "linkedEntityId": "ent_ref",
+            },
+            {
+                "fieldDefinition": {
+                    "id": "assayfield_flag",
+                    "name": "Flag",
+                    "__typename": "BooleanFieldDefinition",
+                },
+                "value": False,
+                "linkedEntityId": "result_1",
+            },
+        ],
+    }
+    flags = {"assayfield_text": False, "assayfield_unknown": True, "assayfield_forced": False}
+    linked_row = _assay_row(
+        linked,
+        [
+            "id",
+            "Note",
+            "Sample",
+            "Forced",
+            "assayfield_unknown",
+            "Amount",
+            "Custom",
+            "Bare",
+            "assayfield_ref",
+            "Flag",
+        ],
+        {},
+        flags,
+    )
+    assert linked_row["Note"] is None
+    assert linked_row["Flag"] is False
+    assert linked_row["Sample"] == "etr_other"
+    assert linked_row["Forced"] is None
+    assert linked_row["assayfield_unknown"] == "seq_abc123"
+    assert linked_row["Amount"] is None
+    assert linked_row["Custom"] == "ent_abc123"
+    assert linked_row["Bare"] == "ent_bare"
+    assert linked_row["assayfield_ref"] == "ent_ref"
+    loose = _assay_row(
+        {
+            "schemaFields": [
+                {
+                    "fieldDefinition": {"name": "Loose"},
+                    "value": None,
+                    "linkedEntityId": "ent_loose",
+                }
+            ]
+        },
+        ["Loose"],
+    )
+    assert loose["Loose"] == "ent_loose"
     assert _assay_columns([{"fields": {1: {"value": "nope"}, "ct": {"value": 1}}}]) == ["ct"]
     records = [
         {

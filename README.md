@@ -292,7 +292,9 @@ Every `entry list` filter is applied by Benchling. `routing.client_side` is alwa
 
 `--part` takes a `v3_document_part` id (`docpart_…`) from `entry inspect` (the `tables` part ids). `results tables ENTRY` returns a different id: `table_id` is a `v2_structured_table` id (`strtbl_…`, `id_namespace` `v2_structured_table`). Pass that id with `--kind results-table --entry ENTRY` (the same entry). The export reads the entry's document parts and uses the matching results-table part. When no part matches, it reads assay results for that entry and the table's result schema. `--kind table` does not accept a `strtbl_…` id. That is a validation error naming `v3_document_part`. A `strtbl_…` id with no `--entry` is the same kind of error.
 
-Assay-result columns are the result's scalar metadata plus one column per schema field. V3 stores those values in `schemaFields` (an array of field-definition ref plus value), not in a top-level `fields` object. The column name is the field's display name. A link or entity reference is written as its id. A multi-value field is a JSON array in CSV.
+Assay-result columns are the result's scalar metadata plus one column per schema field. V3 stores those values in `schemaFields` (an array of field-definition ref plus value), not in a top-level `fields` object. The column name is the field's display name. A link or entity reference is written as its id. A multi-value field is a JSON array in CSV. An unset field is empty: CSV writes `""` and JSON writes `null`. `linkedEntityId` is used only when the field is a link and the id is a different entity. An unset field's `linkedEntityId` is often the result's own id, and that id is not written as the value.
+
+A results-table or unstructured-table cell is flattened the same way. A link or entity reference becomes its id in both JSON and CSV, so a results table and the assay results for the same record show the same value.
 
 ### Preview and apply changes
 
@@ -446,7 +448,7 @@ uv run mypy
 uv run pytest --cov
 ```
 
-The suite has 328 test functions (520 collected cases, parametrization included) and reaches 98% branch coverage. CI enforces a `fail_under` floor of 96% in `pyproject.toml`, and also builds the sdist and wheel, runs `twine check`, and smoke-tests the built wheel.
+The suite has 342 test functions (534 collected cases, parametrization included) and reaches 98% branch coverage. CI enforces a `fail_under` floor of 96% in `pyproject.toml`, and also builds the sdist and wheel, runs `twine check`, and smoke-tests the built wheel.
 
 ### Opt-in sandbox exercise
 
