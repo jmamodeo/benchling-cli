@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://example.invalid/benchling-agent/change-spec.schema.json",
-  "title": "Benchling Agent Change Specification",
+  "$id": "https://example.invalid/benchling-toolkit/change-spec.schema.json",
+  "title": "Benchling Toolkit Change Specification",
   "description": "Select the matching object for the --family argument.",
   "$defs": {
     "fieldValueInput": {

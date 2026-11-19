@@ -12,19 +12,19 @@ import pytest
 from mcp import Client
 from typer.testing import CliRunner
 
-from benchling_agent.auth import AuthManager
-from benchling_agent.cli import app
-from benchling_agent.environment import (
+from benchling_toolkit.auth import AuthManager
+from benchling_toolkit.cli import app
+from benchling_toolkit.environment import (
     EnvironmentConfigStore,
     available_envs,
     environment_secrets,
     variables,
 )
-from benchling_agent.errors import AuthenticationError, ValidationError
-from benchling_agent.mcp_server import build_mcp_server
-from benchling_agent.models import AuthMethod
-from benchling_agent.runtime import Runtime, RuntimePool
-from benchling_agent.tls import verified_context
+from benchling_toolkit.errors import AuthenticationError, ValidationError
+from benchling_toolkit.mcp_server import build_mcp_server
+from benchling_toolkit.models import AuthMethod
+from benchling_toolkit.runtime import Runtime, RuntimePool
+from benchling_toolkit.tls import verified_context
 
 VARIABLES = variables("dev")
 
@@ -32,7 +32,7 @@ VARIABLES = variables("dev")
 @pytest.fixture(autouse=True)
 def clean_env(monkeypatch):
     for name in list(os.environ):
-        if name.startswith("BENCHLING_") and name != "BENCHLING_AGENT_HOME":
+        if name.startswith("BENCHLING_") and name != "BENCHLING_TOOLKIT_HOME":
             monkeypatch.delenv(name, raising=False)
 
 
@@ -172,7 +172,7 @@ def test_token_error_cannot_echo_secret(tmp_path, monkeypatch):
 
 def test_cli_status_is_environment_only(tmp_path, monkeypatch):
     configure(monkeypatch)
-    monkeypatch.setenv("BENCHLING_AGENT_HOME", str(tmp_path / "unused"))
+    monkeypatch.setenv("BENCHLING_TOOLKIT_HOME", str(tmp_path / "unused"))
     result = CliRunner().invoke(app, ["--env", "dev", "auth", "status"])
     assert result.exit_code == 0
     data = json.loads(result.stdout)["data"]
@@ -186,7 +186,7 @@ def test_cli_status_is_environment_only(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_mcp_uses_environment_app_identity(tmp_path, monkeypatch):
     configure(monkeypatch)
-    monkeypatch.setenv("BENCHLING_AGENT_HOME", str(tmp_path / "unused"))
+    monkeypatch.setenv("BENCHLING_TOOLKIT_HOME", str(tmp_path / "unused"))
     auth_http = httpx.Client(
         transport=httpx.MockTransport(
             lambda _: httpx.Response(200, json={"access_token": "access", "expires_in": 900})
@@ -219,7 +219,7 @@ async def test_mcp_uses_environment_app_identity(tmp_path, monkeypatch):
 async def test_mcp_routes_each_call_to_its_env(tmp_path, monkeypatch):
     configure(monkeypatch)
     configure(monkeypatch, env="test", host="other", secret="other-secret")
-    monkeypatch.setenv("BENCHLING_AGENT_HOME", str(tmp_path / "unused"))
+    monkeypatch.setenv("BENCHLING_TOOLKIT_HOME", str(tmp_path / "unused"))
     hosts: list[str] = []
 
     def token_handler(request):

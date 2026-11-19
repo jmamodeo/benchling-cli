@@ -1,16 +1,15 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite it as below."
 type: software
-title: "benchling-agent"
-version: 0.2.0
-date-released: "2026-11-18"
+title: "benchling-toolkit"
+version: 0.3.0
+date-released: "2026-11-19"
 abstract: >-
-  A preview-then-apply CLI and read-only-by-default MCP server that puts an
-  auditable layer between an AI agent and a Benchling electronic lab notebook.
-  Changes are first recorded as immutable, checksummed plans with version
-  preconditions; a separate apply step re-checks those preconditions and
-  writes an execution journal. Unofficial; not affiliated with or endorsed
-  by Benchling, Inc.
+  Safe, auditable tools for AI agents working in Benchling: a JSON-first CLI
+  and a read-only-by-default MCP server. Every change is first recorded as an
+  immutable, checksummed plan with version preconditions; a separate apply
+  step re-checks those preconditions and writes an execution journal.
+  Unofficial; not affiliated with or endorsed by Benchling, Inc.
 authors:
   - family-names: Amodeo
     given-names: John

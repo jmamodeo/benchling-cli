@@ -7,9 +7,9 @@ from conftest import runtime_for
 from fake_benchling import ENTRY_ID, TABLE_PART, TEXT_PART
 from mcp import Client
 
-from benchling_agent.errors import AuthenticationError, ValidationError
-from benchling_agent.mcp_server import build_mcp_server, run_mcp_server
-from benchling_agent.runtime import RuntimePool
+from benchling_toolkit.errors import AuthenticationError, ValidationError
+from benchling_toolkit.mcp_server import build_mcp_server, run_mcp_server
+from benchling_toolkit.runtime import RuntimePool
 
 READ_TOOLS = {
     "list_environments",

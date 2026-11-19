@@ -8,7 +8,7 @@ from conftest import runtime_for
 from fake_benchling import ENTRY_ID, TABLE_PART, TEXT_PART
 from typer.testing import CliRunner
 
-from benchling_agent import cli
+from benchling_toolkit import cli
 
 
 @pytest.fixture
@@ -71,7 +71,7 @@ def test_version_flag_matches_package_metadata(invoke) -> None:
 
     result = CliRunner().invoke(cli.app, ["--version"])
     assert result.exit_code == 0
-    assert result.stdout.strip() == f"benchling-agent {version('benchling-agent')}"
+    assert result.stdout.strip() == f"benchling-toolkit {version('benchling-toolkit')}"
 
 
 @pytest.mark.parametrize(
@@ -318,7 +318,7 @@ def test_envs_list_shows_configured_environment_without_secrets(invoke) -> None:
 
 def test_envs_list_is_an_empty_envelope_when_nothing_is_configured(monkeypatch) -> None:
     for name in list(os.environ):
-        if name.startswith("BENCHLING_") and name != "BENCHLING_AGENT_HOME":
+        if name.startswith("BENCHLING_") and name != "BENCHLING_TOOLKIT_HOME":
             monkeypatch.delenv(name)
     result = CliRunner().invoke(cli.app, ["envs", "list"])
     assert result.exit_code == 0
