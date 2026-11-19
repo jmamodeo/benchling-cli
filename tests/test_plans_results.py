@@ -172,3 +172,28 @@ async def test_status_surfaces_task_lookup_errors_without_losing_the_journal(run
     assert status["remote_task_error"]["code"] == "access_denied"
     assert status["journal"]["status"] == "succeeded"
     assert status["journal"]["result"]["state"] == "submission_pending"
+
+
+async def test_apply_tells_the_user_to_accept_the_pending_results(runtime, fake) -> None:
+    planned = await plan(runtime, [record()])
+    applied = await runtime.planner.apply(planned.id)
+    step = applied["next_step"]
+    assert "pending" in step
+    assert ENTRY_ID in step
+    assert "plug" in step
+    assert "Assay results" in step
+
+
+async def test_plan_warning_names_the_acceptance_step(runtime) -> None:
+    planned = await plan(runtime, [record()])
+    assert any("plug icon" in warning for warning in planned.warnings)
+
+
+async def test_non_results_apply_has_no_next_step(runtime) -> None:
+    planned = await runtime.planner.plan(
+        ENTRY_ID,
+        "table",
+        {"operation": "append_rows", "table_part_id": "docpart_table1", "rows": [["D", "4"]]},
+    )
+    applied = await runtime.planner.apply(planned.id)
+    assert "next_step" not in applied
