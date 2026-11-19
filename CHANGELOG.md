@@ -8,6 +8,7 @@ All notable changes to this project are documented here. The format is based on
 
 ### Added
 
+- `SKILL.md` tells an agent when to use benchling-toolkit. It covers listing, reading entries, tables, and results, exporting to a local file, and previewing a change with `changes plan` before `changes apply`. The MCP server is read-only unless started with `--allow-writes ENV`. Credentials come from `benchling auth login --env NAME` and stay in the OS keychain.
 - A weekly GitHub Actions workflow, `.github/workflows/openapi-drift.yml`, downloads the public V3 OpenAPI spec from the URL in `contracts/openapi-manifest.json` and fails when the SHA-256 differs. The failure names each `routes_used` path whose operation or referenced definition changed. The workflow also runs on `workflow_dispatch`. The public spec needs no tenant and no credentials. `scripts/check_openapi_drift.py` performs the comparison. Its tests use fixture specs and stay offline.
 - `ARCHITECTURE.md` explains the plan, apply, and journal flow, with a sequence diagram.
 - `docs/threat-model.md` covers credentials, stale or replayed plans, write scoping, and agent misuse. It names the code for each control and the cases that code does not close.
