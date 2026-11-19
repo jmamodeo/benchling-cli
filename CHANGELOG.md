@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- `benchling results rows PART_ID` and the MCP tool `list_results_table_rows` read one page of a results table from `GET /document-part-results-table/{id}/rows/items`. The page size defaults to 50 and stops at 100. The response uses the standard JSON envelope and includes `next_token`.
+
+### Fixed
+
+- `entry list --name` accepts a name that contains a comma. `name.anyOf` and `names.anyOf` are comma-separated and document no escape, so that name is sent as the V2 `name` parameter together with the other filters.
+- A modified timestamp with no time zone is a validation error. `YYYY-MM-DD` is still the start or end of that UTC day.
+- Entry and schema lists return `modified_at` as a UTC timestamp with a `Z` suffix. V2 `+00:00` values and other offsets are converted.
+
 ### Fixed
 
 - During `auth login`, the keychain error's `dbus-run-session` command fills in the environment name, the normalized tenant URL, and the client ID that were passed or already saved. Each value is shell-quoted. `$KEYRING_PASSWORD` and `$BENCHLING_CLIENT_SECRET` stay variable references. Omitted values, and errors from other commands, keep the placeholders.

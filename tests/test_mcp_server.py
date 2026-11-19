@@ -27,6 +27,7 @@ READ_TOOLS = {
     "list_results",
     "get_result",
     "list_result_tables",
+    "list_results_table_rows",
     "get_change_status",
 }
 
@@ -220,6 +221,8 @@ async def test_full_entry_pages_parts_results_and_table_rows(client, fake) -> No
         ("list_results", {"page_size": 101}),
         ("list_entries", {"limit": 0}),
         ("list_entries", {"limit": 101}),
+        ("list_results_table_rows", {"part_id": "docpart_rt1", "limit": 0}),
+        ("list_results_table_rows", {"part_id": "docpart_rt1", "limit": 101}),
         ("list_schemas", {"limit": 0}),
         ("list_schemas", {"kind": "sample"}),
     ],
@@ -576,6 +579,29 @@ async def test_list_entries_is_read_only_and_routes_folder_filters_to_v2(client,
     assert data["routing"]["client_side"] == []
     assert fake.writes() == []
     assert all(not call.path.endswith("/entry/items") for call in fake.calls)
+
+
+async def test_list_results_table_rows_is_read_only_and_paged(client, fake) -> None:
+    fake.add_results_table()
+    first = (
+        await call(client, "list_results_table_rows", env="sandbox", part_id="docpart_rt1", limit=2)
+    )["data"]
+    assert [row["id"] for row in first["items"]] == ["strow_1", "strow_2"]
+    assert first["result_schema_id"] == "assaysch_abc123"
+    assert first["next_token"]
+    second = (
+        await call(
+            client,
+            "list_results_table_rows",
+            env="sandbox",
+            part_id="docpart_rt1",
+            limit=2,
+            cursor=first["next_token"],
+        )
+    )["data"]
+    assert [row["id"] for row in second["items"]] == ["strow_3"]
+    assert second["next_token"] is None
+    assert fake.writes() == []
 
 
 async def test_list_schemas_pages_without_allow_writes(client, fake) -> None:

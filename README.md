@@ -268,6 +268,7 @@ benchling --env dev entry list --project src_example --modified-after 2026-01-01
 benchling --env dev entry list --folder lib_example --name "Example entry"
 benchling --env dev results list --entry etr_abc123
 benchling --env dev results tables etr_abc123
+benchling --env dev results rows docpart_example --limit 50
 ```
 
 Entry references may be canonical IDs, display IDs, or URLs for the selected tenant. Duplicate section titles must be addressed by part ID.
@@ -276,8 +277,12 @@ Entry references may be canonical IDs, display IDs, or URLs for the selected ten
 
 Every `entry list` filter is applied by Benchling. `routing.client_side` is always empty.
 
-- Without `--folder`, the query is V3 `GET /entry/items`. Server-side filters are project (`project.eq`), schema (`schema.eq`), name (`name.anyOf`), and the modified range (`modifiedAt.gte` and `modifiedAt.lte`). Name is an exact case-insensitive match, not a substring. The modified bounds are inclusive. A bare `YYYY-MM-DD` is the start of that UTC day for `--modified-after` and the end of that UTC day for `--modified-before`.
+- Without `--folder`, and when the name has no comma, the query is V3 `GET /entry/items`. Server-side filters are project (`project.eq`), schema (`schema.eq`), name (`name.anyOf`), and the modified range (`modifiedAt.gte` and `modifiedAt.lte`). That name match is exact and case-insensitive. It is not a substring search. The modified bounds are inclusive. A bare `YYYY-MM-DD` is the start of that UTC day for `--modified-after` and the end of that UTC day for `--modified-before`. A timestamp must include a time zone, such as `2026-06-15T12:00:00Z`. A timestamp with no zone is rejected.
 - V3 entry listing has no folder parameter, and live tenants ignore `folderId` on that route, so this client never sends it there. `--folder` sends the whole query to V2 `GET /entries`. On that route folder (`folderId`), project (`projectId`), schema (`schemaId`), name (`names.anyOf`), and `modifiedAt` are all server-side. V2 takes one `modifiedAt` string; this client sends `>=` and `<=` joined by ` AND ` so the range stays inclusive.
+- A name that contains a comma cannot be one item of `name.anyOf` or `names.anyOf`. Both parameters are comma-separated lists, and the contract documents no escape. That name is sent as V2 `GET /entries` parameter `name`, and the other filters on the same request go to V2 as well. V2 `name` is a single entry name. The contract describes it as the specified name and does not say the comparison is case-insensitive.
+- `modified_at` on entry and schema lists is a UTC timestamp with a `Z` suffix. V2 values that use `+00:00`, and values with another offset, are converted.
+
+`results rows PART_ID` reads one page of a results table. It is read-only. The page size defaults to 50 and stops at 100. Pass `next_token` back with `--cursor`. The call is `GET /document-part-results-table/{id}/rows/items` with `pageSize` and `nextToken`. The part is read first, and its `rows` URL must be that path on this tenant. Cells use the same shape as `entry get --full`. `row_count` is the count on the part. `entry get --full` still reads every row of the part.
 
 ### Preview and apply changes
 
@@ -339,7 +344,7 @@ On Linux the standard MCP SDK starts the stdio server with only `HOME`, `LOGNAME
 
 Startup failures, including a missing keychain, are a JSON envelope on stderr and a non-zero exit. Stdout is reserved for the MCP protocol. The stderr text names the MCP SDK's default environment and the `env` block. Request logging is off unless you pass `--verbose`.
 
-Every tool except `list_environments` takes a required `env` argument, and each call is authenticated with that environment's credentials. The server is read-only by default. To permit `apply_changes` in specific environments, add `--allow-writes ENV` after `serve` (repeatable, e.g. `--allow-writes dev --allow-writes test`); reads remain available in all environments. `list_entries` and `list_schemas` are reads, so they work without `--allow-writes`. A plan can only be applied or checked in the environment that created it. `plan_changes` remains available because it performs remote reads and writes only an immutable local preview. Large entry, section, table, result, and schema responses expose offset/limit or cursor pagination and never silently truncate data. `list_entries` and `list_schemas` use `limit` (default 50, maximum 100) and return `next_token` for the following page.
+Every tool except `list_environments` takes a required `env` argument, and each call is authenticated with that environment's credentials. The server is read-only by default. To permit `apply_changes` in specific environments, add `--allow-writes ENV` after `serve` (repeatable, e.g. `--allow-writes dev --allow-writes test`); reads remain available in all environments. `list_entries` and `list_schemas` are reads, so they work without `--allow-writes`. A plan can only be applied or checked in the environment that created it. `plan_changes` remains available because it performs remote reads and writes only an immutable local preview. Large entry, section, table, result, and schema responses expose offset/limit or cursor pagination and never silently truncate data. `list_entries`, `list_schemas`, and `list_results_table_rows` use `limit` (default 50, maximum 100) and return `next_token` for the following page. `list_results_table_rows` is a read, so it works without `--allow-writes`.
 
 The CLI and MCP tools share the same versioned envelope. Static schemas for the envelope and change specifications live under [`schemas/`](schemas/); MCP also publishes the generated input and output schema for each typed tool during tool discovery.
 
@@ -429,7 +434,7 @@ uv run mypy
 uv run pytest --cov
 ```
 
-The suite has 291 test functions (454 collected cases, parametrization included) and reaches 98% branch coverage. CI enforces a `fail_under` floor of 96% in `pyproject.toml`, and also builds the sdist and wheel, runs `twine check`, and smoke-tests the built wheel.
+The suite has 310 test functions (488 collected cases, parametrization included) and reaches 98% branch coverage. CI enforces a `fail_under` floor of 96% in `pyproject.toml`, and also builds the sdist and wheel, runs `twine check`, and smoke-tests the built wheel.
 
 ### Opt-in sandbox exercise
 
@@ -455,7 +460,7 @@ uv run python scripts/sandbox_exercise.py \
 - Assay result submissions stay pending until a person integrates them in Benchling.
 - State is local to one machine and the package is not published on PyPI.
 - The offline suite uses a synthetic fake; it cannot prove compatibility with every tenant configuration.
-- `entry list --name` is an exact case-insensitive match. It does not search substrings. Folder filters use the V2 entry list because the V3 list ignores `folderId`.
+- `entry list --name` is an exact case-insensitive match when the name has no comma (`name.anyOf` on V3, `names.anyOf` on V2 with `--folder`). It does not search substrings. A name that contains a comma is sent as V2 `name`, because those list parameters are comma-separated and document no escape. A modified timestamp must include a time zone. Folder filters use the V2 entry list because the V3 list ignores `folderId`. Listing timestamps are UTC with a `Z` suffix.
 
 See [API limitations](docs/api-limitations.md) and the [research record](docs/research.md) before enabling writes against production data.
 

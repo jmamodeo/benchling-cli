@@ -448,6 +448,23 @@ def _register_result_tools(mcp: MCPServer, pool: RuntimePool) -> None:
 
         return await safe(env, call)
 
+    @mcp.tool(annotations=_annotations(True))
+    async def list_results_table_rows(
+        env: str,
+        part_id: str,
+        limit: int = 50,
+        cursor: str | None = None,
+    ) -> Envelope[Any]:
+        """Read one page of rows from a results table.
+
+        Rows come from GET /document-part-results-table/{id}/rows/items.
+        limit is 1 to 100 and defaults to 50. Pass next_token back as cursor.
+        """
+        return await safe(
+            env,
+            lambda rt: rt.service.list_results_table_rows(part_id, limit=limit, cursor=cursor),
+        )
+
 
 def _register_change_tools(
     mcp: MCPServer, pool: RuntimePool, writable_envs: set[str] | frozenset[str]

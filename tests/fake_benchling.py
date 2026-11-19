@@ -57,6 +57,40 @@ def text_cell(value: str, **extra: Any) -> dict[str, Any]:
     return {"inputValue": {"type": "text_value", "value": value}, **extra}
 
 
+def default_results_rows() -> list[dict[str, Any]]:
+    """Three results-table rows, enough to exercise a short page and a last page."""
+    return [
+        {
+            "id": "strow_1",
+            "rowId": "row_1",
+            "submissionStatus": "SUBMITTED",
+            "isSubmittable": False,
+            "result": {"__typename": "ResultRef", "id": "result_1"},
+            "cells": [{"inputValue": {"__typename": "IntegerValue", "value": 12}}],
+        },
+        {
+            "id": "strow_2",
+            "rowId": "row_2",
+            "submissionStatus": "UNSUBMITTED",
+            "isSubmittable": True,
+            "cells": [{"inputValue": {"__typename": "DecimalValue", "value": "1.5"}}],
+        },
+        {
+            "id": "strow_3",
+            "rowId": "row_3",
+            "submissionStatus": "HAS_UNSUBMITTED_CHANGES",
+            "cells": [{"inputValue": {"__typename": "TextValue", "value": "ok"}}],
+        },
+    ]
+
+
+def _offset_stamp(value: str) -> str:
+    """V2 listing timestamps use a numeric offset. ``Z`` becomes ``+00:00``."""
+    if value.endswith("Z"):
+        return f"{value[:-1]}+00:00"
+    return value
+
+
 def default_table_content() -> dict[str, Any]:
     return {
         "__typename": "UnstructuredTableDocumentContent",
@@ -213,6 +247,8 @@ class FakeBenchling:
         self.omit_table_version = False
         self.corrupt_cells = False
         self.results_parts: dict[str, dict[str, Any]] = {}
+        self.results_row_page_size: int | None = None
+        self.extra_entries: list[dict[str, Any]] = []
         self.parts_page_size = 100
         self.results_page_size = 100
         self.next_part_number = 1
@@ -496,6 +532,7 @@ class FakeBenchling:
                 "projectId": "src_abc123",
                 "folderId": "lib_abc123",
             },
+            *self.extra_entries,
         ]
 
     def _modified_matches(self, modified_at: str, expression: str) -> bool:
@@ -532,6 +569,8 @@ class FakeBenchling:
             names = [item.casefold() for item in params.get("names.anyOf", "").split(",") if item]
             if names:
                 rows = [row for row in rows if str(row["name"]).casefold() in names]
+            if params.get("name"):
+                rows = [row for row in rows if row["name"] == params["name"]]
             if params.get("modifiedAt"):
                 rows = [
                     row
@@ -584,7 +623,7 @@ class FakeBenchling:
                     "id": row["id"],
                     "name": row["name"],
                     "displayId": row["displayId"],
-                    "modifiedAt": row["modifiedAt"],
+                    "modifiedAt": _offset_stamp(str(row["modifiedAt"])),
                     "schemaId": row["schemaId"],
                     "projectId": row["projectId"],
                     "folderId": row["folderId"],
@@ -725,7 +764,7 @@ class FakeBenchling:
         rows = self.table_content["rows"]
         if not isinstance(rows, list):
             return 200, {"items": rows, "nextToken": ""}
-        return self._page_row_items(rows, call)
+        return self._page_row_items(rows, call, page_cap=self.table_page_size)
 
     def _get_results_table(self, call: Call, part_id: str) -> tuple[int, dict[str, Any]]:
         spec = self.results_parts.get(part_id)
@@ -749,13 +788,36 @@ class FakeBenchling:
         spec = self.results_parts.get(part_id)
         if spec is None:
             return 404, {"error": {"message": "results table not found"}}
-        return self._page_row_items(spec.get("rows") or [], call)
+        return self._page_row_items(
+            spec.get("rows") or [], call, page_cap=self.results_row_page_size
+        )
 
-    def _page_row_items(self, rows: list[dict[str, Any]], call: Call) -> tuple[int, dict[str, Any]]:
+    def add_results_table(self, part_id: str = "docpart_rt1") -> str:
+        """Install a synthetic results table the rows endpoint can page."""
+        rows = default_results_rows()
+        self.results_parts[part_id] = {
+            "name": "qPCR, plate 1",
+            "columnDefinitions": [
+                {"__typename": "SchemaFieldColumnDefinition", "name": "Ct", "columnId": "col_ct"}
+            ],
+            "rows": rows,
+            "resultSchema": {"id": "assaysch_abc123"},
+            "submissionStatus": "HAS_UNSUBMITTED_CHANGES",
+            "isEvaluated": True,
+        }
+        return part_id
+
+    def _page_row_items(
+        self, rows: list[dict[str, Any]], call: Call, *, page_cap: int | None
+    ) -> tuple[int, dict[str, Any]]:
         requested = int(call.params.get("pageSize") or "50")
         if requested > 100:
             return 400, {"error": {"message": "pageSize must be at most 100"}}
-        size = self.table_page_size or requested
+        size = page_cap or requested
+        api_rows = [self._api_row(index, row) for index, row in enumerate(rows)]
+        if self.repeat_next_token:
+            incoming = call.params.get("nextToken")
+            return 200, {"items": api_rows[:size], "nextToken": incoming or "loop"}
         raw_token = call.params.get("nextToken") or "0"
         try:
             start = int(raw_token)
@@ -763,10 +825,10 @@ class FakeBenchling:
             # A non-numeric token is still a page, so a client can notice it repeating.
             start = 0
         end = start + size
-        items = [
-            self._api_row(index, row) for index, row in enumerate(rows[start:end], start=start)
-        ]
-        return 200, {"items": items, "nextToken": str(end) if end < len(rows) else ""}
+        return 200, {
+            "items": api_rows[start:end],
+            "nextToken": str(end) if end < len(rows) else "",
+        }
 
     def _api_row(self, index: int, row: dict[str, Any]) -> dict[str, Any]:
         cells = []
@@ -794,7 +856,15 @@ class FakeBenchling:
                     "value": evaluated.get("value"),
                 }
             cells.append(api_cell)
-        return {"id": row.get("id") or f"utrow_{index}", "rowIndex": index, "cells": cells}
+        api_row: dict[str, Any] = {
+            "id": row.get("id") or f"utrow_{index}",
+            "rowIndex": index,
+            "cells": cells,
+        }
+        for key in ("rowId", "submissionStatus", "isArchived", "isSubmittable", "result"):
+            if row.get(key) is not None:
+                api_row[key] = deepcopy(row[key])
+        return api_row
 
     def _update_table_cells(self, mutation: dict[str, Any]) -> None:
         if mutation.get("documentPartId") != TABLE_PART:

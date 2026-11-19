@@ -191,8 +191,29 @@ async def _apply(runtime, family: str, request: dict[str, Any]) -> None:
 LISTS = json.loads((ROOT / "contracts" / "list-parameters.json").read_text(encoding="utf-8"))
 
 
+def _allowed_for(method: str, path: str) -> set[str] | None:
+    """Parameters recorded for this route, including `{id}` templates."""
+    routes: dict[str, list[str]] = LISTS["routes"]
+    exact = routes.get(f"{method} {path}")
+    if exact is not None:
+        return set(exact)
+    for pattern, params in routes.items():
+        declared, separator, route = pattern.partition(" ")
+        if not separator or declared != method or "{" not in route:
+            continue
+        pieces: list[str] = []
+        for piece in re.split(r"(\{[^}]+\})", route):
+            if piece.startswith("{") and piece.endswith("}"):
+                pieces.append("[^/]+")
+            else:
+                pieces.append(re.escape(piece))
+        if re.fullmatch("".join(pieces), path):
+            return set(params)
+    return None
+
+
 async def test_list_query_parameters_stay_inside_the_vendored_allow_list(runtime, fake) -> None:
-    """Entry and schema lists may send only the parameters recorded for each route."""
+    """Entry, schema, and results-row lists may send only the recorded parameters."""
     await runtime.service.list_entries(
         project="src_abc123",
         schema_id="entsch_abc123",
@@ -211,14 +232,30 @@ async def test_list_query_parameters_stay_inside_the_vendored_allow_list(runtime
         modified_before="2026-06-30",
         cursor="0",
     )
-    allowed = LISTS["routes"]
-    listed = [call for call in fake.calls if f"{call.method} {call.path}" in allowed]
-    assert listed
-    for call in listed:
-        key = f"{call.method} {call.path}"
-        assert set(call.params) <= set(allowed[key]), key
+    fake.extra_entries.append(
+        {
+            "id": "etr_comma",
+            "name": "Assay, replicate 1",
+            "displayId": "EXP-5",
+            "modifiedAt": "2026-07-01T00:00:00Z",
+            "schemaId": "entsch_abc123",
+            "projectId": "src_abc123",
+            "folderId": "lib_abc123",
+        }
+    )
+    await runtime.service.list_entries(name="Assay, replicate 1")
+    fake.add_results_table()
+    await runtime.service.list_results_table_rows("docpart_rt1", limit=1, cursor="0")
+    checked = []
+    for call in fake.calls:
+        allowed_params = _allowed_for(call.method, call.path)
+        if allowed_params is None:
+            continue
+        assert set(call.params) <= allowed_params, (call.method, call.path, call.params)
+        checked.append(call)
+    assert checked
     v3_entry_lists = [call for call in fake.calls if call.path.endswith("/entry/items")]
     assert v3_entry_lists
     assert all("folderId" not in call.params for call in v3_entry_lists)
-    assert "folderId" not in allowed["GET /api/v3/entry/items"]
+    assert "folderId" not in LISTS["routes"]["GET /api/v3/entry/items"]
     assert any(call.params.get("folderId") == "lib_abc123" for call in fake.calls)
