@@ -15,6 +15,6 @@ def test_demo_shows_preview_apply_conflict_and_read_only_mcp(capsys, monkeypatch
     assert "remote writes so far: 0" in out
     assert "remote writes in total: 1" in out
     assert out.count("[exit 5]") == 2
-    assert "Table version changed after the plan was created" in out
+    assert "Entry version changed after the plan was created" in out
     assert "Plan has already been applied or attempted" in out
     assert "MCP writes are disabled for demo" in out

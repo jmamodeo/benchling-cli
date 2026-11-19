@@ -12,6 +12,7 @@ import httpx
 from .auth import AuthManager
 from .errors import (
     AccessError,
+    ApiDriftError,
     AuthenticationError,
     ConflictError,
     NotFoundError,
@@ -180,6 +181,14 @@ class BenchlingAPI:
             raise AccessError("Benchling denied access", details=details)
         if response.status_code == 404:
             raise NotFoundError("Benchling resource was not found", details=details)
+        if response.status_code == 405:
+            allow = response.headers.get("Allow")
+            if allow:
+                details["allow"] = allow
+            raise ApiDriftError(
+                "This endpoint no longer supports this method. The Benchling API has drifted from this client.",
+                details=details,
+            )
         if response.status_code == 409:
             raise ConflictError("The Benchling resource changed since it was read", details=details)
         if response.status_code == 429:

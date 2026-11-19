@@ -174,7 +174,7 @@ class DocumentPlanning(PlannerBase):
         insertion = {
             "operationType": "insert",
             "version": version,
-            "coordinates": {"position": target},
+            "position": target,
             "parts": [plan.after["part"]],
         }
         first = await self.api.request(
@@ -187,7 +187,7 @@ class DocumentPlanning(PlannerBase):
         deletion = {
             "operationType": "delete",
             "version": next_version,
-            "coordinates": {"fromDocumentPartId": target, "toDocumentPartId": target},
+            "sourceRange": {"start": target, "end": target},
         }
         second = await self.api.request(
             "PATCH", f"/entry/{plan.entry_id}", json={"partsMutation": deletion}
@@ -210,26 +210,26 @@ class DocumentPlanning(PlannerBase):
             return {
                 "operationType": "insert",
                 "version": version,
-                "coordinates": {"position": request.get("position", "end_of_document")},
+                "position": request.get("position", "end_of_document"),
                 "parts": request["parts"],
             }
         if operation == "delete":
             return {
                 "operationType": "delete",
                 "version": version,
-                "coordinates": {
-                    "fromDocumentPartId": request["from_part_id"],
-                    "toDocumentPartId": request.get("to_part_id", request["from_part_id"]),
+                "sourceRange": {
+                    "start": request["from_part_id"],
+                    "end": request.get("to_part_id", request["from_part_id"]),
                 },
             }
         return {
             "operationType": "move",
             "version": version,
-            "sourceCoordinates": {
-                "fromDocumentPartId": request["from_part_id"],
-                "toDocumentPartId": request.get("to_part_id", request["from_part_id"]),
+            "sourceRange": {
+                "start": request["from_part_id"],
+                "end": request.get("to_part_id", request["from_part_id"]),
             },
-            "destinationCoordinates": {"position": request["position"]},
+            "destinationPosition": request["position"],
         }
 
     def _part_range(

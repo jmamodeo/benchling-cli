@@ -12,6 +12,15 @@ All notable changes to this project are documented here. The format is based on
 - Keychain failures name the cause (no Secret Service backend, D-Bus session not reachable, or a locked collection) and the headless Linux commands (`dbus-run-session` and `gnome-keyring-daemon --unlock --components=secrets`). README has a Headless Linux section. There is still no plaintext fallback.
 - `benchling mcp serve --verbose` turns request logging on. It is off by default.
 
+### Fixed
+
+- Unstructured table reads follow the current V3 shape: `rows` is a URL, pages come from `.../rows/items` at `pageSize` 100, cells use `inputValue.value`, and the version precondition is the entry version.
+- Unstructured table writes use `update_table_cells` and `insert_table_rows` on `PATCH /entry/{id}`. A stale entry version (HTTP 409) is the same conflict as a stale plan. The full-table replace operation is removed.
+- Document insert, delete, move, and text replacement send `position`, `sourceRange`, and `destinationPosition`.
+- Entry field writes send field-definition IDs. Plans still accept a system name or an ID and show both.
+- `entry get --full` and `part get` return unstructured-table and results-table rows. A failure to read those rows fails the request. `DocumentPartResultsTable` and `DocumentPartUnavailable` are modeled.
+- HTTP 405 is reported as `api_drift`: the endpoint no longer supports the method.
+
 ### Changed
 
 - Repository links now point at `https://github.com/jmamodeo/benchling-toolkit` after the GitHub repository rename. Older changelog text is unchanged.

@@ -45,15 +45,14 @@ $ benchling --env demo changes plan --entry etr_abc123 --family table --spec set
     "family": "table",
     "env": "demo",
     "preconditions": {
-      "table_version": "tver_1",
+      "entry_version": "ver_1",
       "entry_id": "etr_abc123"
     },
     "guarantees": [
-      "server-enforced document version check",
-      "complete table replacement"
+      "server-enforced document version check"
     ],
     "warnings": [
-      "API table edits clear evaluated values until Benchling evaluates the table in the browser"
+      "Updating a cell or appending rows resets table evaluation until Benchling evaluates the table again"
     ]
   }
 }
@@ -75,7 +74,7 @@ $ benchling --env demo changes apply 61f30b3982634235b8811a15e3ef3004
           "status": "started"
         },
         {
-          "stage": "replace_table",
+          "stage": "update_table_cells",
           "status": "succeeded"
         },
         {
@@ -88,18 +87,18 @@ $ benchling --env demo changes apply 61f30b3982634235b8811a15e3ef3004
 }
 [exit 0]
 
-# 4. The second plan was previewed against the old table version: apply is refused
+# 4. The second plan was previewed against the old entry version: apply is refused
 
 $ benchling --env demo changes apply 346151df5d53417cb39d840ecb0c53f8
 {
   "ok": false,
   "error": {
     "code": "conflict",
-    "message": "Table version changed after the plan was created",
+    "message": "Entry version changed after the plan was created",
     "retryable": false,
     "details": {
-      "expected": "tver_1",
-      "actual": "tver_2"
+      "expected": "ver_1",
+      "actual": "ver_2"
     }
   }
 }
@@ -270,13 +269,13 @@ benchling --env dev changes status PLAN_ID
 Supported specifications are documented in [schemas/change-spec.schema.json](schemas/change-spec.schema.json). The four families are:
 
 - `document`: insert, delete, move, or replace a text part;
-- `table`: set selected cells, append rows, or replace an unstructured table;
+- `table`: set selected cells or append rows on an unstructured table;
 - `fields`: update fields already present on the entry's assigned schema; and
 - `results`: submit V2 assay result records to an explicit `strtbl_…` table.
 
-Field inputs must use a schema field's V3 `systemName` or its field-definition ID and have the shape `{"value": ...}`. Plans normalize IDs to system names, validate value types and constraints, and re-check the affected definitions and values immediately before applying. Result plans also verify that the table belongs to the selected entry, that every record uses the table's result schema, and that any supplied project IDs are readable.
+Field inputs must use a schema field's V3 `systemName` or its field-definition ID and have the shape `{"value": ...}`. Plans show both identifiers, send the field-definition ID, validate value types and constraints, and re-check the affected definitions and values immediately before applying. Result plans also verify that the table belongs to the selected entry, that every record uses the table's result schema, and that any supplied project IDs are readable. Result field keys stay system names.
 
-Result submissions remain pending until a person integrates them in Benchling. A table write sends a complete version-checked table replacement and clears evaluated values until Benchling's browser evaluates it again.
+Result submissions remain pending until a person integrates them in Benchling. A table write updates the named cells or appends rows, checked against the entry version, and resets table evaluation until Benchling's browser evaluates it again.
 Table upload plans use local correlation UUIDs; the tenant assigns the actual result IDs. Local UUIDs are not idempotency keys. Caller-supplied result IDs are rejected by the CLI because the tested tenant rejects them on this endpoint despite the public OpenAPI declaration. Notebook table uploads are limited to 500 records. The immediate apply result is `submission_pending`; task success is reported separately as `pending_integration`.
 `changes status` checks Benchling's asynchronous task endpoint after a result submission while retaining the local execution journal as the reconciliation record.
 
@@ -357,7 +356,7 @@ flowchart TD
 
 - **Preview, then apply.** `changes plan` only reads Benchling and writes an immutable local plan; nothing changes remotely until `changes apply`.
 - **Plans are checksummed and scoped.** A plan stores a SHA-256 of its content, verified on load, and is bound to the environment and tenant that created it. The checksum catches accidental corruption; it is not a signature and does not defend against someone who can already write to your state directory.
-- **Version preconditions.** Document edits and table replacements send the version observed at preview time, and Benchling answers HTTP 409 if it is stale; table plans also re-check the table version just before writing. A concurrent edit becomes a conflict instead of an overwrite. Entry field updates have no atomic server-side precondition, so the affected values are compared immediately before writing; this is best effort.
+- **Version preconditions.** Document edits and table writes send the entry version observed at preview time, and Benchling answers HTTP 409 if it is stale. Table plans re-check that entry version just before writing. A concurrent edit becomes a conflict instead of an overwrite. Entry field updates have no atomic server-side precondition, so the affected values are compared immediately before writing; this is best effort.
 - **Single use.** A plan with any prior attempt cannot be applied again, and a per-plan file lock stops a CLI and an MCP process from applying the same plan concurrently on one machine.
 - **Writes are never retried.** A write that times out or fails with a server error leaves the journal in `unknown`/`partial` state for a person to reconcile; reads are retried with bounded backoff.
 - **Read-only MCP by default.** `apply_changes` is refused unless the server was started with `--allow-writes ENV` for that environment. `plan_changes` stays available because it only reads Benchling and writes a local preview.
@@ -370,7 +369,7 @@ flowchart TD
 - **OS keychain, no default environment.** The client secret is stored by the operating system and the target tenant is always explicit. The cost is a keychain dependency and no headless plaintext fallback.
 - **App identity, not user identity.** OAuth client credentials give the toolkit its own permissions and audit identity, separate from any person's. The app must be granted access to each project it touches.
 - **One service layer, two interfaces.** The CLI and MCP server call the same typed services and return the same envelope, so behavior is specified and tested once. The cost is a more verbose, JSON-first CLI.
-- **Honest handling of API limits.** Benchling's document API cannot edit table cells individually, so table edits send a complete replacement that preserves supported cell fields; evaluated values are cleared. Replacing text is an insert followed by a delete and can end in a reported partial completion.
+- **Honest handling of API limits.** Unstructured table cells are edited one cell at a time, and new rows are inserted at the end of the table; evaluation is reset until Benchling recalculates it. Replacing text is an insert followed by a delete and can end in a reported partial completion.
 - **Local, single-machine state.** Plans, journals, locks, and `environments.json` are plain files under the application directory (`BENCHLING_TOOLKIT_HOME` overrides it). Client secrets are in the OS keychain for that user. Concurrency control does not extend across machines.
 - **Offline tests against a stateful fake.** The suite runs the real client, services and planner against an in-process fake Benchling API instead of stubbing each call. This tests behavior end to end; the cost is that the fake can drift from the real API, which is why the opt-in sandbox exercise exists.
 
@@ -401,7 +400,7 @@ uv run mypy
 uv run pytest --cov
 ```
 
-The suite has 249 test functions (409 collected cases, parametrization included) and reaches 98% branch coverage. CI enforces a `fail_under` floor of 96% in `pyproject.toml`, and also builds the sdist and wheel, runs `twine check`, and smoke-tests the built wheel.
+The suite has 256 test functions (400 collected cases, parametrization included) and reaches 98% branch coverage. CI enforces a `fail_under` floor of 96% in `pyproject.toml`, and also builds the sdist and wheel, runs `twine check`, and smoke-tests the built wheel.
 
 ### Opt-in sandbox exercise
 
@@ -421,7 +420,7 @@ uv run python scripts/sandbox_exercise.py \
 
 - **`replace_text` on flattened V3 text parts is verified against fixtures only.** The fix in 0.1.2 that lets `replace_text` accept the flattened `DocumentPartText` shape was built and tested against synthetic fixtures. It has not been verified against a live Benchling tenant, so do not rely on it for production data until it has been checked there (`scripts/live_cli_session.py` and `scripts/sandbox_exercise.py` are provided for that).
 - The V3 Document API is in beta and Benchling may change it.
-- Table edits clear evaluated values until Benchling recalculates them in the browser, and only unstructured tables are editable.
+- Table cell edits and row inserts reset evaluation until Benchling recalculates the table in the browser. Only unstructured tables are editable. Results tables can be read; other structured tables cannot.
 - Entry field updates are protected by a best-effort value comparison, not an atomic precondition.
 - Replacing text can end in a partial completion that a person must reconcile.
 - Assay result submissions stay pending until a person integrates them in Benchling.

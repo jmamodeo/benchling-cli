@@ -31,8 +31,13 @@ async def plan(runtime, fields):
 )
 async def test_valid_field_values_are_planned(runtime, fake, key, value) -> None:
     planned = await plan(runtime, {key: {"value": value}})
-    assert planned.request["schema_fields"] == {key: {"value": value}}
-    assert planned.after["fields"][key] == {"value": value}
+    target = planned.after["targets"][0]
+    assert target["system_name"] == key
+    assert planned.request["schema_fields"] == {target["field_definition_id"]: {"value": value}}
+    assert planned.after["fields"][key]["field_definition_id"] == target["field_definition_id"]
+    assert planned.after["fields"][key]["system_name"] == key
+    assert planned.before["fields"][key]["field_definition_id"] == target["field_definition_id"]
+    assert planned.after["fields"][key]["value"] == {"value": value}
     assert fake.writes() == []
 
 
@@ -77,14 +82,13 @@ async def test_unsupported_or_read_only_fields_cannot_be_planned(runtime, key) -
     assert caught.value.details["field"] == key
 
 
-async def test_field_definition_ids_normalize_to_system_names(runtime, fake) -> None:
+async def test_system_names_and_ids_both_resolve_to_field_definition_ids(runtime, fake) -> None:
     planned = await plan(runtime, {"tsf_notes": {"value": "x"}, "temperature": {"value": 30}})
-    assert set(planned.request["schema_fields"]) == {"notes", "temperature"}
-    assert {t["field_definition_id"] for t in planned.after["targets"]} == {
-        "tsf_notes",
-        "tsf_temp",
-    }
-    assert planned.before["fields"] == {"notes": "n", "temperature": 20}
+    assert set(planned.request["schema_fields"]) == {"tsf_notes", "tsf_temp"}
+    assert planned.after["fields"]["notes"]["system_name"] == "notes"
+    assert planned.after["fields"]["notes"]["field_definition_id"] == "tsf_notes"
+    assert planned.after["fields"]["temperature"]["value"] == {"value": 30}
+    assert planned.before["fields"]["temperature"]["value"] == 20
 
 
 async def test_unknown_fields_list_available_addresses(runtime) -> None:
@@ -122,6 +126,19 @@ async def test_entry_without_schema_is_unsupported(runtime, fake) -> None:
         await plan(runtime, {"temperature": {"value": 1}})
 
 
+async def test_field_without_an_id_cannot_be_written(runtime, fake) -> None:
+    fake.field_defs["entsch_abc123"].append(
+        {
+            "systemName": "noid",
+            "name": "No id",
+            "type": "text",
+            "derivationType": "DIRECT",
+        }
+    )
+    with pytest.raises(UnsupportedError, match="field-definition ID"):
+        await plan(runtime, {"noid": {"value": "x"}})
+
+
 async def test_schema_without_addressable_fields_is_unsupported(runtime, fake) -> None:
     fake.field_defs["entsch_abc123"] = []
     with pytest.raises(UnsupportedError, match="addressable"):
@@ -131,7 +148,7 @@ async def test_schema_without_addressable_fields_is_unsupported(runtime, fake) -
 async def test_apply_sends_normalized_schema_fields_and_updates_entry(runtime, fake) -> None:
     planned = await plan(runtime, {"tsf_temp": {"value": 42}})
     applied = await runtime.planner.apply(planned.id)
-    assert fake.entry_patches == [{"schemaFields": {"temperature": {"value": 42}}}]
+    assert fake.entry_patches == [{"schemaFields": {"tsf_temp": {"value": 42}}}]
     assert fake.entry_fields["Temperature"] == 42
     assert applied["journal"]["result"]["concurrency"] == "best_effort_value_comparison"
     assert applied["journal"]["status"] == "succeeded"

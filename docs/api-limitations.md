@@ -1,14 +1,15 @@
 # API limitations
 
-These limits are based on the public Benchling documentation and OpenAPI contracts inspected on 2026-09-24.
+These limits are based on the public Benchling documentation and OpenAPI contracts. The document, unstructured-table, and entry-field portions were rechecked against the V3 spec captured on 2026-11-19.
 
 - The V3 Document API is beta. This client sends `EARLY-ACCESS: true` and uses the unified `/api/v3` routes.
 - Entry content is an ordered, flat list. Sections are derived from section markers; they are not independent nested resources.
-- The document API can read and replace unstructured tables. It does not expose modular row/cell writes, so `set_cells` and `append_rows` read every row, preserve supported fields, and send a complete version-checked replacement.
-- API table edits clear evaluated values. Benchling's browser is currently responsible for recalculating formulas.
-- Structured result, registration, inventory, and generic structured tables are discoverable as document parts but their cells are not editable through the Document API.
-- Document part mutations and unstructured table updates accept a current document version and return HTTP 409 when stale. Entry schema-field updates do not publish an equivalent atomic version precondition. This client compares affected values immediately before writing and labels that protection as best effort.
-- Entry field and result inputs are normalized from a V3 field-definition ID or `systemName` to the API-facing system name. Display names are deliberately rejected because they are mutable and may not be unique.
+- Unstructured-table reads return `rows` as a URL. This client pages `.../rows/items` at `pageSize` 100, the maximum the API accepts. `set_cells` sends `update_table_cells` and `append_rows` sends `insert_table_rows` on `PATCH /entry/{id}`. There is no full-table replace.
+- Those cell and row writes reset table evaluation (`isEvaluated` becomes false). Benchling's browser recalculates formulas.
+- `DocumentPartResultsTable` parts are readable, including typed columns and paged rows. Their cells are not editable here. Registration, inventory, and other structured tables are still not readable or editable through the document API. `DocumentPartUnavailable` parts are reported as unavailable rather than kept as an unknown type.
+- Document insert uses `position`, delete uses `sourceRange`, and move uses `sourceRange` plus `destinationPosition`. A part ID means immediately before that part. These mutations and unstructured table updates send the entry version from `versionMetadata.versionId` and return HTTP 409 when it is stale. Entry schema-field updates do not publish an equivalent atomic version precondition. This client compares affected values immediately before writing and labels that protection as best effort.
+- Entry field inputs may use a V3 field `systemName` or its field-definition ID. Plans show both and send the field-definition ID (`tsf_…`), which is what `schemaFields` accepts. Result inputs still use the result field's `systemName`. Display names are rejected because they are mutable and may not be unique.
+- V3 `GET /entry/items` ignores `folderId`. That route has no folder filter; V2 `GET /entries` is the one that accepts `folderId`. This toolkit does not list entries.
 - Replacing a text part requires insert followed by delete. If the second request fails, the entry contains both parts and the journal reports partial completion.
 - V2 result-table bulk creation creates pending result records. A person must integrate them into the existing table in Benchling.
 - Live verification on 2026-09-29 against a Benchling tenant found that it rejects `assayResults[].id` in notebook-table bulk uploads, even though public V2 `AssayResultCreate` declares it. The CLI omits remote IDs, retains local correlation UUIDs plus task IDs, and never treats those local UUIDs as idempotency keys. Fresh plans are required for the updated contract; plans using the old request shape cannot be applied. Table uploads are capped at 500 records.
