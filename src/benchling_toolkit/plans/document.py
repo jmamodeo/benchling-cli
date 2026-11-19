@@ -185,7 +185,7 @@ class DocumentPlanning(PlannerBase):
         insertion = {
             "operationType": "insert",
             "version": version,
-            "coordinates": {"position": target},
+            "position": target,
             "parts": [plan.after["part"]],
         }
         first = await self.api.request(
@@ -198,7 +198,7 @@ class DocumentPlanning(PlannerBase):
         deletion = {
             "operationType": "delete",
             "version": next_version,
-            "coordinates": {"fromDocumentPartId": target, "toDocumentPartId": target},
+            "sourceRange": {"start": target, "end": target},
         }
         second = await self.api.request(
             "PATCH", f"/entry/{plan.entry_id}", json={"partsMutation": deletion}
@@ -221,26 +221,26 @@ class DocumentPlanning(PlannerBase):
             return {
                 "operationType": "insert",
                 "version": version,
-                "coordinates": {"position": request.get("position", "end_of_document")},
+                "position": request.get("position", "end_of_document"),
                 "parts": request["parts"],
             }
         if operation == "delete":
             return {
                 "operationType": "delete",
                 "version": version,
-                "coordinates": {
-                    "fromDocumentPartId": request["from_part_id"],
-                    "toDocumentPartId": request.get("to_part_id", request["from_part_id"]),
+                "sourceRange": {
+                    "start": request["from_part_id"],
+                    "end": request.get("to_part_id", request["from_part_id"]),
                 },
             }
         return {
             "operationType": "move",
             "version": version,
-            "sourceCoordinates": {
-                "fromDocumentPartId": request["from_part_id"],
-                "toDocumentPartId": request.get("to_part_id", request["from_part_id"]),
+            "sourceRange": {
+                "start": request["from_part_id"],
+                "end": request.get("to_part_id", request["from_part_id"]),
             },
-            "destinationCoordinates": {"position": request["position"]},
+            "destinationPosition": request["position"],
         }
 
     def _parts_after_move(
@@ -249,7 +249,7 @@ class DocumentPlanning(PlannerBase):
         selected: list[dict[str, Any]],
         destination: Any,
     ) -> list[dict[str, Any]]:
-        """Document order after a move. A part id anchors the range immediately after that part."""
+        """Document order after a move. A part id inserts the range immediately before that part."""
         selected_ids = {part.get("id") for part in selected}
         remaining = [part for part in parts if part.get("id") not in selected_ids]
         if destination == "beginning_of_document":
@@ -257,7 +257,7 @@ class DocumentPlanning(PlannerBase):
         if destination == "end_of_document":
             return [*remaining, *selected]
         index = next(i for i, part in enumerate(remaining) if part.get("id") == destination)
-        return [*remaining[: index + 1], *selected, *remaining[index + 1 :]]
+        return [*remaining[:index], *selected, *remaining[index:]]
 
     def _part_range(
         self, parts: list[dict[str, Any]], first: Any, last: Any

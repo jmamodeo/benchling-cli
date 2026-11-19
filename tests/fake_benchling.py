@@ -11,7 +11,7 @@ import re
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlsplit
 
 import httpx
 
@@ -179,6 +179,7 @@ def field_definitions() -> list[dict[str, Any]]:
 class FakeBenchling:
     def __init__(self) -> None:
         self.calls: list[Call] = []
+        self.origin = TENANT
         self.faults: list[Fault] = []
         self.token_status = 200
         self.token_body: dict[str, Any] | None = None
@@ -189,11 +190,14 @@ class FakeBenchling:
         self.display_id = "EXP-1"
         self.parts: list[dict[str, Any]] = [
             {"id": "docpart_sec1", "__typename": "DocumentPartSection", "title": "Methods"},
-            text_part(TEXT_PART, "before", formats=[{"type": "bold", "start": 0, "end": 3}]),
+            text_part(
+                TEXT_PART,
+                "before",
+                formats=[{"start": 0, "end": 3, "properties": ["BOLD"]}],
+            ),
             {"id": "docpart_sec2", "__typename": "DocumentPartSection", "title": "Results"},
             {
                 "id": TABLE_PART,
-                "versionId": "tver_1",
                 "content": {"__typename": "UnstructuredTableDocumentContentSummary"},
             },
             {
@@ -202,9 +206,13 @@ class FakeBenchling:
             },
             text_part("docpart_text2", "after"),
         ]
-        self.table_version = 1
         self.table_content = default_table_content()
         self.table_page_size: int | None = None
+        self.rows_field: Any = None
+        self.row_count_override: int | None = None
+        self.omit_table_version = False
+        self.corrupt_cells = False
+        self.results_parts: dict[str, dict[str, Any]] = {}
         self.parts_page_size = 100
         self.results_page_size = 100
         self.next_part_number = 1
@@ -338,7 +346,6 @@ class FakeBenchling:
             for n in range(1, 4)
         ]
         self.task: dict[str, Any] = {"status": "RUNNING"}
-        self.table_payloads: list[dict[str, Any]] = []
         self.entry_patches: list[dict[str, Any]] = []
         self.bulk_payloads: list[dict[str, Any]] = []
         self.bulk_response: dict[str, Any] = {"taskId": "task_abc123"}
@@ -368,6 +375,8 @@ class FakeBenchling:
         if request.url.path == "/oauth/token":
             return self._oauth(request)
         body = json.loads(request.content) if request.content else None
+        requested = urlsplit(str(request.url))
+        self.origin = f"{requested.scheme}://{requested.netloc}"
         call = Call(request.method, request.url.path, dict(request.url.params), body)
         self.calls.append(call)
         for index, (contains, status, payload) in enumerate(self.payload_overrides):
@@ -599,42 +608,64 @@ class FakeBenchling:
         return 200, payload
 
     def _parts_items(self, call: Call, entry_id: str) -> tuple[int, dict[str, Any]]:
-        parts = self.parts
+        parts = []
+        for part in self.parts:
+            item = deepcopy(part)
+            if (
+                item.get("id") == TABLE_PART
+                and "versionId" not in item
+                and "versionMetadata" not in item
+            ):
+                item["versionMetadata"] = {"versionId": self.version}
+            parts.append(item)
         wanted = call.params.get("id.anyOf")
         if wanted:
             parts = [part for part in parts if part["id"] in wanted.split(",")]
-        return self._page(deepcopy(parts), call, self.parts_page_size)
+        return self._page(parts, call, self.parts_page_size)
 
     def _patch_entry(self, call: Call, entry_id: str) -> tuple[int, dict[str, Any]]:
         body = call.body
         self.entry_patches.append(body)
         if "schemaFields" in body:
-            for system_name, wrapper in body["schemaFields"].items():
-                definition = next(
-                    item
-                    for item in self.field_defs["entsch_abc123"]
-                    if item["systemName"] == system_name
-                )
-                self.entry_fields[definition["name"]] = wrapper["value"]
+            definitions = self.field_defs["entsch_abc123"]
+            for key, wrapper in body["schemaFields"].items():
+                matches = [item for item in definitions if item.get("id") == key]
+                if not matches:
+                    return 400, {"error": {"message": f"schemaFields: Invalid field: {key}"}}
+                self.entry_fields[matches[0]["name"]] = wrapper["value"]
             return 200, {"id": entry_id}
         mutation = body["partsMutation"]
-        if mutation["version"] != self.version:
-            return 409, {"error": {"message": "stale version"}}
+        if mutation.get("version") != self.version:
+            return 409, {
+                "error": {
+                    "message": (
+                        "Version mismatch, the document has been modified since you last read it. "
+                        f"Provided version: {mutation.get('version')!r}, "
+                        f"Current document version: {self.version!r}."
+                    )
+                }
+            }
         kind = mutation["operationType"]
         if kind == "insert":
-            self._insert(mutation["coordinates"]["position"], mutation["parts"])
+            self._insert(mutation["position"], mutation["parts"])
         elif kind == "delete":
-            coords = mutation["coordinates"]
-            first = self.part_ids().index(coords["fromDocumentPartId"])
-            last = self.part_ids().index(coords["toDocumentPartId"])
+            src = mutation["sourceRange"]
+            first = self.part_ids().index(src["start"])
+            last = self.part_ids().index(src["end"])
             del self.parts[first : last + 1]
         elif kind == "move":
-            src = mutation["sourceCoordinates"]
-            first = self.part_ids().index(src["fromDocumentPartId"])
-            last = self.part_ids().index(src["toDocumentPartId"])
+            src = mutation["sourceRange"]
+            first = self.part_ids().index(src["start"])
+            last = self.part_ids().index(src["end"])
             moved = self.parts[first : last + 1]
             del self.parts[first : last + 1]
-            self._insert_existing(mutation["destinationCoordinates"]["position"], moved)
+            self._insert_existing(mutation["destinationPosition"], moved)
+        elif kind == "update_table_cells":
+            self._update_table_cells(mutation)
+        elif kind == "insert_table_rows":
+            self._insert_table_rows(mutation)
+        else:
+            return 400, {"error": {"message": f"unknown operation {kind}"}}
         self.entry_version += 1
         return 200, {"id": entry_id}
 
@@ -654,36 +685,150 @@ class FakeBenchling:
         elif position == "end_of_document":
             index = len(self.parts)
         else:
-            index = self.part_ids().index(position) + 1
+            # A part id inserts immediately before that part.
+            index = self.part_ids().index(position)
         self.parts[index:index] = parts
 
     # ---- tables ------------------------------------------------------
+    def _table_rows_url(self, collection: str, part_id: str) -> str:
+        return f"{self.origin}/api/v3/{collection}/{part_id}/rows/items"
+
     def _get_table(self, call: Call, part_id: str) -> tuple[int, dict[str, Any]]:
         if part_id != TABLE_PART:
             return 404, {"error": {"message": "table not found"}}
         rows = self.table_content["rows"]
-        content = deepcopy(self.table_content)
-        payload: dict[str, Any] = {"id": part_id, "versionId": f"tver_{self.table_version}"}
-        if self.table_page_size:
-            start = int(call.params.get("nextToken") or 0)
-            end = start + self.table_page_size
-            content["rows"] = deepcopy(rows[start:end])
-            payload["nextToken"] = str(end) if end < len(rows) else ""
-        payload["content"] = content
+        row_count = self.row_count_override
+        if row_count is None:
+            row_count = len(rows) if isinstance(rows, list) else None
+        payload: dict[str, Any] = {
+            "id": part_id,
+            "__typename": "DocumentPartUnstructuredTable",
+            "name": self.table_content.get("name"),
+            "columnDefinitions": deepcopy(self.table_content.get("columnDefinitions")),
+            "isEvaluated": self.table_content.get("isEvaluated"),
+            "rowCount": row_count,
+            "rows": (
+                self.rows_field
+                if self.rows_field is not None
+                else self._table_rows_url("document-part-unstructured-table", part_id)
+            ),
+        }
+        if "caption" in self.table_content:
+            payload["caption"] = self.table_content["caption"]
+        if not self.omit_table_version:
+            payload["versionMetadata"] = {"versionId": self.version}
         return 200, payload
 
-    def _patch_table(self, call: Call, part_id: str) -> tuple[int, dict[str, Any]]:
-        body = call.body
-        self.table_payloads.append(body)
-        if body["versionId"] != f"tver_{self.table_version}":
-            return 409, {"error": {"message": "stale table"}}
-        self.table_content = {
-            **self.table_content,
-            **{key: value for key, value in body.items() if key != "versionId"},
+    def _table_rows(self, call: Call, part_id: str) -> tuple[int, dict[str, Any]]:
+        if part_id != TABLE_PART:
+            return 404, {"error": {"message": "table not found"}}
+        rows = self.table_content["rows"]
+        if not isinstance(rows, list):
+            return 200, {"items": rows, "nextToken": ""}
+        return self._page_row_items(rows, call)
+
+    def _get_results_table(self, call: Call, part_id: str) -> tuple[int, dict[str, Any]]:
+        spec = self.results_parts.get(part_id)
+        if spec is None:
+            return 404, {"error": {"message": "results table not found"}}
+        rows = spec.get("rows") or []
+        return 200, {
+            "id": part_id,
+            "__typename": "DocumentPartResultsTable",
+            "name": spec.get("name"),
+            "columnDefinitions": deepcopy(spec.get("columnDefinitions") or []),
+            "isEvaluated": spec.get("isEvaluated", True),
+            "resultSchema": spec.get("resultSchema"),
+            "submissionStatus": spec.get("submissionStatus", "UNSUBMITTED"),
+            "rowCount": len(rows),
+            "rows": self._table_rows_url("document-part-results-table", part_id),
+            "versionMetadata": {"versionId": self.version},
         }
-        self.table_version += 1
-        self.parts[3]["versionId"] = f"tver_{self.table_version}"
-        return 200, {"id": part_id, "versionId": f"tver_{self.table_version}"}
+
+    def _results_rows(self, call: Call, part_id: str) -> tuple[int, dict[str, Any]]:
+        spec = self.results_parts.get(part_id)
+        if spec is None:
+            return 404, {"error": {"message": "results table not found"}}
+        return self._page_row_items(spec.get("rows") or [], call)
+
+    def _page_row_items(self, rows: list[dict[str, Any]], call: Call) -> tuple[int, dict[str, Any]]:
+        requested = int(call.params.get("pageSize") or "50")
+        if requested > 100:
+            return 400, {"error": {"message": "pageSize must be at most 100"}}
+        size = self.table_page_size or requested
+        raw_token = call.params.get("nextToken") or "0"
+        try:
+            start = int(raw_token)
+        except ValueError:
+            # A non-numeric token is still a page, so a client can notice it repeating.
+            start = 0
+        end = start + size
+        items = [
+            self._api_row(index, row) for index, row in enumerate(rows[start:end], start=start)
+        ]
+        return 200, {"items": items, "nextToken": str(end) if end < len(rows) else ""}
+
+    def _api_row(self, index: int, row: dict[str, Any]) -> dict[str, Any]:
+        cells = []
+        for cell in row.get("cells") or []:
+            if self.corrupt_cells:
+                cells.append({"inputValue": "bad"})
+                continue
+            input_value = cell.get("inputValue") or {}
+            if isinstance(input_value, dict) and "__typename" in input_value:
+                api_input = deepcopy(input_value)
+            else:
+                api_input = {"__typename": "TextValue", "value": input_value.get("value", "")}
+            api_cell: dict[str, Any] = {
+                "inputValue": api_input,
+                "evaluationValue": None,
+                "format": cell.get("format"),
+                "mergeRange": cell.get("mergeRange"),
+                "mergeRangeParent": cell.get("mergeRangeParent"),
+                "selectorId": cell.get("selectorId"),
+            }
+            evaluated = cell.get("evaluatedValue") or cell.get("evaluationValue")
+            if isinstance(evaluated, dict) and evaluated.get("value") is not None:
+                api_cell["evaluationValue"] = {
+                    "__typename": "TextValue",
+                    "value": evaluated.get("value"),
+                }
+            cells.append(api_cell)
+        return {"id": row.get("id") or f"utrow_{index}", "rowIndex": index, "cells": cells}
+
+    def _update_table_cells(self, mutation: dict[str, Any]) -> None:
+        if mutation.get("documentPartId") != TABLE_PART:
+            raise KeyError(mutation.get("documentPartId"))
+        rows = self.table_content["rows"]
+        for update in mutation["cellUpdates"]:
+            cell = rows[update["rowIndex"]]["cells"][update["columnIndex"]]
+            cell["inputValue"] = {
+                "type": "text_value",
+                "value": update["inputValue"]["value"],
+            }
+            cell.pop("evaluatedValue", None)
+            cell.pop("evaluationValue", None)
+        self.table_content["isEvaluated"] = False
+
+    def _insert_table_rows(self, mutation: dict[str, Any]) -> None:
+        if mutation.get("documentPartId") != TABLE_PART:
+            raise KeyError(mutation.get("documentPartId"))
+        for row in mutation["rows"]:
+            ordered = sorted(row["cells"], key=lambda item: item["columnIndex"])
+            self.table_content["rows"].append(
+                {
+                    "cells": [
+                        {
+                            "inputValue": {
+                                "type": "text_value",
+                                "value": cell["inputValue"]["value"],
+                            }
+                        }
+                        for cell in ordered
+                    ]
+                }
+            )
+        self.table_content["isEvaluated"] = False
 
     # ---- schemas -----------------------------------------------------
     def _schema(self, call: Call, schema_id: str) -> tuple[int, dict[str, Any]]:
@@ -785,15 +930,15 @@ ROUTES: list[tuple[str, str]] = [
     (r"/entry/(etr_\w+)", "GET v3|get_entry"),
     (r"/entry/(etr_\w+)", "PATCH v3|patch_entry"),
     (r"/entry/(etr_\w+)/parts/items", "GET v3|parts_items"),
+    (r"/document-part-unstructured-table/(\w+)/rows/items", "GET v3|table_rows"),
     (r"/document-part-unstructured-table/(\w+)", "GET v3|get_table"),
-    (r"/document-part-unstructured-table/(\w+)", "PATCH v3|patch_table"),
+    (r"/document-part-results-table/(\w+)/rows/items", "GET v3|results_rows"),
+    (r"/document-part-results-table/(\w+)", "GET v3|get_results_table"),
     (r"/entry-schema/items", "GET v3|list_entry_schemas"),
     (r"/result-schema/items", "GET v3|list_result_schemas"),
     (r"/run-schema/items", "GET v3|list_run_schemas"),
-    (r"/run-schema/(\w+)/field-definitions/items", "GET v3|schema_fields"),
-    (r"/run-schema/(\w+)", "GET v3|schema"),
-    (r"/(?:entry|result)-schema/(\w+)/field-definitions/items", "GET v3|schema_fields"),
-    (r"/(?:entry|result)-schema/(\w+)", "GET v3|schema"),
+    (r"/(?:entry|result|run)-schema/(\w+)/field-definitions/items", "GET v3|schema_fields"),
+    (r"/(?:entry|result|run)-schema/(\w+)", "GET v3|schema"),
     (r"/dropdown/(\w+)/options/items", "GET v3|dropdown_options"),
     (r"/dropdown/(\w+)", "GET v3|dropdown"),
     (r"/result/items", "GET v3|list_results"),

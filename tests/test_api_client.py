@@ -8,6 +8,7 @@ from benchling_toolkit import api as api_module
 from benchling_toolkit.api import BenchlingAPI
 from benchling_toolkit.auth import AuthManager
 from benchling_toolkit.errors import (
+    ApiDriftError,
     PartialCompletionError,
     UpstreamError,
     ValidationError,
@@ -152,6 +153,22 @@ async def test_non_object_success_body_is_rejected() -> None:
     handler, _ = sequence(httpx.Response(200, json=[1, 2]))
     with pytest.raises(UpstreamError, match="unexpected response shape"):
         await make_api(handler).request("GET", "/x")
+
+
+async def test_method_not_allowed_is_reported_as_api_drift() -> None:
+    handler, _ = sequence(
+        httpx.Response(
+            405,
+            json={"error": {"message": "Method PATCH is not allowed"}},
+            headers={"Allow": "GET, HEAD, OPTIONS"},
+        )
+    )
+    with pytest.raises(ApiDriftError, match="no longer supports this method") as caught:
+        await make_api(handler).request("PATCH", "/document-part-unstructured-table/docpart_x")
+    assert caught.value.code == "api_drift"
+    assert caught.value.details["status"] == 405
+    assert caught.value.details["allow"] == "GET, HEAD, OPTIONS"
+    assert int(caught.value.exit_code) == 7
 
 
 async def test_non_json_error_body_is_truncated_into_details() -> None:

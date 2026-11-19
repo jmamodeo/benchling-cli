@@ -1,10 +1,12 @@
 {
-  "captured_at": "2026-09-24",
+  "captured_at": "2026-11-19",
   "contracts": [
     {
       "name": "benchling-v3",
       "url": "https://benchling.com/api/v3/openapi.yaml",
-      "sha256": "0d382f804f5f7720cd73530ccba35961dfa56a6267d9d7290bcdc73ef3b458d1",
+      "sha256": "d2594d4792843802e2c7f64c3b09241ff78c4962e85028f3dc55b7ef61f81512",
+      "captured_at": "2026-11-19",
+      "snapshot": "contracts/benchling-v3-openapi.yaml",
       "routes_used": [
         "/entry/items",
         "/entry/{entry_id}",
@@ -19,6 +21,9 @@
         "/entry-schema/{entry_schema_id}",
         "/entry-schema/{entry_schema_id}/field-definitions/items",
         "/document-part-unstructured-table/{doc_part_id}",
+        "/document-part-unstructured-table/{doc_part_id}/rows/items",
+        "/document-part-results-table/{doc_part_id}",
+        "/document-part-results-table/{doc_part_id}/rows/items",
         "/result/items",
         "/result/{result_id}",
         "/result-schema/{result_schema_id}",
@@ -28,7 +33,9 @@
     {
       "name": "benchling-v2",
       "url": "https://benchling.com/api/v2/openapi.yaml",
-      "sha256": "8d6dcd0bb78991c64df4350ea213c8c999cb45d8c56d19095e3f3e68072beeee",
+      "sha256": "ced59de4d98b35fd4e051d6db9d549174516cd2f229b1b5684e66cb2e3cd8298",
+      "captured_at": "2026-11-19",
+      "snapshot": "contracts/benchling-v2-openapi.yaml",
       "routes_used": [
         "/entries",
         "/entries/{entry_id}",

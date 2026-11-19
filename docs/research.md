@@ -17,26 +17,33 @@ Primary sources:
 - [Introduction to Documents](https://docs.benchling.com/docs/introduction-to-documents): stable part identifiers, `partsMutation`, and required document versions.
 - [Working with Entries](https://docs.benchling.com/docs/working-with-entries): entry and parts retrieval.
 - [Working with Sections](https://docs.benchling.com/docs/working-with-sections): flat section semantics.
-- [Working with Tables](https://docs.benchling.com/docs/working-with-tables): paged unstructured-table detail, complete replacement writes, and evaluation limitations.
+- [Working with Tables](https://docs.benchling.com/docs/working-with-tables): paged unstructured-table rows, cell updates, row inserts, and evaluation limitations.
 - [Uploading Results](https://docs.benchling.com/docs/example-creating-results): V2 table IDs and pending result integration.
 - [V3 unified API changelog](https://docs.benchling.com/changelog/v3-rest-api-unified-api-new-stability-guidelines-and-breaking-changes): unified `/api/v3` route and early-access header.
 - [V3 OpenAPI](https://benchling.com/api/v3/openapi.yaml) and [V2 OpenAPI](https://benchling.com/api/v2/openapi.yaml): request contracts and endpoint shapes.
 - [Benchling SDK 1.25.0](https://benchling.com/sdk-docs/1.25.0/index.html): SDK scope and V2 service surface.
 - [MCP Python SDK](https://py.sdk.modelcontextprotocol.io/): stdio server, typed tools, structured output, and in-process testing.
 
-The checksums recorded in `contracts/openapi-manifest.json` identify the exact public specifications reviewed on 2026-09-24. Those YAML files are not vendored. Tests use the small checked-in fixtures in `contracts/request-bodies.json` and `contracts/list-parameters.json` rather than requiring network access.
+The checksums recorded in `contracts/openapi-manifest.json` identify the exact public specifications reviewed. The YAML snapshots next to that manifest are those files. Tests validate the client's request bodies against them and do not need network access. List query parameters are also checked against `contracts/list-parameters.json`.
 
-A parameter check on 2026-11-19 against the public specifications (not a replacement of the 2026-09-24 checksums) confirmed:
+A parameter check on 2026-11-19 against those snapshots confirmed:
 
 - V3 `GET /entry/items` documents `project.eq`, `schema.eq`, `name.anyOf`, and `modifiedAt.gt` / `gte` / `lt` / `lte`. It does not document `folderId`. Live tenants ignore `folderId` on that route.
 - V2 `GET /entries` documents `projectId`, `schemaId`, `name`, `names.anyOf`, and one `modifiedAt` comparison string using `>` and `<`. The `listEntries` operation text does not repeat `folderId`, but the V2 components still define `folderIdFilter` (`folderId`, "Restricts results to those in the folder") and the historical SDK sends it. This client sends `folderId` only on V2, and uses `>=` / `<=` so a modified range stays inclusive.
 - V3 schema lists are `GET /entry-schema/items`, `/result-schema/items`, and `/run-schema/items`, each paged with `pageSize` (default 50, maximum 100) and `nextToken`.
 - Dropdowns are `GET /dropdown/{dropdown_id}` and `GET /dropdown/{dropdown_id}/options/items` (unpaginated). A dropdown field points at the dropdown through `dropdownId` or `linkDefinition.id`.
-- The 2026-11-19 document-mutation schemas name the position fields `position`, `sourceRange`, and `destinationPosition`. The client still sends `coordinates`, `sourceCoordinates`, and `destinationCoordinates`, which is the shape the live tenant accepted when it rejected a move with HTTP 400 `Entry must start with a section`.
 
-Contract decisions confirmed from those snapshots:
+The same day's check of the V3 spec `d2594d47…` and a live tenant set the write contract:
 
-- `UpdateEntryInput.schemaFields` is a dictionary of `FieldValueInput` objects, each containing exactly `value`; published examples key that dictionary by field `systemName`.
+- `GET /document-part-unstructured-table/{id}` returns `rows` as a URL plus `rowCount`. Row pages are `GET .../rows/items` with `pageSize` at most 100. The only version is `versionMetadata.versionId`, and it is the entry version. Cell values use `inputValue.value` with `__typename` `TextValue`.
+- `PATCH /document-part-unstructured-table/{id}` is gone (HTTP 405). Cell edits are `partsMutation.operationType` `update_table_cells`; appended rows are `insert_table_rows`. Both are `PATCH /entry/{id}` and both apply to unstructured tables. A stale entry version is HTTP 409 `Version mismatch`.
+- Document insert uses `position`. Delete uses `sourceRange` `{start, end}`. Move uses `sourceRange` and `destinationPosition`. `coordinates`, `sourceCoordinates`, and `destinationCoordinates` are rejected as additional properties.
+- `UpdateEntryInput.schemaFields` keys are field-definition IDs (`tsf_…`). A system name is HTTP 400 `schemaFields: Invalid field`. Result-record fields are unchanged and still use system names.
+- V3 `GET /entry/items` ignores a `folderId` query parameter. It is not in that operation's parameter list. V2 `GET /entries` still accepts `folderId`.
+
+Contract decisions that still hold:
+
+- `UpdateEntryInput.schemaFields` values are `FieldValueInput` objects, each containing exactly `value`.
 - V2 `AssayResultCreate.fields` explicitly requires system-name keys, and `/assay-results:bulk-create` returns a task ID for polling at `/tasks/{task_id}`.
 - V2 entry `results_table` notes expose both the structured-table `apiId` and `assayResultSchemaId`, which are used rather than matching a visible table name or position.
-- The unstructured-table PATCH contract is a complete row replacement guarded by `versionId`; supported cell state includes input formulas, formatting, merges, and selector IDs.
+- `DocumentPartResultsTable` exposes `columnDefinitions` and a rows URL. `DocumentPartUnavailable` returns only the fields shared by every document part.

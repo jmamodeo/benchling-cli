@@ -95,7 +95,7 @@ def test_version_flag_matches_package_metadata(invoke) -> None:
         (["entry", "fields", "get", ENTRY_ID], "entry_id", ENTRY_ID),
         (["section", "get", ENTRY_ID, "Results"], "version_id", "ver_1"),
         (["part", "get", ENTRY_ID, TEXT_PART], "entry_id", ENTRY_ID),
-        (["table", "get", TABLE_PART], "versionId", "tver_1"),
+        (["table", "get", TABLE_PART], "versionMetadata", {"versionId": "ver_1"}),
         (
             ["schema", "get", "entsch_abc123"],
             "schema",
@@ -392,9 +392,11 @@ def test_mcp_keychain_startup_error_is_json_on_stderr(monkeypatch) -> None:
     assert result.stdout == ""
     payload = json.loads(result.stderr)
     message = payload["error"]["message"]
+    assert message.count("\n") == 3
     assert "HOME, LOGNAME, PATH, SHELL, TERM and USER" in message
     assert "DBUS_SESSION_BUS_ADDRESS" in message
     assert "env block" in message
+    assert "Cron needs that same long-lived bus exported." in message
     assert "dev-client-secret" not in result.stderr
 
 

@@ -6,12 +6,21 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+
+- During `auth login`, the keychain error's `dbus-run-session` command fills in the environment name, the normalized tenant URL, and the client ID that were passed or already saved. Each value is shell-quoted. `$KEYRING_PASSWORD` and `$BENCHLING_CLIENT_SECRET` stay variable references. Omitted values, and errors from other commands, keep the placeholders.
+- The keychain error is the cause, one fix command, and a pointer to the README Headless Linux section. `dbus-run-session` also runs `benchling auth login` in that same shell. It says `DBUS_SESSION_BUS_ADDRESS` is unset only when it is unset, and says the bus has no Secret Service when the variable is set but the bus has no keyring. The MCP client `env` block and cron note is included only when `benchling mcp serve` raises the error.
+- The README Headless Linux section no longer says `gnome-keyring-daemon --unlock` prints `DBUS_SESSION_BUS_ADDRESS`. It shows a long-lived `dbus-daemon --session --fork` bus that MCP, later shells, and cron can share, notes a systemd user bus, and says a wrong `KEYRING_PASSWORD` for an existing login keyring hangs the first keyring call.
+- Closing MCP stdin after a tool call exits 0 and does not print `MCP server failed to start` / `Event loop is closed`.
+- A token request that cannot reach the host says to check the tenant URL. The raw transport error, including SSL text, stays in `details.reason`. `details` also includes `env` and `tenant_url`.
+- A 401 from token exchange says `Benchling at https://<tenant> rejected the client ID or secret.` `details` includes `env`, `tenant_url`, and `status`. `--secret-stdin` with an empty stdin says `No client secret was received on stdin`.
+
 ### Added
 
 - `benchling entry list` and the MCP tool `list_entries` list entries by project, folder, schema, modified date range, and exact name. Filters are server-side. A folder filter uses V2 `GET /entries`, because V3 `GET /entry/items` ignores `folderId`. The other filters use V3 unless a folder is set, in which case the whole query stays on V2. Pages default to 50, cap at 100, and return `next_token`.
 - `benchling schema list` and the MCP tool `list_schemas` list entry, result, and run schemas (`/entry-schema/items`, `/result-schema/items`, `/run-schema/items`), following every upstream page up to the caller's limit.
 - `schema get` and `get_schema` include each dropdown field's options from `/dropdown/{id}` and `/dropdown/{id}/options/items`.
-- Checked-in request contracts in `contracts/request-bodies.json` and `contracts/list-parameters.json`. Tests reject write bodies and list query parameters that fall outside them.
+- `contracts/list-parameters.json` records the query parameters entry and schema lists may send. Tests reject a list call that adds a parameter outside that list. Write bodies are checked against the vendored OpenAPI snapshots.
 
 ### Fixed
 
@@ -24,15 +33,24 @@ All notable changes to this project are documented here. The format is based on
 - Keychain failures name the cause (no Secret Service backend, D-Bus session not reachable, or a locked collection) and the headless Linux commands (`dbus-run-session` and `gnome-keyring-daemon --unlock --components=secrets`). README has a Headless Linux section. There is still no plaintext fallback.
 - `benchling mcp serve --verbose` turns request logging on. It is off by default.
 
+### Fixed
+
+- Unstructured table reads follow the current V3 shape: `rows` is a URL, pages come from `.../rows/items` at `pageSize` 100, cells use `inputValue.value`, and the version precondition is the entry version.
+- Unstructured table writes use `update_table_cells` and `insert_table_rows` on `PATCH /entry/{id}`. A stale entry version (HTTP 409) is the same conflict as a stale plan. The full-table replace operation is removed.
+- Document insert, delete, move, and text replacement send `position`, `sourceRange`, and `destinationPosition`.
+- Entry field writes send field-definition IDs. Plans still accept a system name or an ID and show both.
+- `entry get --full` and `part get` return unstructured-table and results-table rows. A failure to read those rows fails the request. `DocumentPartResultsTable` and `DocumentPartUnavailable` are modeled.
+- HTTP 405 is reported as `api_drift`: the endpoint no longer supports the method.
+
 ### Changed
 
 - Repository links now point at `https://github.com/jmamodeo/benchling-toolkit` after the GitHub repository rename. Older changelog text is unchanged.
 - **Breaking:** `BENCHLING_<ENV>_API_ENDPOINT`, `BENCHLING_<ENV>_CLIENT_ID`, and `BENCHLING_<ENV>_CLIENT_SECRET` are no longer read. There is no fallback or alias. Configure an environment with `benchling auth login --env NAME`.
 - Tenant URLs accept a bare host and a trailing `/api/v2` or `/api/v3`. A trailing slash is not shown. `http://` is rejected on its own. The tenant URL and the client ID are validated separately.
-- A 401 from the token endpoint says to check the client ID and secret.
+- A 401 from the token endpoint names the configured tenant URL and includes `env` and `tenant_url` in `details`.
 - `benchling doctor` exits 3 with `ok: false` when a check fails. Each failed check has a hint. `auth status --check` puts the specific cause in the top-level message.
 - An invalid environment name explains the lowercase-letters-and-digits rule. Logging out an environment that is not configured says so.
-- MCP startup errors, including a missing keychain, are a JSON envelope on stderr and a non-zero exit. The keychain text states that the MCP SDK launches stdio servers with only `HOME`, `LOGNAME`, `PATH`, `SHELL`, `TERM` and `USER`, so `DBUS_SESSION_BUS_ADDRESS` has to be set in the client `env` block.
+- MCP startup errors, including a missing keychain, are a JSON envelope on stderr and a non-zero exit. Only that `mcp serve` path adds that the MCP SDK launches stdio servers with only `HOME`, `LOGNAME`, `PATH`, `SHELL`, `TERM` and `USER`, so `DBUS_SESSION_BUS_ADDRESS` has to be set in the client `env` block. Cron needs the same long-lived bus.
 - `--secret-stdin` reads the controlling terminal with `os.open` and `FileIO`. Opening `/dev/tty` in text mode `r+` is rejected on Linux and macOS, which made that flag fail even when a terminal existed.
 
 ### Removed

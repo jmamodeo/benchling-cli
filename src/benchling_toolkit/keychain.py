@@ -7,8 +7,13 @@ name. There is no plaintext file fallback.
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 import keyring
@@ -19,33 +24,37 @@ from .redact import register_secret
 
 SERVICE_NAME = "benchling-toolkit"
 _SECRET_SERVICE_NAME = "org.freedesktop.secrets"
-_NO_PLAINTEXT = (
-    "Client secrets are stored in the system keychain and are never written to plaintext files."
-)
 _UNLOCK = "gnome-keyring-daemon --unlock --components=secrets"
-_SESSION = (
-    'dbus-run-session -- sh -c \'printf "%s\\n" "$KEYRING_PASSWORD" | '
-    "gnome-keyring-daemon --unlock --components=secrets'"
-)
-_NO_SUBSTITUTION = (
-    "Do not capture gnome-keyring-daemon --unlock with $(...) or backticks. "
-    "The daemon does not exit, so the substitution hangs. Run the unlock and "
-    "benchling inside one dbus-run-session shell."
-)
-_SHARE_BUS = (
-    "Later shells and the MCP server must use the same DBUS_SESSION_BUS_ADDRESS, "
-    "or the keychain is not visible to them."
-)
+_PLACEHOLDER_ENV = "dev"
+_PLACEHOLDER_URL = "https://your-tenant.benchling.com"
+_PLACEHOLDER_CLIENT = "CLIENT"
+_INSTALL = "sudo apt-get install -y gnome-keyring dbus"
+_README = "See the README section Headless Linux."
+# Shown only for `benchling mcp serve`. CLI login already has a terminal session.
 _MCP_ENV = (
     "The standard MCP SDK launches stdio servers with only HOME, LOGNAME, PATH, "
-    "SHELL, TERM and USER in the environment, so DBUS_SESSION_BUS_ADDRESS is missing. "
-    "Set DBUS_SESSION_BUS_ADDRESS in the MCP client config env block."
+    "SHELL, TERM and USER, so DBUS_SESSION_BUS_ADDRESS is missing. "
+    "Set it in the MCP client config env block. Cron needs that same long-lived bus exported."
 )
+# Set for the lifetime of run_mcp_server, including its keychain check.
+_in_mcp_serve: ContextVar[bool] = ContextVar("benchling_in_mcp_serve", default=False)
+
+
+@dataclass(frozen=True)
+class _LoginFix:
+    """Values already known when a keychain error interrupts login."""
+
+    env: str | None = None
+    tenant_url: str | None = None
+    client_id: str | None = None
+
+
+# Set only around `benchling auth login`. Other commands keep the placeholders.
+_login_fix: ContextVar[_LoginFix | None] = ContextVar("benchling_login_fix", default=None)
 NO_KEYRING_MESSAGE = (
-    f"No usable OS keychain is available. {_NO_PLAINTEXT} On Linux, install and unlock "
-    "a Secret Service provider such as gnome-keyring or KWallet. "
-    f"{_SESSION}. {_NO_SUBSTITUTION} {_SHARE_BUS} {_MCP_ENV} "
-    "macOS and Windows use the system keychain automatically."
+    "No usable OS keychain is available because no Secret Service backend is installed.\n"
+    f"{_INSTALL}\n"
+    f"{_README}"
 )
 
 
@@ -151,31 +160,98 @@ def classify_keychain_failure(backend: object | None, exc: BaseException | None 
     return "no_backend"
 
 
-def keychain_message(cause: str) -> str:
-    """Actionable text for one keychain failure cause. Never includes secret values."""
+def _dbus_bus_line() -> str:
+    """Describe the session bus that failed. Do not call an unset bus 'set', or the reverse."""
+    if os.environ.get("DBUS_SESSION_BUS_ADDRESS"):
+        return f"DBUS_SESSION_BUS_ADDRESS is set, but this bus has no {_SECRET_SERVICE_NAME} name."
+    return "DBUS_SESSION_BUS_ADDRESS is unset."
+
+
+def _lines(*parts: str) -> str:
+    return "\n".join(part for part in parts if part)
+
+
+def _cause(cause: str) -> str:
     if cause == "locked":
-        return (
-            "No usable OS keychain is available because the Secret Service collection is locked. "
-            f"{_NO_PLAINTEXT} Unlock it in this session by piping the keyring password on stdin, "
-            f"not as an argument: printf '%s\\n' \"$KEYRING_PASSWORD\" | {_UNLOCK}. "
-            f"If there is no session bus, run that inside dbus-run-session. {_NO_SUBSTITUTION} "
-            f"{_SHARE_BUS} {_MCP_ENV}"
-        )
+        return "No usable OS keychain is available because the Secret Service collection is locked."
     if cause == "dbus_unreachable":
         return (
             "No usable OS keychain is available because Secret Service is not reachable on D-Bus. "
-            f"{_NO_PLAINTEXT} DBUS_SESSION_BUS_ADDRESS is unset, or this bus has no "
-            f"{_SECRET_SERVICE_NAME} name. On headless Linux, start an unlocked keyring and run "
-            f"benchling in that same session: {_SESSION}. {_NO_SUBSTITUTION} {_SHARE_BUS} {_MCP_ENV} "
-            "macOS and Windows use the system keychain automatically."
+            + _dbus_bus_line()
         )
-    return (
-        "No usable OS keychain is available because no Secret Service backend is installed. "
-        f"{_NO_PLAINTEXT} On Linux, install gnome-keyring and dbus "
-        "(for example `sudo apt-get install -y gnome-keyring dbus`), then unlock a session: "
-        f"{_SESSION}. {_NO_SUBSTITUTION} {_SHARE_BUS} {_MCP_ENV} "
-        "macOS and Windows use the system keychain automatically."
+    return "No usable OS keychain is available because no Secret Service backend is installed."
+
+
+def _shell_value(value: str | None, placeholder: str) -> str:
+    """Quote a supplied flag value. An omitted value stays a shell-safe placeholder."""
+    if value is None or not value.strip():
+        return placeholder
+    return shlex.quote(value.strip())
+
+
+def dbus_login_command(
+    *,
+    env: str | None = None,
+    tenant_url: str | None = None,
+    client_id: str | None = None,
+) -> str:
+    """Unlock the keyring and log in inside one ``dbus-run-session``.
+
+    ``env``, ``tenant_url``, and ``client_id`` are shell-quoted. Omitted values
+    stay placeholders. ``$KEYRING_PASSWORD`` and ``$BENCHLING_CLIENT_SECRET``
+    stay variable references; this command never contains a secret value.
+    """
+    login = (
+        'printf "%s" "$BENCHLING_CLIENT_SECRET" | benchling auth login '
+        f"--env {_shell_value(env, _PLACEHOLDER_ENV)} "
+        f"--tenant-url {_shell_value(tenant_url, _PLACEHOLDER_URL)} "
+        f"--client-id {_shell_value(client_id, _PLACEHOLDER_CLIENT)} "
+        "--secret-stdin"
     )
+    # The session exits with its shell, and the bus exits with it. Login has to
+    # be in that same shell or the secret is stored on a bus that is already gone.
+    script = f'printf "%s\\n" "$KEYRING_PASSWORD" | {_UNLOCK}; {login}'
+    return f"dbus-run-session -- sh -c {shlex.quote(script)}"
+
+
+@contextmanager
+def bind_login_fix(
+    *,
+    env: str | None,
+    tenant_url: str | None,
+    client_id: str | None,
+) -> Iterator[None]:
+    """Use these login values in a keychain error raised inside the block."""
+    token = _login_fix.set(_LoginFix(env=env, tenant_url=tenant_url, client_id=client_id))
+    try:
+        yield
+    finally:
+        _login_fix.reset(token)
+
+
+def _fix_command(cause: str) -> str:
+    """One command. The README has the rest, including a long-lived bus."""
+    if cause == "no_backend":
+        return _INSTALL
+    current = _login_fix.get()
+    if current is None:
+        return dbus_login_command()
+    return dbus_login_command(
+        env=current.env,
+        tenant_url=current.tenant_url,
+        client_id=current.client_id,
+    )
+
+
+def keychain_message(cause: str) -> str:
+    """Cause, one fix command, and a README pointer. MCP adds the env-block line.
+
+    Never includes secret values. The MCP line is only present while `mcp serve` is running.
+    """
+    parts = [_cause(cause), _fix_command(cause), _README]
+    if _in_mcp_serve.get():
+        parts.append(_MCP_ENV)
+    return _lines(*parts)
 
 
 def _keychain_error(backend: object | None, exc: BaseException | None) -> AuthenticationError:

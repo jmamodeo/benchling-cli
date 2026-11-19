@@ -45,15 +45,14 @@ $ benchling --env demo changes plan --entry etr_abc123 --family table --spec set
     "family": "table",
     "env": "demo",
     "preconditions": {
-      "table_version": "tver_1",
+      "entry_version": "ver_1",
       "entry_id": "etr_abc123"
     },
     "guarantees": [
-      "server-enforced document version check",
-      "complete table replacement"
+      "server-enforced document version check"
     ],
     "warnings": [
-      "API table edits clear evaluated values until Benchling evaluates the table in the browser"
+      "Updating a cell or appending rows resets table evaluation until Benchling evaluates the table again"
     ]
   }
 }
@@ -75,7 +74,7 @@ $ benchling --env demo changes apply 61f30b3982634235b8811a15e3ef3004
           "status": "started"
         },
         {
-          "stage": "replace_table",
+          "stage": "update_table_cells",
           "status": "succeeded"
         },
         {
@@ -88,18 +87,18 @@ $ benchling --env demo changes apply 61f30b3982634235b8811a15e3ef3004
 }
 [exit 0]
 
-# 4. The second plan was previewed against the old table version: apply is refused
+# 4. The second plan was previewed against the old entry version: apply is refused
 
 $ benchling --env demo changes apply 346151df5d53417cb39d840ecb0c53f8
 {
   "ok": false,
   "error": {
     "code": "conflict",
-    "message": "Table version changed after the plan was created",
+    "message": "Entry version changed after the plan was created",
     "retryable": false,
     "details": {
-      "expected": "tver_1",
-      "actual": "tver_2"
+      "expected": "ver_1",
+      "actual": "ver_2"
     }
   }
 }
@@ -168,7 +167,7 @@ printf '%s' "$BENCHLING_CLIENT_SECRET" | benchling auth login --env dev \
 
 `--tenant-url` accepts `https://host`, a bare host, or the same URL with a trailing `/api/v2` or `/api/v3` (those suffixes and a trailing slash are removed). `http://` is rejected. If a flag is missing and there is no terminal, login exits with one error that names `--tenant-url`, `--client-id`, and `--secret-stdin`. It does not fall back to `getpass` on a pipe, so you will not see echo warnings.
 
-Login requests an OAuth `client_credentials` token before it saves anything. On success it writes the tenant URL and client ID to `environments.json` (mode 0600) under the state directory, and stores the client secret in the OS keychain under the service name `benchling-toolkit`. The username in the keychain is the environment name. Access tokens stay in process memory and are renewed before expiry in a long-running MCP process. If no usable keychain is available, login fails with the cause (no backend, Secret Service not on D-Bus, or a locked collection) and the commands to fix it. There is no plaintext file fallback. A 401 means Benchling rejected the client ID or secret; check both in the Benchling developer console.
+Login requests an OAuth `client_credentials` token before it saves anything. On success it writes the tenant URL and client ID to `environments.json` (mode 0600) under the state directory, and stores the client secret in the OS keychain under the service name `benchling-toolkit`. The username in the keychain is the environment name. Access tokens stay in process memory and are renewed before expiry in a long-running MCP process. If no usable keychain is available, login fails with the cause, one fix command, and a pointer to Headless Linux. There is no plaintext file fallback. A 401 says `Benchling at https://<tenant> rejected the client ID or secret.`
 
 The toolkit acts as the **app**, with the app's permissions and audit identity, not the signed-in browser user. Profiles saved by previous versions are never read.
 
@@ -198,6 +197,8 @@ dbus-run-session -- sh -c '
 '
 ```
 
+A wrong `KEYRING_PASSWORD` for an existing login keyring makes the first keyring call hang; use the right password, or remove `~/.local/share/keyrings/login.keyring` for a fresh scratch setup.
+
 Do not capture `gnome-keyring-daemon --unlock` with `$(...)` or backticks. The daemon does not exit, and the child keeps the substitution's pipe open, so the shell waits forever:
 
 ```console
@@ -205,9 +206,23 @@ Do not capture `gnome-keyring-daemon --unlock` with `$(...)` or backticks. The d
 eval "$(printf '%s\n' "$KEYRING_PASSWORD" | gnome-keyring-daemon --unlock --components=secrets)"
 ```
 
-The `dbus-run-session` command runs the daemon and `benchling` in one shell, so the shell does not wait for the daemon to exit. `gnome-keyring-daemon` prints `DBUS_SESSION_BUS_ADDRESS=...` to the terminal. Later shells, cron jobs, and `benchling mcp serve` must inherit that same value. A new shell without it cannot see the keychain, so the command fails again.
+`dbus-run-session` sets `DBUS_SESSION_BUS_ADDRESS` for that shell only. When the shell exits, the bus exits with it, and a secret stored there is gone. `gnome-keyring-daemon --unlock` does not print `DBUS_SESSION_BUS_ADDRESS`. Do not look for the address in its output.
 
-If the collection is locked, or no provider is installed, or the session bus has no `org.freedesktop.secrets` name, the error names that cause and repeats these commands. macOS and Windows use the system keychain and do not need this session.
+MCP, later shells, and cron need a bus that stays up. Create one with `dbus-daemon`, then unlock the keyring on it. `dbus-daemon --print-address` prints the address and exits. Command substitution is safe for that command. It is not safe for `gnome-keyring-daemon --unlock`.
+
+```console
+runtime="${XDG_RUNTIME_DIR:-/tmp/benchling-bus-$UID}"
+mkdir -p "$runtime"
+chmod 700 "$runtime"
+export DBUS_SESSION_BUS_ADDRESS="$(dbus-daemon --session --fork --print-address --address="unix:path=${runtime}/bus")"
+printf '%s\n' "$KEYRING_PASSWORD" | gnome-keyring-daemon --unlock --components=secrets
+```
+
+Put that same `DBUS_SESSION_BUS_ADDRESS` in the environment of later shells, cron, and the MCP client config `env` block.
+
+If `systemctl --user status` works, a user bus is often already listening at `unix:path=$XDG_RUNTIME_DIR/bus`. Export `DBUS_SESSION_BUS_ADDRESS` to that socket, then unlock the keyring. SSH and cron do not receive the user session's environment on their own. `loginctl enable-linger "$USER"` keeps the systemd user session after logout so that bus can stay up.
+
+If the collection is locked, or the session bus has no `org.freedesktop.secrets` name, the error is the cause, one `dbus-run-session` command that unlocks the keyring and logs in inside that shell, and a pointer here. During `auth login` that command uses the environment name, the normalized tenant URL, and the client ID you passed, or the ones already saved for that environment. A value you did not supply stays a placeholder (`--env dev`, `https://your-tenant.benchling.com`, `CLIENT`). `$KEYRING_PASSWORD` and `$BENCHLING_CLIENT_SECRET` stay shell variables. `auth status`, `mcp serve`, and other commands keep the placeholders. If no provider is installed, the command is `sudo apt-get install -y gnome-keyring dbus`. The note about the MCP client `env` block and cron is included only when `benchling mcp serve` raises the error. macOS and Windows use the system keychain and do not need this session.
 
 `BENCHLING_TOOLKIT_HOME` overrides the state directory (the platform config directory plus `benchling-toolkit` otherwise). It does not hold secrets. HTTPS uses the operating system's certificate trust store, with certificate-chain and hostname verification enabled. No insecure TLS fallback is available.
 
@@ -281,13 +296,13 @@ benchling --env dev changes status PLAN_ID
 Supported specifications are documented in [schemas/change-spec.schema.json](schemas/change-spec.schema.json). The four families are:
 
 - `document`: insert, delete, move, or replace a text part;
-- `table`: set selected cells, append rows, or replace an unstructured table;
+- `table`: set selected cells or append rows on an unstructured table;
 - `fields`: update fields already present on the entry's assigned schema; and
 - `results`: submit V2 assay result records to an explicit `strtbl_…` table.
 
-Field inputs must use a schema field's V3 `systemName` or its field-definition ID and have the shape `{"value": ...}`. Plans normalize IDs to system names, validate value types and constraints, and re-check the affected definitions and values immediately before applying. Result plans also verify that the table belongs to the selected entry, that every record uses the table's result schema, and that any supplied project IDs are readable.
+Field inputs must use a schema field's V3 `systemName` or its field-definition ID and have the shape `{"value": ...}`. Plans show both identifiers, send the field-definition ID, validate value types and constraints, and re-check the affected definitions and values immediately before applying. Result plans also verify that the table belongs to the selected entry, that every record uses the table's result schema, and that any supplied project IDs are readable. Result field keys stay system names.
 
-Result submissions remain pending until a person integrates them in Benchling. A table write sends a complete version-checked table replacement and clears evaluated values until Benchling's browser evaluates it again.
+Result submissions remain pending until a person integrates them in Benchling. A table write updates the named cells or appends rows, checked against the entry version, and resets table evaluation until Benchling's browser evaluates it again.
 Table upload plans use local correlation UUIDs; the tenant assigns the actual result IDs. Local UUIDs are not idempotency keys. Caller-supplied result IDs are rejected by the CLI because the tested tenant rejects them on this endpoint despite the public OpenAPI declaration. Notebook table uploads are limited to 500 records. The immediate apply result is `submission_pending`; task success is reported separately as `pending_integration`.
 `changes status` checks Benchling's asynchronous task endpoint after a result submission while retaining the local execution journal as the reconciliation record.
 
@@ -306,7 +321,7 @@ One server serves every environment saved with `auth login`. The client config c
 }
 ```
 
-On Linux the standard MCP SDK starts the stdio server with only `HOME`, `LOGNAME`, `PATH`, `SHELL`, `TERM` and `USER`. `DBUS_SESSION_BUS_ADDRESS` is not among them, so the server cannot see the keyring and exits before the protocol starts. Put the session bus in the client config `env` block (the value printed when the keyring was unlocked):
+On Linux the standard MCP SDK starts the stdio server with only `HOME`, `LOGNAME`, `PATH`, `SHELL`, `TERM` and `USER`. `DBUS_SESSION_BUS_ADDRESS` is not among them, so the server cannot see the keyring and exits before the protocol starts. Put the long-lived session bus from Headless Linux in the client config `env` block. A `dbus-run-session` that has already exited is not a usable value:
 
 ```json
 {
@@ -370,7 +385,7 @@ flowchart TD
 - **Preview, then apply.** `changes plan` only reads Benchling and writes an immutable local plan; nothing changes remotely until `changes apply`. A document move that would leave the entry starting with anything other than a section fails in preview, before a plan is saved. Benchling rejects that shape with HTTP 400 `Entry must start with a section`.
 - **Journals record the HTTP status.** Each apply step stores the raw status Benchling returned (`http_status`) next to the response body. A local failure that never reached the API has no status.
 - **Plans are checksummed and scoped.** A plan stores a SHA-256 of its content, verified on load, and is bound to the environment and tenant that created it. The checksum catches accidental corruption; it is not a signature and does not defend against someone who can already write to your state directory.
-- **Version preconditions.** Document edits and table replacements send the version observed at preview time, and Benchling answers HTTP 409 if it is stale; table plans also re-check the table version just before writing. A concurrent edit becomes a conflict instead of an overwrite. Entry field updates have no atomic server-side precondition, so the affected values are compared immediately before writing; this is best effort.
+- **Version preconditions.** Document edits and table writes send the entry version observed at preview time, and Benchling answers HTTP 409 if it is stale. Table plans re-check that entry version just before writing. A concurrent edit becomes a conflict instead of an overwrite. Entry field updates have no atomic server-side precondition, so the affected values are compared immediately before writing; this is best effort.
 - **Single use.** A plan with any prior attempt cannot be applied again, and a per-plan file lock stops a CLI and an MCP process from applying the same plan concurrently on one machine.
 - **Writes are never retried.** A write that times out or fails with a server error leaves the journal in `unknown`/`partial` state for a person to reconcile; reads are retried with bounded backoff.
 - **Read-only MCP by default.** `apply_changes` is refused unless the server was started with `--allow-writes ENV` for that environment. `plan_changes` stays available because it only reads Benchling and writes a local preview.
@@ -383,7 +398,7 @@ flowchart TD
 - **OS keychain, no default environment.** The client secret is stored by the operating system and the target tenant is always explicit. The cost is a keychain dependency and no headless plaintext fallback.
 - **App identity, not user identity.** OAuth client credentials give the toolkit its own permissions and audit identity, separate from any person's. The app must be granted access to each project it touches.
 - **One service layer, two interfaces.** The CLI and MCP server call the same typed services and return the same envelope, so behavior is specified and tested once. The cost is a more verbose, JSON-first CLI.
-- **Honest handling of API limits.** Benchling's document API cannot edit table cells individually, so table edits send a complete replacement that preserves supported cell fields; evaluated values are cleared. Replacing text is an insert followed by a delete and can end in a reported partial completion.
+- **Honest handling of API limits.** Unstructured table cells are edited one cell at a time, and new rows are inserted at the end of the table; evaluation is reset until Benchling recalculates it. Replacing text is an insert followed by a delete and can end in a reported partial completion.
 - **Local, single-machine state.** Plans, journals, locks, and `environments.json` are plain files under the application directory (`BENCHLING_TOOLKIT_HOME` overrides it). Client secrets are in the OS keychain for that user. Concurrency control does not extend across machines.
 - **Offline tests against a stateful fake.** The suite runs the real client, services and planner against an in-process fake Benchling API instead of stubbing each call. This tests behavior end to end; the cost is that the fake can drift from the real API, which is why the opt-in sandbox exercise exists.
 
@@ -414,7 +429,7 @@ uv run mypy
 uv run pytest --cov
 ```
 
-The suite has 277 test functions (456 collected cases, parametrization included) and reaches 98% branch coverage. CI enforces a `fail_under` floor of 96% in `pyproject.toml`, and also builds the sdist and wheel, runs `twine check`, and smoke-tests the built wheel.
+The suite has 291 test functions (454 collected cases, parametrization included) and reaches 98% branch coverage. CI enforces a `fail_under` floor of 96% in `pyproject.toml`, and also builds the sdist and wheel, runs `twine check`, and smoke-tests the built wheel.
 
 ### Opt-in sandbox exercise
 
@@ -434,7 +449,7 @@ uv run python scripts/sandbox_exercise.py \
 
 - **`replace_text` on flattened V3 text parts is verified against fixtures only.** The fix in 0.1.2 that lets `replace_text` accept the flattened `DocumentPartText` shape was built and tested against synthetic fixtures. It has not been verified against a live Benchling tenant, so do not rely on it for production data until it has been checked there (`scripts/live_cli_session.py` and `scripts/sandbox_exercise.py` are provided for that).
 - The V3 Document API is in beta and Benchling may change it.
-- Table edits clear evaluated values until Benchling recalculates them in the browser, and only unstructured tables are editable.
+- Table cell edits and row inserts reset evaluation until Benchling recalculates the table in the browser. Only unstructured tables are editable. Results tables can be read; other structured tables cannot.
 - Entry field updates are protected by a best-effort value comparison, not an atomic precondition.
 - Replacing text can end in a partial completion that a person must reconcile.
 - Assay result submissions stay pending until a person integrates them in Benchling.

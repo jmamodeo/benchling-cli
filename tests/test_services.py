@@ -4,6 +4,7 @@ import pytest
 from fake_benchling import ENTRY_ID, TABLE_PART, TEXT_PART
 
 from benchling_toolkit.errors import (
+    AccessError,
     ConflictError,
     NotFoundError,
     UnsupportedError,
@@ -14,8 +15,10 @@ from benchling_toolkit.services import (
     build_sections,
     entry_version,
     field_definition_type,
+    is_results_table,
     is_section,
     is_structured_table,
+    is_unavailable_part,
     is_unstructured_table,
     part_content,
     part_type,
@@ -47,6 +50,9 @@ def test_part_helpers_handle_nested_and_flat_shapes() -> None:
     assert not is_unstructured_table({"__typename": "DocumentPartStructuredTable"})
     assert part_type({"__typename": "DocumentPartText"}) == "DocumentPartText"
     assert is_structured_table({"__typename": "DocumentPartResultsStructuredTable"})
+    assert is_results_table({"__typename": "DocumentPartResultsTable"})
+    assert is_unavailable_part({"__typename": "DocumentPartUnavailable"})
+    assert not is_results_table(flat)
 
 
 def test_section_boundaries_follow_flat_part_order() -> None:
@@ -112,27 +118,102 @@ async def test_table_pages_are_concatenated_and_marked_complete(runtime, fake) -
     table = await runtime.service.get_table(TABLE_PART)
     assert len(table["content"]["rows"]) == 3
     assert table["pagination"] == {"rows": 3, "complete": True}
-    token_calls = [c.params.get("nextToken") for c in fake.calls if TABLE_PART in c.path]
-    assert token_calls == [None, "1", "2"]
+    assert table["versionMetadata"]["versionId"] == "ver_1"
+    assert table["content"]["rows"][0]["cells"][0]["inputValue"] == {
+        "type": "text_value",
+        "value": "A",
+    }
+    row_calls = [c for c in fake.calls if c.path.endswith("/rows/items")]
+    assert [c.params.get("nextToken") for c in row_calls] == [None, "1", "2"]
+    assert all(c.params.get("pageSize") == "100" for c in row_calls)
 
 
 async def test_repeated_table_pagination_token_is_an_upstream_error(runtime, fake) -> None:
-    original = fake._get_table
+    original = fake._table_rows
 
     def stuck(call, part_id):
         status, payload = original(call, part_id)
         payload["nextToken"] = "same"
         return status, payload
 
-    fake._get_table = stuck
-    with pytest.raises(UpstreamError, match="repeated a pagination token"):
+    fake._table_rows = stuck
+    with pytest.raises(UpstreamError, match="repeated pagination token"):
         await runtime.service.get_table(TABLE_PART)
 
 
 async def test_table_with_non_list_rows_is_rejected(runtime, fake) -> None:
-    fake.table_content["rows"] = "oops"
+    fake.rows_field = ["not-a-url"]
     with pytest.raises(UpstreamError, match="invalid rows"):
         await runtime.service.get_table(TABLE_PART)
+
+
+async def test_table_rows_url_must_stay_on_the_tenant(runtime, fake) -> None:
+    fake.rows_field = (
+        "https://other.example/api/v3/document-part-unstructured-table/docpart_table1/rows/items"
+    )
+    with pytest.raises(UpstreamError, match="does not belong"):
+        await runtime.service.get_table(TABLE_PART)
+
+
+async def test_table_row_count_must_match_the_pages(runtime, fake) -> None:
+    fake.row_count_override = 9
+    with pytest.raises(UpstreamError, match="row count"):
+        await runtime.service.get_table(TABLE_PART)
+
+
+async def test_table_without_entry_version_is_rejected(runtime, fake) -> None:
+    fake.omit_table_version = True
+    with pytest.raises(UpstreamError, match="version metadata"):
+        await runtime.service.get_table(TABLE_PART)
+
+
+async def test_unstructured_cell_without_text_is_rejected(runtime, fake) -> None:
+    fake.corrupt_cells = True
+    with pytest.raises(UpstreamError, match="invalid rows"):
+        await runtime.service.get_table(TABLE_PART)
+
+
+async def test_full_entry_and_part_reads_include_table_rows(runtime) -> None:
+    snapshot = await runtime.service.get_entry(ENTRY_ID, full=True)
+    rows = snapshot["tables"][TABLE_PART]["content"]["rows"]
+    assert [row["cells"][0]["inputValue"]["value"] for row in rows] == ["A", "B", "C"]
+    part = await runtime.service.get_part(ENTRY_ID, TABLE_PART)
+    assert part["detail"]["content"]["rows"][2]["cells"][1]["inputValue"]["value"] == "=SUM(A1:A2)"
+
+
+async def test_results_table_rows_and_unavailable_parts_are_modeled(runtime, fake) -> None:
+    fake.parts.append(
+        {"id": "docpart_rt1", "__typename": "DocumentPartResultsTable", "name": "Assay"}
+    )
+    fake.results_parts["docpart_rt1"] = {
+        "name": "Assay",
+        "columnDefinitions": [
+            {"__typename": "SchemaFieldColumnDefinition", "name": "Ct", "columnId": "col_ct"}
+        ],
+        "rows": [
+            {
+                "id": "strow_1",
+                "cells": [{"inputValue": {"__typename": "IntegerValue", "value": 12}}],
+                "submissionStatus": "UNSUBMITTED",
+            }
+        ],
+        "resultSchema": {"id": "assaysch_abc123"},
+    }
+    fake.parts.append({"id": "docpart_unavail", "__typename": "DocumentPartUnavailable"})
+    snapshot = await runtime.service.get_entry(ENTRY_ID, full=True)
+    table = snapshot["tables"]["docpart_rt1"]
+    assert table["content"]["columnDefinitions"][0]["name"] == "Ct"
+    assert table["content"]["rows"][0]["cells"][0]["inputValue"] == {
+        "type": "integer_value",
+        "value": 12,
+    }
+    reasons = {issue["reason"] for issue in snapshot["issues"]}
+    assert "document_part_unavailable" in reasons
+    assert "unknown_part_type_preserved_as_opaque_data" not in {
+        issue["reason"] for issue in snapshot["issues"] if issue["scope"] == "part:docpart_unavail"
+    }
+    part = await runtime.service.get_part(ENTRY_ID, "docpart_rt1")
+    assert part["detail"]["rowCount"] == 1
 
 
 async def test_table_for_entry_rejects_non_table_and_duplicate_parts(runtime, fake) -> None:
@@ -176,12 +257,10 @@ async def test_full_snapshot_collects_every_part_page(runtime, fake) -> None:
     assert len(parts_calls) == len(fake.parts)
 
 
-async def test_inaccessible_table_is_reported_as_partial(runtime, fake) -> None:
+async def test_inaccessible_table_fails_the_entry_read(runtime, fake) -> None:
     fake.fail("GET", "/document-part-unstructured-table/", 403)
-    snapshot = await runtime.service.get_entry(ENTRY_ID, full=True)
-    assert snapshot["completeness"] == "partial"
-    (issue,) = [i for i in snapshot["issues"] if i["scope"] == f"table:{TABLE_PART}"]
-    assert issue["reason"] == "detail_unavailable"
+    with pytest.raises(AccessError):
+        await runtime.service.get_entry(ENTRY_ID, full=True)
 
 
 async def test_unknown_part_types_are_preserved_and_flagged(runtime, fake) -> None:
@@ -303,6 +382,9 @@ async def test_doctor_records_per_endpoint_failures_without_raising(runtime, fak
     assert report["capabilities"]["entry_fields"] is False
     assert report["capabilities"]["result_upload_pending_integration"] is False
     assert report["capabilities"]["structured_table_edit"] is False
+    assert report["capabilities"]["unstructured_table_cell_edit"] is True
+    assert report["capabilities"]["unstructured_table_row_insert"] is True
+    assert "unstructured_table_replace" not in report["capabilities"]
     assert report["checks"][1] == {
         "name": "v2_entries",
         "ok": False,

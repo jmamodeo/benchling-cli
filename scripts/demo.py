@@ -151,7 +151,7 @@ def _demo() -> None:
 
     print("# 3. Apply the first plan\n")
     run("--env", "demo", "changes", "apply", first["data"]["id"], brief_journal=True)
-    print("# 4. The second plan was previewed against the old table version: apply is refused\n")
+    print("# 4. The second plan was previewed against the old entry version: apply is refused\n")
     run("--env", "demo", "changes", "apply", second["data"]["id"])
     print("# 5. A plan cannot be applied twice\n")
     run("--env", "demo", "changes", "apply", first["data"]["id"])

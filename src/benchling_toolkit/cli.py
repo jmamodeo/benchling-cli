@@ -15,7 +15,7 @@ from typing import Any, NoReturn
 import typer
 
 from . import __version__
-from .credentials import build_environment, collect_status, login, logout
+from .credentials import build_environment, collect_status, login, login_fix_values, logout
 from .environment import ENV_NAME, EnvironmentConfigStore, invalid_environment_name
 from .errors import (
     AuthenticationError,
@@ -24,7 +24,7 @@ from .errors import (
     UpstreamError,
     ValidationError,
 )
-from .keychain import Keychain
+from .keychain import Keychain, bind_login_fix
 from .models import Envelope, Environment, PlanFamily
 from .redact import redact_text
 from .runtime import Runtime
@@ -233,8 +233,8 @@ def _read_secret(secret_stdin: bool) -> str:
             value = value[:-2]
         elif value.endswith("\n"):
             value = value[:-1]
-        if value == "":
-            raise ValidationError("Client secret is required")
+        if value.strip() == "":
+            raise ValidationError("No client secret was received on stdin")
         return value
     try:
         secret = getpass.getpass("Client secret (not echoed): ")
@@ -296,34 +296,36 @@ def auth_login(
     store = EnvironmentConfigStore()
     try:
         name = _require_env_name(env or state.env, store)
-        Keychain().require()
         url = _blank_to_none(tenant_url)
         client = _blank_to_none(client_id)
-        missing_url = url is None
-        missing_client = client is None
-        missing_secret = not secret_stdin
-        if (missing_url or missing_client or missing_secret) and not _prompts_available(
-            secret_on_stdin=secret_stdin
-        ):
-            raise _noninteractive_login_error(
-                url=missing_url, client=missing_client, secret=missing_secret
+        fix_url, fix_client = login_fix_values(store, name, url, client)
+        with bind_login_fix(env=name, tenant_url=fix_url, client_id=fix_client):
+            Keychain().require()
+            missing_url = url is None
+            missing_client = client is None
+            missing_secret = not secret_stdin
+            if (missing_url or missing_client or missing_secret) and not _prompts_available(
+                secret_on_stdin=secret_stdin
+            ):
+                raise _noninteractive_login_error(
+                    url=missing_url, client=missing_client, secret=missing_secret
+                )
+            use_terminal = secret_stdin or not _stdin_is_tty()
+            if missing_url:
+                url = _prompt("Tenant URL", tty=use_terminal)
+            if missing_client:
+                client = _prompt("Client ID", tty=use_terminal)
+            assert url is not None and client is not None
+            build_environment(name, url, client)
+            secret = _read_secret(secret_stdin)
+            environment = login(
+                store,
+                Keychain(),
+                name=name,
+                tenant_url=url,
+                client_id=client,
+                secret=secret,
             )
-        use_terminal = secret_stdin or not _stdin_is_tty()
-        if missing_url:
-            url = _prompt("Tenant URL", tty=use_terminal)
-        if missing_client:
-            client = _prompt("Client ID", tty=use_terminal)
-        assert url is not None and client is not None
-        build_environment(name, url, client)
-        secret = _read_secret(secret_stdin)
-        environment = login(
-            store,
-            Keychain(),
-            name=name,
-            tenant_url=url,
-            client_id=client,
-            secret=secret,
-        )
     except BenchlingAgentError as exc:
         _auth_failure(exc)
     _emit(

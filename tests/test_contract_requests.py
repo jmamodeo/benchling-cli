@@ -1,179 +1,146 @@
-"""Validate the request bodies this client sends against the checked-in contracts.
-
-The fixtures in ``contracts/`` are the subset of the reviewed Benchling OpenAPI
-that the toolkit actually sends. The public multi-megabyte specifications are
-not vendored; ``contracts/openapi-manifest.json`` records their checksums.
-"""
+"""Every JSON body the client sends must satisfy the vendored OpenAPI request schema."""
 
 from __future__ import annotations
 
+import hashlib
 import json
+import re
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-import pytest
-from fake_benchling import ENTRY_ID
+import yaml
+from fake_benchling import ENTRY_ID, TABLE_PART, TEXT_PART
+from jsonschema import Draft202012Validator
+from referencing import Registry, Resource
+from referencing.jsonschema import DRAFT202012
 
-ROOT = Path(__file__).parents[1]
-BODIES = json.loads((ROOT / "contracts" / "request-bodies.json").read_text(encoding="utf-8"))
-LISTS = json.loads((ROOT / "contracts" / "list-parameters.json").read_text(encoding="utf-8"))
+ROOT = Path(__file__).resolve().parents[1]
+MANIFEST = json.loads((ROOT / "contracts" / "openapi-manifest.json").read_text())
 
-
-class ContractError(Exception):
-    """A request body does not match the checked-in contract."""
-
-
-def _resolve(schema: dict[str, Any], root: dict[str, Any]) -> dict[str, Any]:
-    if "$ref" not in schema:
-        return schema
-    name = schema["$ref"].removeprefix("#/")
-    target = root[name]
-    rest = {key: value for key, value in schema.items() if key != "$ref"}
-    if not rest:
-        return target
-    return {"allOf": [target, rest]}
+_V3_ENTRY = re.compile(r"/api/v3/entry/[^/]+$")
+_V2_BULK = re.compile(r"/api/v2/assay-results:bulk-create$")
 
 
-def _type_ok(instance: Any, expected: str | list[str]) -> bool:
-    kinds = expected if isinstance(expected, list) else [expected]
-
-    def one(kind: str) -> bool:
-        if kind == "object":
-            return isinstance(instance, dict)
-        if kind == "array":
-            return isinstance(instance, list)
-        if kind == "string":
-            return isinstance(instance, str)
-        if kind == "boolean":
-            return isinstance(instance, bool)
-        if kind == "integer":
-            return isinstance(instance, int) and not isinstance(instance, bool)
-        if kind == "number":
-            return isinstance(instance, (int, float)) and not isinstance(instance, bool)
-        if kind == "null":
-            return instance is None
-        raise AssertionError(kind)
-
-    return any(one(kind) for kind in kinds)
+def _contract(name: str) -> dict[str, Any]:
+    matches = [item for item in MANIFEST["contracts"] if item["name"] == name]
+    if len(matches) != 1:
+        raise AssertionError(f"manifest is missing {name}")
+    return matches[0]
 
 
-def _check(instance: Any, schema: dict[str, Any], root: dict[str, Any], path: str) -> None:
-    schema = _resolve(schema, root)
-    if "allOf" in schema:
-        for item in schema["allOf"]:
-            _check(instance, item, root, path)
-    if "anyOf" in schema:
-        errors: list[str] = []
-        for item in schema["anyOf"]:
-            try:
-                _check(instance, item, root, path)
-                break
-            except ContractError as exc:
-                errors.append(str(exc))
-        else:
-            raise ContractError(f"{path} matched no alternative: {errors}")
-    if "if" in schema:
-        try:
-            _check(instance, schema["if"], root, path)
-        except ContractError:
-            pass
-        else:
-            _check(instance, schema["then"], root, path)
-    if "const" in schema and instance != schema["const"]:
-        raise ContractError(f"{path} must be {schema['const']!r}")
-    if "enum" in schema and instance not in schema["enum"]:
-        raise ContractError(f"{path} must be one of {schema['enum']!r}")
-    if "type" in schema and not _type_ok(instance, schema["type"]):
-        raise ContractError(f"{path} has the wrong type")
-    object_keys = {"properties", "required", "additionalProperties", "minProperties"}
-    if object_keys & schema.keys():
-        if not isinstance(instance, dict):
-            raise ContractError(f"{path} must be an object")
-        for key in schema.get("required", []):
-            if key not in instance:
-                raise ContractError(f"{path}.{key} is required")
-        if "minProperties" in schema and len(instance) < schema["minProperties"]:
-            raise ContractError(f"{path} has too few properties")
-        additional = schema.get("additionalProperties", True)
-        for key, value in instance.items():
-            if key in schema.get("properties", {}):
-                _check(value, schema["properties"][key], root, f"{path}.{key}")
-            elif additional is False:
-                raise ContractError(f"{path}.{key} is not allowed")
-            elif isinstance(additional, dict):
-                _check(value, additional, root, f"{path}.{key}")
-    if schema.get("type") == "array":
-        if not isinstance(instance, list):
-            raise ContractError(f"{path} must be an array")
-        if "minItems" in schema and len(instance) < schema["minItems"]:
-            raise ContractError(f"{path} has too few items")
-        if "maxItems" in schema and len(instance) > schema["maxItems"]:
-            raise ContractError(f"{path} has too many items")
-        if "items" in schema:
-            for index, item in enumerate(instance):
-                _check(item, schema["items"], root, f"{path}[{index}]")
+def test_vendored_specs_match_the_manifest_checksums() -> None:
+    for name in ("benchling-v3", "benchling-v2"):
+        contract = _contract(name)
+        snapshot = ROOT / str(contract["snapshot"])
+        digest = hashlib.sha256(snapshot.read_bytes()).hexdigest()
+        assert digest == contract["sha256"]
+        assert contract["captured_at"] == "2026-11-19"
 
 
-def validate(instance: Any, name: str) -> None:
-    """Raise ContractError when ``instance`` does not match a named contract."""
-    _check(instance, BODIES[name], BODIES, "$")
+@lru_cache(maxsize=4)
+def _spec(name: str) -> dict[str, Any]:
+    contract = _contract(name)
+    return yaml.safe_load((ROOT / str(contract["snapshot"])).read_text())
 
 
-def _schema_for(call) -> str:
-    if call.path.endswith(":bulk-create"):
-        return "assay_results_bulk_create"
-    if "/document-part-unstructured-table/" in call.path:
-        return "unstructured_table"
-    if call.path.endswith(f"/entry/{ENTRY_ID}"):
-        return "entry_update"
-    raise AssertionError(call.path)
-
-
-async def _apply(runtime, family: str, request: dict[str, Any]) -> None:
-    planned = await runtime.planner.plan(ENTRY_ID, family, request)
-    await runtime.planner.apply(planned.id)
-
-
-async def test_every_write_matches_the_vendored_request_contract(runtime, fake) -> None:
-    await _apply(
-        runtime,
-        "table",
-        {
-            "table_part_id": "docpart_table1",
-            "operation": "set_cells",
-            "updates": [{"row": 0, "column": 1, "value": "3"}],
-        },
+def _validator(spec_name: str, schema_name: str) -> Draft202012Validator:
+    spec = _spec(spec_name)
+    uri = f"https://benchling.example/{spec_name}.yaml"
+    registry = Registry().with_resource(
+        uri, Resource.from_contents(spec, default_specification=DRAFT202012)
     )
+    return Draft202012Validator(
+        {"$ref": f"{uri}#/components/schemas/{schema_name}"},
+        registry=registry,
+    )
+
+
+def _schema_errors(spec_name: str, schema_name: str, instance: Any) -> list[str]:
+    validator = _validator(spec_name, schema_name)
+    return [
+        error.message
+        for error in sorted(validator.iter_errors(instance), key=lambda item: list(item.path))
+    ]
+
+
+def _request_schema(call: Any) -> tuple[str, str] | None:
+    if call.method == "PATCH" and _V3_ENTRY.search(call.path):
+        return "benchling-v3", "UpdateEntryInput"
+    if call.method == "POST" and _V2_BULK.search(call.path):
+        return None
+    raise AssertionError(f"no request schema for {call.method} {call.path}")
+
+
+def _bulk_create_errors(body: dict[str, Any]) -> list[str]:
+    """Validate a bulk-create body against the two schemas the V2 contract composes.
+
+    `AssayResultsBulkCreateInTableRequest` is an allOf of a schema that forbids
+    additional properties and a schema that adds `tableId`. Standard JSON Schema
+    therefore rejects `tableId`, which the live API requires. Check each published
+    branch, and record that the composed schema still rejects the live body.
+    """
+    composed = _schema_errors("benchling-v2", "AssayResultsBulkCreateInTableRequest", body)
+    if not composed:
+        return []
+    if not any("tableId" in message for message in composed):
+        return composed
+    if not isinstance(body.get("tableId"), str) or not body["tableId"]:
+        return ["tableId must be the string declared on AssayResultsBulkCreateInTableRequest"]
+    without_table = {key: value for key, value in body.items() if key != "tableId"}
+    return _schema_errors("benchling-v2", "AssayResultsBulkCreateRequest", without_table)
+
+
+def test_retired_document_coordinates_fail_the_current_schema() -> None:
+    """The drift that sent `coordinates` must be rejected by the vendored schema."""
+    body = {
+        "partsMutation": {
+            "operationType": "insert",
+            "version": "etrver_example",
+            "coordinates": {"position": "end_of_document"},
+            "parts": [{"contentType": "text", "text": "hello"}],
+        }
+    }
+    errors = _schema_errors("benchling-v3", "UpdateEntryInput", body)
+    assert errors
+    assert any("coordinates" in message for message in errors)
+
+
+async def test_every_client_request_body_matches_the_openapi_schema(runtime, fake) -> None:
+    text = {"contentType": "text", "text": "introduced"}
     await _apply(
         runtime,
-        "table",
-        {
-            "table_part_id": "docpart_table1",
-            "operation": "replace",
-            "table": {
-                "caption": {"text": "cap", "formats": []},
-                "columnDefinitions": [{"name": "Only", "width": 90, "isLocked": True}],
-                "rows": [{"cells": [{"inputValue": {"type": "text_value", "value": "v"}}]}],
-            },
-        },
+        "document",
+        {"operation": "insert", "position": "end_of_document", "parts": [text]},
     )
     await _apply(
         runtime,
         "document",
-        {"operation": "insert", "parts": [{"contentType": "text", "text": "tail"}]},
+        {
+            "operation": "move",
+            "from_part_id": "docpart_sec2",
+            "position": "beginning_of_document",
+        },
     )
     await _apply(runtime, "document", {"operation": "delete", "from_part_id": "docpart_text2"})
     await _apply(
-        runtime,
-        "document",
-        {"operation": "move", "from_part_id": "docpart_text1", "position": "end_of_document"},
+        runtime, "document", {"operation": "replace_text", "part_id": TEXT_PART, "text": "edited"}
     )
     await _apply(
         runtime,
-        "document",
-        {"operation": "replace_text", "part_id": "docpart_text1", "text": "after"},
+        "table",
+        {
+            "operation": "set_cells",
+            "table_part_id": TABLE_PART,
+            "updates": [{"row": 0, "column": 1, "value": "1.25"}],
+        },
     )
-    await _apply(runtime, "fields", {"schema_fields": {"temperature": {"value": 42}}})
+    await _apply(
+        runtime,
+        "table",
+        {"operation": "append_rows", "table_part_id": TABLE_PART, "rows": [["D", "4"]]},
+    )
+    await _apply(runtime, "fields", {"schema_fields": {"temperature": {"value": 21}}})
     await _apply(
         runtime,
         "results",
@@ -182,62 +149,50 @@ async def test_every_write_matches_the_vendored_request_contract(runtime, fake) 
             "assay_results": [
                 {
                     "schemaId": "assaysch_abc123",
-                    "fields": {"ct": {"value": 12}},
-                    "projectId": "src_abc123",
+                    "fields": {"ct": {"value": 12}, "note": {"value": "n"}},
                 }
             ],
         },
     )
-    writes = fake.writes()
+
+    writes = [call for call in fake.calls if call.method != "GET" and call.path != "/oauth/token"]
     assert writes
+    operations = set()
     for call in writes:
-        validate(call.body, _schema_for(call))
-    kinds = {call.body.get("partsMutation", {}).get("operationType") for call in writes}
-    assert {"insert", "delete", "move"} <= kinds
-    assert any("schemaFields" in call.body for call in writes)
-    assert any(call.path.endswith(":bulk-create") for call in writes)
+        assert isinstance(call.body, dict)
+        schema = _request_schema(call)
+        if schema is None:
+            errors = _bulk_create_errors(call.body)
+        else:
+            errors = _schema_errors(schema[0], schema[1], call.body)
+        assert errors == [], (call.method, call.path, errors, call.body)
+        mutation = call.body.get("partsMutation")
+        if isinstance(mutation, dict):
+            operations.add(mutation["operationType"])
+            assert "coordinates" not in mutation
+            assert "sourceCoordinates" not in mutation
+            assert "destinationCoordinates" not in mutation
+    assert operations == {
+        "insert",
+        "delete",
+        "move",
+        "update_table_cells",
+        "insert_table_rows",
+    }
+    field_bodies = [call.body["schemaFields"] for call in writes if "schemaFields" in call.body]
+    assert field_bodies == [{"tsf_temp": {"value": 21}}]
 
 
-def test_contract_rejects_fields_the_client_must_not_send() -> None:
-    with pytest.raises(ContractError, match="id"):
-        validate(
-            {
-                "tableId": "strtbl_example",
-                "assayResults": [
-                    {
-                        "id": "result_local",
-                        "schemaId": "assaysch_abc123",
-                        "fields": {"ct": {"value": 1}},
-                    }
-                ],
-            },
-            "assay_results_bulk_create",
-        )
-    with pytest.raises(ContractError, match="evaluatedValue"):
-        validate(
-            {
-                "versionId": "tver_1",
-                "columnDefinitions": [],
-                "rows": [
-                    {
-                        "cells": [
-                            {
-                                "inputValue": {"type": "text_value", "value": "a"},
-                                "evaluatedValue": "a",
-                            }
-                        ]
-                    }
-                ],
-            },
-            "unstructured_table",
-        )
-    with pytest.raises(ContractError, match="displayValue"):
-        validate(
-            {"schemaFields": {"temperature": {"value": 1, "displayValue": "1"}}}, "entry_update"
-        )
+async def _apply(runtime, family: str, request: dict[str, Any]) -> None:
+    planned = await runtime.planner.plan(ENTRY_ID, family, request)
+    await runtime.planner.apply(planned.id)
+
+
+LISTS = json.loads((ROOT / "contracts" / "list-parameters.json").read_text(encoding="utf-8"))
 
 
 async def test_list_query_parameters_stay_inside_the_vendored_allow_list(runtime, fake) -> None:
+    """Entry and schema lists may send only the parameters recorded for each route."""
     await runtime.service.list_entries(
         project="src_abc123",
         schema_id="entsch_abc123",
