@@ -393,6 +393,8 @@ The CLI and MCP tools share the same versioned envelope. Static schemas for the 
 
 [ARCHITECTURE.md](ARCHITECTURE.md) is the plan, apply, and journal sequence. The [threat model](docs/threat-model.md) covers credentials, stale or replayed plans, write scoping, and agent misuse, including the limits of those controls.
 
+[`SKILL.md`](SKILL.md) is the Agent Skills file for this repository. Its frontmatter keeps `name`, `description`, `license`, `compatibility`, and a `metadata` map of strings (`summary`, `version`, `docs_url`). Tags, keywords, and use cases are lists in [`agensi/listing.yaml`](agensi/listing.yaml).
+
 ```mermaid
 flowchart TD
     Agent["AI agent (MCP client)"] -->|stdio| MCP["MCP server"]
@@ -481,7 +483,7 @@ uv run mypy
 uv run pytest --cov
 ```
 
-The suite has 396 test functions (620 collected cases, parametrization included) and reaches 97% branch coverage. CI enforces a `fail_under` floor of 96% in `pyproject.toml`, and also builds the sdist and wheel, runs `twine check`, and smoke-tests the built wheel.
+The suite has 396 test functions (620 collected cases, parametrization included) and reaches 97% branch coverage. CI enforces a `fail_under` floor of 96% in `pyproject.toml`, and also builds the sdist and wheel, runs `twine check`, and smoke-tests the built wheel. CI installs `skills-ref` 0.1.1 and runs its `agentskills validate` command on this directory.
 
 ### Public OpenAPI drift
 
