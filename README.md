@@ -342,13 +342,13 @@ Supported specifications are documented in [schemas/change-spec.schema.json](sch
 - `document`: insert, delete, move, or replace a text part;
 - `table`: set selected cells or append rows on an unstructured table;
 - `fields`: update fields already present on the entry's assigned schema; and
-- `results`: submit V2 assay result records to an explicit `strtbl_…` table, or update existing results from a CSV file.
+- `results`: create V2 assay result records for an explicit `strtbl_…` table (they land as pending until a person accepts them in the table), or update existing results from a CSV file.
 
 Field inputs must use a schema field's V3 `systemName` or its field-definition ID and have the shape `{"value": ...}`. Plans show both identifiers, send the field-definition ID, validate value types and constraints, and re-check the affected definitions and values immediately before applying. Result uploads also verify that the table belongs to the selected entry, that every record uses the table's result schema, and that any supplied project IDs are readable. Result upload field keys stay system names.
 
 A result update reads a CSV file instead of inline records. `--id-column` is the column that holds the result id (`id` in an assay-result export). Each `--map CSV_COLUMN=FIELD` is required; columns are not guessed from the header. `FIELD` is the export display name, the system name, or the field-definition id. The preview resolves every mapped column to a field-definition id and shows only the values that would change. Unmapped columns, including `createdAt` and `modifiedAt`, are not written. A blank cell clears a value that is present. A blank cell on an empty field is not a change, so an unmodified export round-trips: export writes both null and an empty string as a blank cell. Unknown columns, ambiguous names, and bad rows are one error and nothing is written. Apply re-reads each result and sends `PATCH /result/{id}` with `schemaFields` keyed by field-definition id, and only when `modifiedAt` and the mapped values still match the plan. The CSV is not read again at apply time. The limit is 500 rows. The same specification (`operation`, `csv_path`, `id_column`, `column_map`) is what `plan_changes` accepts.
 
-Result submissions remain pending until a person integrates them in Benchling. A table write updates the named cells or appends rows, checked against the entry version, and resets table evaluation until Benchling's browser evaluates it again.
+Results land as pending: they do not appear in the notebook results table, and have no entry, until a person clicks the plug (integrate) icon in that table's toolbar in Benchling. After a results upload, `changes apply` returns `next_step` naming the entry and table. The accept control may insert every pending result that matches the table's schema, not only the ones just pushed. See [docs/api-limitations.md](docs/api-limitations.md). A table write updates the named cells or appends rows, checked against the entry version, and resets table evaluation until Benchling's browser evaluates it again.
 Table upload plans use local correlation UUIDs; the tenant assigns the actual result IDs. Local UUIDs are not idempotency keys. Caller-supplied result IDs are rejected by the CLI because the tested tenant rejects them on this endpoint despite the public OpenAPI declaration. Notebook table uploads are limited to 500 records. The immediate apply result is `submission_pending`; task success is reported separately as `pending_integration`.
 `changes status` checks Benchling's asynchronous task endpoint after a result submission while retaining the local execution journal as the reconciliation record.
 
@@ -516,7 +516,7 @@ uv run python scripts/sandbox_exercise.py \
 - Table cell edits and row inserts reset evaluation until Benchling recalculates the table in the browser. Only unstructured tables are editable. Results tables can be read; other structured tables cannot.
 - Entry field updates are protected by a best-effort value comparison, not an atomic precondition.
 - Replacing text can end in a partial completion that a person must reconcile.
-- Assay result submissions stay pending until a person integrates them in Benchling.
+- Results created through the API land as pending until a person accepts them in the results table in Benchling.
 - State is local to one machine.
 - The offline suite uses a synthetic fake; it cannot prove compatibility with every tenant configuration.
 - `entry list --name` is an exact case-insensitive match when the name has no comma (`name.anyOf` on V3, `names.anyOf` on V2 with `--folder`). It does not search substrings. A name that contains a comma is sent as V2 `name`, because those list parameters are comma-separated and document no escape. A modified timestamp must include a time zone. Folder filters use the V2 entry list because the V3 list ignores `folderId`. Listing timestamps are UTC with a `Z` suffix.

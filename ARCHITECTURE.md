@@ -52,7 +52,7 @@ The saved plan is the preview the caller reviews. Changing the entry in Benchlin
 
 A document move that would leave the entry starting with anything other than a section fails here, with `Entry must start with a section`, and no plan is saved. A table plan rejects structured tables, merged child cells, and a coordinate that is outside the table or repeated. A field plan rejects unknown fields and values that do not match the definition. A result upload rejects a table that is not on the entry, a record whose schema does not match the table, more than 500 records, and a caller-supplied result id. A result update rejects a result that is not on the selected entry, a missing `modifiedAt`, an unknown column, and a CSV that changes nothing.
 
-Warnings are part of the plan. They are how the preview says that a table edit clears evaluation until Benchling recalculates it, that `replace_text` can stop halfway, that uploaded results stay pending until a person integrates them, and that a result PATCH writes the result directly rather than through notebook integration.
+Warnings are part of the plan. They are how the preview says that a table edit clears evaluation until Benchling recalculates it, that `replace_text` can stop halfway, that uploaded results land as pending until a person accepts them in the results table (the plug icon), and that a result PATCH writes the result directly rather than through notebook integration.
 
 ## Apply
 
@@ -111,7 +111,7 @@ Document and table applies read the entry version again. If it differs from `pre
 
 Field apply compares the schema id, the field-definition fingerprint, and the observed values, then sends `PATCH /entry/{id}`. The entry-field API has no version field on that body, so the comparison is local. A change that lands after the comparison and before the PATCH can be overwritten. The plan's guarantee says `immediate pre-write field-value comparison`, and the warning says there is no atomic document-version precondition.
 
-Result upload re-checks that the table still belongs to the entry and that the schema fields still match, then sends one bulk-create POST. There is no idempotency key. A timeout or a missing task id is `unknown`, not a second POST. `changes status` later reads `GET /tasks/{id}` and, while the journal is still `succeeded`, records the server's result ids. Task success means `pending_integration`. A person still integrates the rows in Benchling.
+Result upload re-checks that the table still belongs to the entry and that the schema fields still match, then sends one bulk-create POST. There is no idempotency key. A timeout or a missing task id is `unknown`, not a second POST. `changes status` later reads `GET /tasks/{id}` and, while the journal is still `succeeded`, records the server's result ids. Task success means `pending_integration`. A person still accepts the pending results in the table in Benchling, and `apply` returns a `next_step` that says so.
 
 Result update re-checks every result before the first PATCH. The check covers `modifiedAt`, the entry id, the schema id, the definition fingerprint, and the mapped values. `UpdateResultInput` has no version field, so `modifiedAt` is not sent to Benchling. A mismatch aborts with a conflict and no PATCH is sent. After the checks pass, each changed result is one `PATCH /result/{id}`. A failure on a later PATCH leaves the earlier ones applied. Those step events are in memory until the terminal save, so a crash in the middle leaves the on-disk journal at `applying` with only the `started` event. Replay is still refused. The CSV is not read again. Apply uses the updates frozen in the plan.
 
@@ -138,7 +138,7 @@ The journal file is `journals/{id}.json`, written atomically with mode `0600`. T
 |---|---|
 | `pending` | Preview only. Apply has not started. |
 | `applying` | Apply started. If the process is gone, at least the start was saved. Do not assume the remote write is absent. |
-| `succeeded` | Every write step returned a success status. Result uploads can still be waiting for a person to integrate them. |
+| `succeeded` | Every write step returned a success status. Result uploads are still pending until a person accepts them in the table. |
 | `failed` | The attempt stopped before any write step succeeded. A stale document or table version ends here. The plan is spent. |
 | `partial` | A write step succeeded and a later step returned a definite error. Typical of `replace_text`, and of a result-update PATCH that fails after an earlier PATCH. |
 | `unknown` | A write was sent and the client cannot say whether Benchling applied it: timeout, network loss, HTTP 5xx, or a result upload that returned no task id. |

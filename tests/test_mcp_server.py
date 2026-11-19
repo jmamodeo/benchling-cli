@@ -926,3 +926,22 @@ async def test_plan_changes_accepts_inline_records_and_schema_fields(client, fak
     assert fields["ok"] is True
     assert fields["data"]["family"] == "fields"
     assert fake.writes() == []
+
+
+async def test_apply_changes_for_results_returns_the_next_step(writer, fake) -> None:
+    planned = await call(
+        writer,
+        "plan_changes",
+        env="sandbox",
+        entry=ENTRY_ID,
+        family="results",
+        specification={
+            "table_id": "strtbl_example",
+            "assay_results": [{"schemaId": "assaysch_abc123", "fields": {"ct": {"value": 12}}}],
+        },
+    )
+    assert planned["ok"] is True, planned
+    applied = await call(writer, "apply_changes", env="sandbox", plan_id=planned["data"]["id"])
+    assert applied["ok"] is True
+    assert "pending" in applied["data"]["next_step"]
+    assert "Assay results" in applied["data"]["next_step"]

@@ -609,3 +609,17 @@ async def test_missing_result_schema_is_reported(runtime, fake, tmp_path) -> Non
         await plan_csv(runtime, path, {"Ct": "Ct"})
     assert "schema was not found" in _error_text(caught.value)
     assert fake.writes() == []
+
+
+async def test_result_not_on_the_entry_says_pending_results_must_be_accepted(
+    runtime, fake, tmp_path
+) -> None:
+    fake.results = [make_result(entry=None)]
+    path = write_csv(tmp_path / "assay.csv", ["id", "Ct"], [["result_1", "1"]])
+    with pytest.raises(ValidationError) as caught:
+        await plan_csv(runtime, path, {"Ct": "Ct"})
+    text = _error_text(caught.value)
+    assert "not on the selected entry" in text
+    assert "pending" in text
+    assert "plug icon" in text
+    assert fake.writes() == []
