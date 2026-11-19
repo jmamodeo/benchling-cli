@@ -51,10 +51,10 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/jmamodeo/benchling-cli"
-Repository = "https://github.com/jmamodeo/benchling-cli"
-Issues = "https://github.com/jmamodeo/benchling-cli/issues"
-Changelog = "https://github.com/jmamodeo/benchling-cli/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/jmamodeo/benchling-toolkit"
+Repository = "https://github.com/jmamodeo/benchling-toolkit"
+Issues = "https://github.com/jmamodeo/benchling-toolkit/issues"
+Changelog = "https://github.com/jmamodeo/benchling-toolkit/blob/main/CHANGELOG.md"
 
 [project.scripts]
 benchling = "benchling_toolkit.cli:main"

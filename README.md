@@ -2,10 +2,10 @@
 
 Safe, auditable tools for AI agents working in Benchling.
 
-[![CI](https://github.com/jmamodeo/benchling-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/jmamodeo/benchling-cli/actions/workflows/ci.yml)
+[![CI](https://github.com/jmamodeo/benchling-toolkit/actions/workflows/ci.yml/badge.svg)](https://github.com/jmamodeo/benchling-toolkit/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
-[![Coverage](https://img.shields.io/badge/coverage-98%25-brightgreen)](https://github.com/jmamodeo/benchling-cli/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/badge/coverage-98%25-brightgreen)](https://github.com/jmamodeo/benchling-toolkit/actions/workflows/ci.yml)
 
 > **Unofficial; not affiliated with or endorsed by Benchling, Inc.** Benchling is a trademark of Benchling, Inc.
 
@@ -140,8 +140,8 @@ apply_changes(env="demo", plan_id=...) ->
 The package is not published to PyPI. The distribution name is `benchling-toolkit` and the import package is `benchling_toolkit`. Install from source with [`uv`](https://docs.astral.sh/uv/) and Python 3.11 or newer.
 
 ```console
-git clone https://github.com/jmamodeo/benchling-cli.git
-cd benchling-cli
+git clone https://github.com/jmamodeo/benchling-toolkit.git
+cd benchling-toolkit
 uv sync
 uv run benchling --help
 ```
@@ -368,7 +368,7 @@ See [API limitations](docs/api-limitations.md) and the [research record](docs/re
 
 ## Citation
 
-If you use this software, please cite it. GitHub's "Cite this repository" button uses [`CITATION.cff`](CITATION.cff).
+If you use this software, please cite it. GitHub's "Cite this repository" button uses [`CITATION.cff`](CITATION.cff) for [jmamodeo/benchling-toolkit](https://github.com/jmamodeo/benchling-toolkit).
 
 ## Contributing, security, license
 

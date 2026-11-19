@@ -5,8 +5,8 @@ Thanks for helping improve benchling-toolkit. This project is unofficial and not
 ## Development setup
 
 ```console
-git clone https://github.com/jmamodeo/benchling-cli.git
-cd benchling-cli
+git clone https://github.com/jmamodeo/benchling-toolkit.git
+cd benchling-toolkit
 uv sync --extra dev
 ```
 
