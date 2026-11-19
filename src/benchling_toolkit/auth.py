@@ -96,13 +96,14 @@ class AuthManager:
             )
         except httpx.HTTPError as exc:
             raise UpstreamError(
-                "Could not reach the Benchling token endpoint",
+                "Could not reach the Benchling token endpoint. Check the tenant URL.",
                 details={"env": environment.name, "reason": redact_text(str(exc))},
                 retryable=True,
             ) from exc
         if response.status_code == 401:
             raise AuthenticationError(
-                "Benchling rejected the client ID or client secret. Check the client ID and secret.",
+                "Benchling rejected the client ID or client secret. "
+                "Check the tenant URL, the client ID, and the secret.",
                 details={"status": response.status_code},
             )
         if response.status_code >= 400:

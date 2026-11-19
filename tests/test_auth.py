@@ -15,6 +15,24 @@ def auth_for(handler, secrets=None) -> AuthManager:
     )
 
 
+def test_unreachable_tenant_keeps_the_ssl_reason_and_names_the_url() -> None:
+    def fail(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError(
+            "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: "
+            "Hostname mismatch, certificate is not valid for 'wrong.example'"
+        )
+
+    auth = auth_for(fail)
+    with pytest.raises(UpstreamError) as caught:
+        auth.headers(make_environment())
+    message = caught.value.message
+    reason = caught.value.details["reason"]
+    assert "Check the tenant URL." in message
+    assert "SSL" not in message
+    assert "CERTIFICATE_VERIFY_FAILED" in reason
+    assert "wrong.example" in reason
+
+
 def test_missing_secret_is_an_authentication_error() -> None:
     auth = auth_for(lambda request: pytest.fail("no token request expected"), secrets={})
     with pytest.raises(AuthenticationError):

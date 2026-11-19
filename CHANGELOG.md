@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+
+- The keychain error's `dbus-run-session` command also runs `benchling auth login` in that same shell. A session that only unlocks the keyring exits, and the bus vanishes. The message is short lines. It says `DBUS_SESSION_BUS_ADDRESS` is unset only when it is unset, and says the bus has no Secret Service when the variable is set but the bus has no keyring.
+- The README Headless Linux section no longer says `gnome-keyring-daemon --unlock` prints `DBUS_SESSION_BUS_ADDRESS`. It shows a long-lived `dbus-daemon --session --fork` bus that MCP, later shells, and cron can share, and notes a systemd user bus.
+- Closing MCP stdin after a tool call exits 0 and does not print `MCP server failed to start` / `Event loop is closed`.
+- A token request that cannot reach the host says to check the tenant URL. The raw transport error, including SSL text, stays in `details.reason`.
+- A 401 from login also says to check the tenant URL. `--secret-stdin` with an empty stdin says `No client secret was received on stdin`.
+
 ### Added
 
 - `benchling auth login` accepts `--tenant-url` and `--client-id`. Together with `--secret-stdin`, login runs with no terminal and does not call `getpass`, so there is no echo warning. A missing value with no terminal is one error that names the flags.
@@ -26,7 +34,7 @@ All notable changes to this project are documented here. The format is based on
 - Repository links now point at `https://github.com/jmamodeo/benchling-toolkit` after the GitHub repository rename. Older changelog text is unchanged.
 - **Breaking:** `BENCHLING_<ENV>_API_ENDPOINT`, `BENCHLING_<ENV>_CLIENT_ID`, and `BENCHLING_<ENV>_CLIENT_SECRET` are no longer read. There is no fallback or alias. Configure an environment with `benchling auth login --env NAME`.
 - Tenant URLs accept a bare host and a trailing `/api/v2` or `/api/v3`. A trailing slash is not shown. `http://` is rejected on its own. The tenant URL and the client ID are validated separately.
-- A 401 from the token endpoint says to check the client ID and secret.
+- A 401 from the token endpoint says to check the tenant URL, the client ID, and the secret.
 - `benchling doctor` exits 3 with `ok: false` when a check fails. Each failed check has a hint. `auth status --check` puts the specific cause in the top-level message.
 - An invalid environment name explains the lowercase-letters-and-digits rule. Logging out an environment that is not configured says so.
 - MCP startup errors, including a missing keychain, are a JSON envelope on stderr and a non-zero exit. The keychain text states that the MCP SDK launches stdio servers with only `HOME`, `LOGNAME`, `PATH`, `SHELL`, `TERM` and `USER`, so `DBUS_SESSION_BUS_ADDRESS` has to be set in the client `env` block.

@@ -233,8 +233,8 @@ def _read_secret(secret_stdin: bool) -> str:
             value = value[:-2]
         elif value.endswith("\n"):
             value = value[:-1]
-        if value == "":
-            raise ValidationError("Client secret is required")
+        if value.strip() == "":
+            raise ValidationError("No client secret was received on stdin")
         return value
     try:
         secret = getpass.getpass("Client secret (not echoed): ")

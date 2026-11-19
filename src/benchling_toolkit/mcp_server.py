@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Coroutine
+from collections.abc import AsyncIterator, Callable, Coroutine
+from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
 from .errors import (
@@ -57,11 +58,31 @@ def _annotations(read_only: bool, destructive: bool = False) -> ToolAnnotations:
         )
 
 
+def _closed_event_loop(exc: BaseException) -> bool:
+    """True for the asyncio error a stdio client leaves behind when it closes stdin."""
+    if isinstance(exc, RuntimeError) and str(exc) == "Event loop is closed":
+        return True
+    nested = getattr(exc, "exceptions", None)
+    if isinstance(nested, tuple) and nested:
+        return all(_closed_event_loop(item) for item in nested)
+    return False
+
+
+def _close_pool(pool: RuntimePool) -> None:
+    """Close runtimes after the server loop. A closed loop means the client already left."""
+    try:
+        asyncio.run(pool.close())
+    except RuntimeError as exc:
+        if not _closed_event_loop(exc):
+            raise
+
+
 def build_mcp_server(
     pool: RuntimePool,
     *,
     writable_envs: set[str] | frozenset[str] = frozenset(),
     verbose: bool = False,
+    lifespan: Any = None,
 ) -> MCPServer:
     """Create the MCP server; apply_changes works only for envs in writable_envs.
 
@@ -81,6 +102,7 @@ def build_mcp_server(
             "an explicit env. Use plan_changes before apply_changes in the same env."
         ),
         log_level="DEBUG" if verbose else "WARNING",
+        lifespan=lifespan,
     )
 
     _register_environment_tools(mcp, pool, writable_envs)
@@ -446,8 +468,27 @@ def run_mcp_server(
             "--allow-writes names an unconfigured environment",
             details={"unknown_envs": unknown, "available_envs": available},
         )
-    server = build_mcp_server(pool, writable_envs=frozenset(writable_envs), verbose=verbose)
+
+    @asynccontextmanager
+    async def lifespan(_server: object) -> AsyncIterator[dict[str, Any]]:
+        """Close HTTP clients on the server loop, before that loop is closed."""
+        try:
+            yield {}
+        finally:
+            await pool.close()
+
+    server = build_mcp_server(
+        pool,
+        writable_envs=frozenset(writable_envs),
+        verbose=verbose,
+        lifespan=lifespan,
+    )
     try:
         server.run(transport="stdio")
+    except BaseException as exc:
+        # A client that closes stdin can tear the loop down as the server returns.
+        # That is a normal exit, not a failed start.
+        if not _closed_event_loop(exc):
+            raise
     finally:
-        asyncio.run(pool.close())
+        _close_pool(pool)
