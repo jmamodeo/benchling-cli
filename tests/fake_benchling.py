@@ -210,8 +210,110 @@ class FakeBenchling:
         self.next_part_number = 1
         self.entry_fields: dict[str, Any] = {"Temperature": 20, "Notes": "n"}
         self.entry_schema_id: str | None = "entsch_abc123"
+        self.entry_page_size: int | None = None
+        self.schema_page_size: int | None = None
+        self.repeat_next_token = False
+        self.payload_overrides: list[tuple[str, int, dict[str, Any]]] = []
+        self.dropdowns = {
+            "sfs_status": {
+                "id": "sfs_status",
+                "name": "Status",
+                "options": [
+                    {"id": "sfso_open", "name": "Open", "archived": False},
+                    {"id": "sfso_closed", "name": "Closed", "archived": True},
+                ],
+            }
+        }
+        self.schema_catalog = {
+            "entry": [
+                {
+                    "id": "entsch_abc123",
+                    "name": "Schema entsch_abc123",
+                    "modifiedAt": "2026-01-01T00:00:00Z",
+                },
+                {
+                    "id": "entsch_two",
+                    "name": "Second entry schema",
+                    "modifiedAt": "2026-02-01T00:00:00Z",
+                },
+                {
+                    "id": "entsch_three",
+                    "name": "Third entry schema",
+                    "modifiedAt": "2026-03-01T00:00:00Z",
+                },
+                {
+                    "id": "entsch_four",
+                    "name": "Fourth entry schema",
+                    "modifiedAt": "2026-04-01T00:00:00Z",
+                },
+                {
+                    "id": "entsch_choice",
+                    "name": "Choice entry schema",
+                    "modifiedAt": "2026-05-01T00:00:00Z",
+                },
+            ],
+            "result": [
+                {
+                    "id": "assaysch_abc123",
+                    "name": "Schema assaysch_abc123",
+                    "modifiedAt": "2026-01-02T00:00:00Z",
+                },
+                {
+                    "id": "assaysch_two",
+                    "name": "Second result schema",
+                    "modifiedAt": "2026-02-02T00:00:00Z",
+                },
+                {
+                    "id": "assaysch_three",
+                    "name": "Third result schema",
+                    "modifiedAt": "2026-03-02T00:00:00Z",
+                },
+            ],
+            "run": [
+                {"id": "runsch_abc123", "name": "Run schema", "modifiedAt": "2026-01-03T00:00:00Z"},
+                {
+                    "id": "runsch_two",
+                    "name": "Second run schema",
+                    "modifiedAt": "2026-02-03T00:00:00Z",
+                },
+            ],
+        }
         self.field_defs = {
             "entsch_abc123": field_definitions(),
+            "entsch_choice": [
+                {
+                    "id": "tsf_status",
+                    "systemName": "status",
+                    "name": "Status",
+                    "__typename": "DropdownLinkFieldDefinition",
+                    "derivationType": "DIRECT",
+                    "linkDefinition": {"id": "sfs_status"},
+                },
+                {
+                    "id": "tsf_status_again",
+                    "systemName": "status_again",
+                    "name": "Status again",
+                    "__typename": "DropdownLinkFieldDefinition",
+                    "derivationType": "DIRECT",
+                    "linkDefinition": {"id": "sfs_status"},
+                },
+                {
+                    "id": "tsf_orphan",
+                    "systemName": "orphan",
+                    "name": "Orphan",
+                    "__typename": "DropdownLinkFieldDefinition",
+                    "derivationType": "DIRECT",
+                },
+            ],
+            "runsch_abc123": [
+                {
+                    "id": "runfield_note",
+                    "systemName": "note",
+                    "name": "Note",
+                    "__typename": "TextFieldDefinition",
+                    "derivationType": "DIRECT",
+                }
+            ],
             "assaysch_abc123": [
                 {
                     "id": "assayfield_ct",
@@ -268,6 +370,10 @@ class FakeBenchling:
         body = json.loads(request.content) if request.content else None
         call = Call(request.method, request.url.path, dict(request.url.params), body)
         self.calls.append(call)
+        for index, (contains, status, payload) in enumerate(self.payload_overrides):
+            if contains in call.path:
+                self.payload_overrides.pop(index)
+                return httpx.Response(status, json=payload, request=request)
         for fault in self.faults:
             if fault.method == call.method and fault.contains in call.path and fault.times > 0:
                 if fault.skip > 0:
@@ -343,16 +449,150 @@ class FakeBenchling:
             return 404, {"error": {"message": "entry not found"}}
         return 200, self._entry_object()
 
+    def _entry_catalog(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "id": ENTRY_ID,
+                "name": self.entry_name,
+                "displayId": self.display_id,
+                "modifiedAt": "2026-06-15T12:00:00Z",
+                "schemaId": self.entry_schema_id,
+                "projectId": "src_abc123",
+                "folderId": "lib_abc123",
+            },
+            {
+                "id": "etr_list2",
+                "name": "Other experiment",
+                "displayId": "EXP-2",
+                "modifiedAt": "2026-01-01T00:00:00Z",
+                "schemaId": "entsch_other",
+                "projectId": "src_other",
+                "folderId": "lib_other",
+            },
+            {
+                "id": "etr_list3",
+                "name": "Third note",
+                "displayId": "EXP-3",
+                "modifiedAt": "2025-12-01T00:00:00Z",
+                "schemaId": "entsch_abc123",
+                "projectId": "src_abc123",
+                "folderId": "lib_other",
+            },
+            {
+                "id": "etr_list4",
+                "name": "Late note",
+                "displayId": "EXP-4",
+                "modifiedAt": "2026-11-01T08:30:00Z",
+                "schemaId": "entsch_other",
+                "projectId": "src_abc123",
+                "folderId": "lib_abc123",
+            },
+        ]
+
+    def _modified_matches(self, modified_at: str, expression: str) -> bool:
+        for part in (piece.strip() for piece in expression.split(" AND ")):
+            if part.startswith(">="):
+                if modified_at < part[2:].strip():
+                    return False
+            elif part.startswith("<="):
+                if modified_at > part[2:].strip():
+                    return False
+            elif part.startswith(">"):
+                if modified_at <= part[1:].strip():
+                    return False
+            elif part.startswith("<"):
+                if modified_at >= part[1:].strip():
+                    return False
+            else:
+                return False
+        return True
+
+    def _filter_entries(self, call: Call, *, version: int) -> list[dict[str, Any]]:
+        rows = self._entry_catalog()
+        params = call.params
+        display_ids = [item for item in params.get("displayIds", "").split(",") if item]
+        if display_ids:
+            rows = [row for row in rows if row["displayId"] in display_ids]
+        if version == 2:
+            if params.get("folderId"):
+                rows = [row for row in rows if row["folderId"] == params["folderId"]]
+            if params.get("projectId"):
+                rows = [row for row in rows if row["projectId"] == params["projectId"]]
+            if params.get("schemaId"):
+                rows = [row for row in rows if row["schemaId"] == params["schemaId"]]
+            names = [item.casefold() for item in params.get("names.anyOf", "").split(",") if item]
+            if names:
+                rows = [row for row in rows if str(row["name"]).casefold() in names]
+            if params.get("modifiedAt"):
+                rows = [
+                    row
+                    for row in rows
+                    if self._modified_matches(str(row["modifiedAt"]), params["modifiedAt"])
+                ]
+            return rows
+        # V3 entry listing does not apply folderId. Leave it unread on purpose.
+        if params.get("project.eq"):
+            rows = [row for row in rows if row["projectId"] == params["project.eq"]]
+        if params.get("schema.eq"):
+            rows = [row for row in rows if row["schemaId"] == params["schema.eq"]]
+        names = [item.casefold() for item in params.get("name.anyOf", "").split(",") if item]
+        if names:
+            rows = [row for row in rows if str(row["name"]).casefold() in names]
+        if params.get("modifiedAt.gte"):
+            rows = [row for row in rows if str(row["modifiedAt"]) >= params["modifiedAt.gte"]]
+        if params.get("modifiedAt.lte"):
+            rows = [row for row in rows if str(row["modifiedAt"]) <= params["modifiedAt.lte"]]
+        return rows
+
+    def _limited_page(self, call: Call, cap: int | None) -> int:
+        raw = call.params.get("pageSize")
+        requested = int(raw) if raw else 50
+        return min(requested, cap) if cap is not None else requested
+
+    def _v3_entry(self, row: dict[str, Any]) -> dict[str, Any]:
+        item: dict[str, Any] = {
+            "id": row["id"],
+            "name": row["name"],
+            "displayId": row["displayId"],
+            "modifiedAt": row["modifiedAt"],
+            "folder": {"id": row["folderId"]},
+            "reviewSource": {"id": row["projectId"]},
+        }
+        if row["schemaId"]:
+            item["schema"] = {"id": row["schemaId"]}
+            item["typedSchema"] = {"id": row["schemaId"]}
+        return item
+
+    def _list_entries_v3(self, call: Call) -> tuple[int, dict[str, Any]]:
+        items = [self._v3_entry(row) for row in self._filter_entries(call, version=3)]
+        return self._page(items, call, self._limited_page(call, self.entry_page_size))
+
     def _list_entries_v2(self, call: Call) -> tuple[int, dict[str, Any]]:
-        wanted = [item for item in call.params.get("displayIds", "").split(",") if item]
-        entries = [{"id": ENTRY_ID, "displayId": self.display_id, "name": self.entry_name}]
-        return 200, {"entries": [e for e in entries if not wanted or e["displayId"] in wanted]}
+        entries = []
+        for row in self._filter_entries(call, version=2):
+            entries.append(
+                {
+                    "id": row["id"],
+                    "name": row["name"],
+                    "displayId": row["displayId"],
+                    "modifiedAt": row["modifiedAt"],
+                    "schemaId": row["schemaId"],
+                    "projectId": row["projectId"],
+                    "folderId": row["folderId"],
+                }
+            )
+        return self._page(
+            entries, call, self._limited_page(call, self.entry_page_size), key="entries"
+        )
 
     def _page(
         self, items: list[Any], call: Call, size: int | None, key: str = "items"
     ) -> tuple[int, dict[str, Any]]:
-        start = int(call.params.get("nextToken") or 0)
         size = size or len(items) or 1
+        token = call.params.get("nextToken")
+        if self.repeat_next_token:
+            return 200, {key: items[:size], "nextToken": token or "loop"}
+        start = int(token or 0)
         end = start + size
         payload: dict[str, Any] = {key: items[start:end]}
         payload["nextToken"] = str(end) if end < len(items) else ""
@@ -454,6 +694,34 @@ class FakeBenchling:
     def _schema_fields(self, call: Call, schema_id: str) -> tuple[int, dict[str, Any]]:
         return self._page(deepcopy(self.field_defs[schema_id]), call, 5)
 
+    def _list_kind(self, call: Call, kind: str) -> tuple[int, dict[str, Any]]:
+        return self._page(
+            deepcopy(self.schema_catalog[kind]),
+            call,
+            self._limited_page(call, self.schema_page_size),
+        )
+
+    def _list_entry_schemas(self, call: Call) -> tuple[int, dict[str, Any]]:
+        return self._list_kind(call, "entry")
+
+    def _list_result_schemas(self, call: Call) -> tuple[int, dict[str, Any]]:
+        return self._list_kind(call, "result")
+
+    def _list_run_schemas(self, call: Call) -> tuple[int, dict[str, Any]]:
+        return self._list_kind(call, "run")
+
+    def _dropdown(self, call: Call, dropdown_id: str) -> tuple[int, dict[str, Any]]:
+        found = self.dropdowns.get(dropdown_id)
+        if found is None:
+            return 404, {"error": {"message": "dropdown not found"}}
+        return 200, {"id": found["id"], "name": found["name"]}
+
+    def _dropdown_options(self, call: Call, dropdown_id: str) -> tuple[int, dict[str, Any]]:
+        found = self.dropdowns.get(dropdown_id)
+        if found is None:
+            return 404, {"error": {"message": "dropdown not found"}}
+        return 200, {"items": deepcopy(found["options"])}
+
     # ---- v2 entry / project / task -----------------------------------
     def _get_entry_v2(self, call: Call, entry_id: str) -> tuple[int, dict[str, Any]]:
         entry: dict[str, Any] = {
@@ -510,20 +778,24 @@ class FakeBenchling:
                 return 200, deepcopy(item)
         return 404, {"error": {"message": "result not found"}}
 
-    def _doctor_v3(self, call: Call) -> tuple[int, dict[str, Any]]:
-        return 200, {"items": [], "nextToken": ""}
-
 
 ROUTES: list[tuple[str, str]] = [
-    (r"/entry/items", "GET v3|doctor_v3"),
+    (r"/entry/items", "GET v3|list_entries_v3"),
     (r"/entries", "GET v2|list_entries_v2"),
     (r"/entry/(etr_\w+)", "GET v3|get_entry"),
     (r"/entry/(etr_\w+)", "PATCH v3|patch_entry"),
     (r"/entry/(etr_\w+)/parts/items", "GET v3|parts_items"),
     (r"/document-part-unstructured-table/(\w+)", "GET v3|get_table"),
     (r"/document-part-unstructured-table/(\w+)", "PATCH v3|patch_table"),
-    (r"/(?:entry|result)-schema/(\w+)", "GET v3|schema"),
+    (r"/entry-schema/items", "GET v3|list_entry_schemas"),
+    (r"/result-schema/items", "GET v3|list_result_schemas"),
+    (r"/run-schema/items", "GET v3|list_run_schemas"),
+    (r"/run-schema/(\w+)/field-definitions/items", "GET v3|schema_fields"),
+    (r"/run-schema/(\w+)", "GET v3|schema"),
     (r"/(?:entry|result)-schema/(\w+)/field-definitions/items", "GET v3|schema_fields"),
+    (r"/(?:entry|result)-schema/(\w+)", "GET v3|schema"),
+    (r"/dropdown/(\w+)/options/items", "GET v3|dropdown_options"),
+    (r"/dropdown/(\w+)", "GET v3|dropdown"),
     (r"/result/items", "GET v3|list_results"),
     (r"/result/(\w+)", "GET v3|get_result"),
     (r"/entries/(\w+)", "GET v2|get_entry_v2"),

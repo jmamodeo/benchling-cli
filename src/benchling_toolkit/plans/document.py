@@ -15,10 +15,11 @@ from ..models import (
 )
 from ..services import (
     entry_version,
+    is_section,
     part_content,
     part_type,
 )
-from .base import PlannerBase, PlanParts
+from .base import PlannerBase, PlanParts, write_event_details
 
 
 class DocumentPlanning(PlannerBase):
@@ -107,6 +108,16 @@ class DocumentPlanning(PlannerBase):
             raise ValidationError("Move destination is not a document part")
         if destination in {part.get("id") for part in selected}:
             raise ValidationError("Move destination cannot be inside the source range")
+        reordered = self._parts_after_move(parts, selected, destination)
+        if reordered and not is_section(reordered[0]):
+            raise ValidationError(
+                "Entry must start with a section",
+                details={
+                    "position": destination,
+                    "first_part_id": reordered[0].get("id"),
+                    "first_type": part_type(reordered[0]),
+                },
+            )
         before = {"version_id": version_id, "parts": selected}
         after = {"version_id": "changes_on_apply", "position": destination, "parts": selected}
         return before, after
@@ -148,7 +159,7 @@ class DocumentPlanning(PlannerBase):
         response = await self.api.request(
             "PATCH", f"/entry/{plan.entry_id}", json={"partsMutation": mutation}
         )
-        self._event(journal, operation, "succeeded", {"response": response})
+        self._event(journal, operation, "succeeded", write_event_details(response))
         if operation == "insert":
             discovered = await self._discover_new_part_ids(
                 plan.entry_id, plan.preconditions.get("part_ids", [])
@@ -180,7 +191,7 @@ class DocumentPlanning(PlannerBase):
         first = await self.api.request(
             "PATCH", f"/entry/{plan.entry_id}", json={"partsMutation": insertion}
         )
-        self._event(journal, "insert_replacement", "succeeded", {"response": first})
+        self._event(journal, "insert_replacement", "succeeded", write_event_details(first))
         self.repository.save_journal(journal)
         updated = await self.api.request("GET", f"/entry/{plan.entry_id}")
         next_version = entry_version(updated)
@@ -192,7 +203,7 @@ class DocumentPlanning(PlannerBase):
         second = await self.api.request(
             "PATCH", f"/entry/{plan.entry_id}", json={"partsMutation": deletion}
         )
-        self._event(journal, "delete_original", "succeeded", {"response": second})
+        self._event(journal, "delete_original", "succeeded", write_event_details(second))
         discovered = await self._discover_new_part_ids(
             plan.entry_id, plan.preconditions.get("part_ids", [])
         )
@@ -231,6 +242,22 @@ class DocumentPlanning(PlannerBase):
             },
             "destinationCoordinates": {"position": request["position"]},
         }
+
+    def _parts_after_move(
+        self,
+        parts: list[dict[str, Any]],
+        selected: list[dict[str, Any]],
+        destination: Any,
+    ) -> list[dict[str, Any]]:
+        """Document order after a move. A part id anchors the range immediately after that part."""
+        selected_ids = {part.get("id") for part in selected}
+        remaining = [part for part in parts if part.get("id") not in selected_ids]
+        if destination == "beginning_of_document":
+            return [*selected, *remaining]
+        if destination == "end_of_document":
+            return [*remaining, *selected]
+        index = next(i for i, part in enumerate(remaining) if part.get("id") == destination)
+        return [*remaining[: index + 1], *selected, *remaining[index + 1 :]]
 
     def _part_range(
         self, parts: list[dict[str, Any]], first: Any, last: Any

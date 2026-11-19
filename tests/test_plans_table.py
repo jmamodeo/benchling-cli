@@ -229,6 +229,10 @@ async def test_apply_sends_versioned_payload_without_evaluated_values(runtime, f
     planned = await plan(runtime, {"operation": "set_cells", "updates": [cell(0, 1, "3")]})
     applied = await runtime.planner.apply(planned.id)
     assert applied["journal"]["result"]["evaluated_values_cleared"] is True
+    replaced = next(
+        event for event in applied["journal"]["events"] if event["stage"] == "replace_table"
+    )
+    assert replaced["details"]["http_status"] == 200
     (payload,) = fake.table_payloads
     assert payload["versionId"] == "tver_1"
     assert payload["name"] == "Measurements"

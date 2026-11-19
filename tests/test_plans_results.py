@@ -96,6 +96,7 @@ async def test_apply_posts_normalized_records_once(runtime, fake) -> None:
         {"ct": {"value": 7}},
         {"ct": {"value": 12}},
     ]
+    assert applied["journal"]["result"]["http_status"] == 202
     assert applied["journal"]["result"]["task_id"] == "task_abc123"
     assert applied["journal"]["result"]["state"] == "submission_pending"
     assert applied["journal"]["result"]["record_ids"] == []

@@ -36,12 +36,12 @@ app = typer.Typer(
     pretty_exceptions_enable=False,
 )
 auth_app = typer.Typer(help="Log in, log out, and inspect saved environments.")
-entry_app = typer.Typer(help="Resolve, fetch, and inspect entries.")
+entry_app = typer.Typer(help="Resolve, list, fetch, and inspect entries.")
 entry_fields_app = typer.Typer(help="Read entry schema fields.")
 section_app = typer.Typer(help="Read entry sections.")
 part_app = typer.Typer(help="Read document parts.")
 table_app = typer.Typer(help="Read unstructured tables.")
-schema_app = typer.Typer(help="Read entry and result schemas.")
+schema_app = typer.Typer(help="List and read entry, result, and run schemas.")
 results_app = typer.Typer(help="Read and submit result records.")
 changes_app = typer.Typer(help="Preview and explicitly apply safe changes.")
 mcp_app = typer.Typer(help="Run the local MCP server.")
@@ -470,6 +470,39 @@ def entry_inspect(ctx: typer.Context, reference: str) -> None:
     _execute(state.env, lambda runtime: runtime.service.inspect_entry(reference))
 
 
+@entry_app.command("list")
+def entry_list(
+    ctx: typer.Context,
+    project: str | None = typer.Option(None, "--project", help="Project ID."),
+    folder: str | None = typer.Option(None, "--folder", help="Folder ID. Uses the V2 entry list."),
+    schema: str | None = typer.Option(None, "--schema", help="Entry schema ID."),
+    name: str | None = typer.Option(None, "--name", help="Exact entry name."),
+    modified_after: str | None = typer.Option(
+        None, "--modified-after", help="Inclusive modified-at lower bound."
+    ),
+    modified_before: str | None = typer.Option(
+        None, "--modified-before", help="Inclusive modified-at upper bound."
+    ),
+    limit: int = typer.Option(50, "--limit", min=1, max=100, help="Page size, from 1 to 100."),
+    cursor: str | None = typer.Option(None, "--cursor", help="next_token from the previous page."),
+) -> None:
+    """List entries. A folder filter is applied by V2; the other filters are server-side too."""
+    state: State = ctx.obj
+    _execute(
+        state.env,
+        lambda runtime: runtime.service.list_entries(
+            project=project,
+            folder=folder,
+            schema_id=schema,
+            name=name,
+            modified_after=modified_after,
+            modified_before=modified_before,
+            limit=limit,
+            cursor=cursor,
+        ),
+    )
+
+
 @entry_fields_app.command("get")
 def entry_fields_get(ctx: typer.Context, reference: str) -> None:
     """Get the schema field values of an entry."""
@@ -500,9 +533,26 @@ def table_get(ctx: typer.Context, part_id: str) -> None:
 
 @schema_app.command("get")
 def schema_get(ctx: typer.Context, schema_id: str) -> None:
-    """Get an entry or result schema by ID."""
+    """Get an entry, result, or run schema by ID, including dropdown options."""
     state: State = ctx.obj
     _execute(state.env, lambda runtime: runtime.service.get_schema(schema_id))
+
+
+@schema_app.command("list")
+def schema_list(
+    ctx: typer.Context,
+    kind: str | None = typer.Option(
+        None, "--kind", help="entry, result, or run. Omit to list all three."
+    ),
+    limit: int = typer.Option(50, "--limit", min=1, max=100, help="Page size, from 1 to 100."),
+    cursor: str | None = typer.Option(None, "--cursor", help="next_token from the previous page."),
+) -> None:
+    """List entry, result, and run schemas, following every upstream page up to the limit."""
+    state: State = ctx.obj
+    _execute(
+        state.env,
+        lambda runtime: runtime.service.list_schemas(kind=kind, limit=limit, cursor=cursor),
+    )
 
 
 @results_app.command("list")

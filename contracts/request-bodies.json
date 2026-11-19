@@ -1,0 +1,204 @@
+{
+  "description": "Request bodies this client sends. Shapes follow the reviewed Benchling contracts, including the document-mutation field names the live tenant accepts (coordinates, sourceCoordinates, destinationCoordinates). additionalProperties is false except where a map is open by design (schema field names, inserted part content).",
+  "entry_update": {
+    "type": "object",
+    "additionalProperties": false,
+    "anyOf": [
+      {"required": ["partsMutation"]},
+      {"required": ["schemaFields"]}
+    ],
+    "properties": {
+      "partsMutation": {"$ref": "#/parts_mutation"},
+      "schemaFields": {"$ref": "#/schema_fields"}
+    }
+  },
+  "parts_mutation": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["operationType", "version"],
+    "properties": {
+      "operationType": {"enum": ["insert", "delete", "move"]},
+      "version": {"type": "string"},
+      "coordinates": {"$ref": "#/coordinates"},
+      "sourceCoordinates": {"$ref": "#/source_coordinates"},
+      "destinationCoordinates": {"$ref": "#/destination_coordinates"},
+      "parts": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "required": ["contentType"],
+          "properties": {"contentType": {"type": "string"}}
+        }
+      }
+    },
+    "allOf": [
+      {
+        "if": {"properties": {"operationType": {"const": "insert"}}},
+        "then": {"required": ["coordinates", "parts"]}
+      },
+      {
+        "if": {"properties": {"operationType": {"const": "delete"}}},
+        "then": {
+          "required": ["coordinates"],
+          "properties": {"coordinates": {"required": ["fromDocumentPartId", "toDocumentPartId"]}}
+        }
+      },
+      {
+        "if": {"properties": {"operationType": {"const": "move"}}},
+        "then": {"required": ["sourceCoordinates", "destinationCoordinates"]}
+      }
+    ]
+  },
+  "coordinates": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "position": {"type": "string"},
+      "fromDocumentPartId": {"type": "string"},
+      "toDocumentPartId": {"type": "string"}
+    }
+  },
+  "source_coordinates": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["fromDocumentPartId", "toDocumentPartId"],
+    "properties": {
+      "fromDocumentPartId": {"type": "string"},
+      "toDocumentPartId": {"type": "string"}
+    }
+  },
+  "destination_coordinates": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["position"],
+    "properties": {"position": {"type": "string"}}
+  },
+  "schema_fields": {
+    "type": "object",
+    "minProperties": 1,
+    "additionalProperties": {"$ref": "#/field_value"}
+  },
+  "field_value": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["value"],
+    "properties": {"value": {}}
+  },
+  "unstructured_table": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["versionId", "columnDefinitions", "rows"],
+    "properties": {
+      "versionId": {"type": "string"},
+      "name": {"type": "string"},
+      "caption": {
+        "anyOf": [
+          {"type": "string"},
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "text": {"type": "string"},
+              "formats": {"type": "array"},
+              "links": {"type": "array"},
+              "mentions": {"type": "array"}
+            }
+          }
+        ]
+      },
+      "columnDefinitions": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": {"type": "string"},
+            "width": {"type": "integer"},
+            "isLocked": {"type": "boolean"}
+          }
+        }
+      },
+      "rows": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["cells"],
+          "properties": {
+            "cells": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["inputValue"],
+                "properties": {
+                  "inputValue": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["type", "value"],
+                    "properties": {
+                      "type": {"type": "string"},
+                      "value": {}
+                    }
+                  },
+                  "format": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "alignment": {},
+                      "backgroundColor": {},
+                      "foregroundColor": {},
+                      "link": {},
+                      "properties": {}
+                    }
+                  },
+                  "mergeRange": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "mergeRowSpan": {"type": "integer"},
+                      "mergeColSpan": {"type": "integer"}
+                    }
+                  },
+                  "mergeRangeParent": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "row": {"type": "integer"},
+                      "col": {"type": "integer"}
+                    }
+                  },
+                  "selectorId": {"type": ["string", "null"]}
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "assay_results_bulk_create": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["tableId", "assayResults"],
+    "properties": {
+      "tableId": {"type": "string"},
+      "assayResults": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 500,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["schemaId", "fields"],
+          "properties": {
+            "schemaId": {"type": "string"},
+            "projectId": {"type": ["string", "null"]},
+            "fields": {"$ref": "#/schema_fields"}
+          }
+        }
+      }
+    }
+  }
+}

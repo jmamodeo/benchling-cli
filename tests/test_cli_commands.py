@@ -496,3 +496,68 @@ def test_invalid_saved_endpoint_fails_validation_without_echoing_value(invoke) -
 def test_cli_without_arguments_shows_help() -> None:
     text = plain_stdout([])
     assert "Usage" in text and "changes" in text
+
+
+def test_entry_list_forwards_filters_and_reports_server_side_routing(invoke, fake) -> None:
+    code, payload, _ = invoke(
+        "entry",
+        "list",
+        "--folder",
+        "lib_other",
+        "--schema",
+        "entsch_abc123",
+        "--limit",
+        "10",
+    )
+    assert code == 0, payload
+    assert [item["id"] for item in payload["data"]["items"]] == ["etr_list3"]
+    assert payload["data"]["routing"]["api_version"] == 2
+    assert payload["data"]["routing"]["client_side"] == []
+    assert "folder" in payload["data"]["routing"]["server_side"]
+    assert fake.writes() == []
+    (call,) = [item for item in fake.calls if item.path.endswith("/entries")]
+    assert call.params["folderId"] == "lib_other"
+    assert call.params["schemaId"] == "entsch_abc123"
+    assert "folderId" not in {
+        key for item in fake.calls if item.path.endswith("/entry/items") for key in item.params
+    }
+
+
+def test_schema_list_pages_with_a_cursor(invoke, fake) -> None:
+    fake.schema_page_size = 2
+    code, first, _ = invoke("schema", "list", "--kind", "entry", "--limit", "2")
+    assert code == 0, first
+    assert [item["id"] for item in first["data"]["items"]] == ["entsch_abc123", "entsch_two"]
+    assert first["data"]["next_token"]
+    code, second, _ = invoke(
+        "schema", "list", "--kind", "entry", "--limit", "2", "--cursor", first["data"]["next_token"]
+    )
+    assert code == 0
+    assert [item["id"] for item in second["data"]["items"]] == ["entsch_three", "entsch_four"]
+    assert fake.writes() == []
+
+
+def test_list_commands_reject_bad_input_with_the_validation_exit_code(invoke, fake) -> None:
+    code, payload, _ = invoke("entry", "list", "--modified-after", "yesterday")
+    assert code == 2
+    assert payload["error"]["code"] == "validation_error"
+    code, payload, _ = invoke("schema", "list", "--kind", "sample")
+    assert code == 2
+    assert payload["error"]["code"] == "validation_error"
+    assert fake.calls == []
+
+
+@pytest.mark.parametrize("size", ["0", "101"])
+def test_list_limit_bounds_are_enforced_by_the_cli(invoke, fake, size) -> None:
+    result = CliRunner().invoke(cli.app, ["--env", "sandbox", "entry", "list", "--limit", size])
+    assert result.exit_code == 2
+    assert fake.calls == []
+
+
+def test_schema_get_includes_dropdown_options(invoke) -> None:
+    code, payload, _ = invoke("schema", "get", "entsch_choice")
+    assert code == 0, payload
+    status = payload["data"]["field_definitions"][0]
+    assert status["dropdown"]["id"] == "sfs_status"
+    assert [option["name"] for option in status["dropdown"]["options"]] == ["Open", "Closed"]
+    assert status["dropdown"]["options"][1]["archived"] is True

@@ -17,7 +17,7 @@ from ..models import (
 from ..services import (
     field_definition_type,
 )
-from .base import PlannerBase, PlanParts
+from .base import PlannerBase, PlanParts, write_event_details
 
 
 class FieldNormalization(PlannerBase):
@@ -264,5 +264,5 @@ class FieldsPlanning(FieldNormalization):
             f"/entry/{plan.entry_id}",
             json={"schemaFields": plan.request["schema_fields"]},
         )
-        self._event(journal, "update_fields", "succeeded", {"response": response})
+        self._event(journal, "update_fields", "succeeded", write_event_details(response))
         return {"response": response, "concurrency": "best_effort_value_comparison"}

@@ -31,6 +31,24 @@ from .results import ResultsPlanning
 from .table import TablePlanning
 
 
+def _with_http_status(details: dict[str, Any]) -> dict[str, Any]:
+    """Copy error details and record the raw HTTP status when the API returned one."""
+    recorded = dict(details)
+    status = recorded.get("status")
+    if isinstance(status, int) and "http_status" not in recorded:
+        recorded["http_status"] = status
+    return recorded
+
+
+def _failure_details(exc: BenchlingAgentError) -> dict[str, Any]:
+    """Journal details for a failed apply step, including the HTTP status when known."""
+    details: dict[str, Any] = {"error": exc.message}
+    status = exc.details.get("status")
+    if isinstance(status, int):
+        details["http_status"] = status
+    return details
+
+
 class ChangePlanner(DocumentPlanning, TablePlanning, FieldsPlanning, ResultsPlanning):
     """Creates change plans and applies them under a per-plan file lock."""
 
@@ -170,7 +188,7 @@ class ChangePlanner(DocumentPlanning, TablePlanning, FieldsPlanning, ResultsPlan
     ) -> None:
         """Record an unknown outcome and attach plan and journal to the error details."""
         journal.status = PlanStatus.UNKNOWN
-        self._event(journal, "apply", "unknown", exc.details)
+        self._event(journal, "apply", "unknown", _with_http_status(exc.details))
         self.repository.save_journal(journal)
         exc.details = {
             **exc.details,
@@ -182,7 +200,7 @@ class ChangePlanner(DocumentPlanning, TablePlanning, FieldsPlanning, ResultsPlan
         """Record a failed or partial apply; raises PartialCompletionError if a step had succeeded."""
         if any(event.status == "succeeded" for event in journal.events if event.stage != "apply"):
             journal.status = PlanStatus.PARTIAL
-            self._event(journal, "apply", "partial", {"error": exc.message})
+            self._event(journal, "apply", "partial", _failure_details(exc))
             self.repository.save_journal(journal)
             raise PartialCompletionError(
                 "Some plan steps completed before a later step failed",
@@ -193,7 +211,7 @@ class ChangePlanner(DocumentPlanning, TablePlanning, FieldsPlanning, ResultsPlan
                 },
             ) from exc
         journal.status = PlanStatus.FAILED
-        self._event(journal, "apply", "failed", {"error": exc.message})
+        self._event(journal, "apply", "failed", _failure_details(exc))
         self.repository.save_journal(journal)
 
     def _raise_local_failure(

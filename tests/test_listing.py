@@ -1,0 +1,298 @@
+"""Entry, schema, and dropdown discovery against the fake API."""
+
+from __future__ import annotations
+
+import pytest
+from fake_benchling import ENTRY_ID
+
+from benchling_toolkit.errors import UpstreamError, ValidationError
+from benchling_toolkit.listing import dropdown_id_of, entry_summary
+
+
+def _params(fake, suffix: str) -> list[dict[str, str]]:
+    return [call.params for call in fake.calls if call.path.endswith(suffix)]
+
+
+async def test_v3_filters_are_server_side_and_folder_is_not_sent(runtime, fake) -> None:
+    page = await runtime.service.list_entries(
+        project=" src_abc123 ",
+        schema_id="entsch_abc123",
+        name="synthetic experiment",
+        modified_after="2026-06-15T08:00:00-04:00",
+        modified_before="2026-06-15",
+    )
+    assert [item["id"] for item in page["items"]] == [ENTRY_ID]
+    assert page["items"][0]["folder_id"] == "lib_abc123"
+    assert page["items"][0]["project_id"] == "src_abc123"
+    assert page["items"][0]["schema_id"] == "entsch_abc123"
+    assert page["next_token"] is None
+    assert page["routing"] == {
+        "api_version": 3,
+        "path": "/entry/items",
+        "server_side": ["project", "schema", "name", "modified_at"],
+        "client_side": [],
+    }
+    (params,) = _params(fake, "/entry/items")
+    assert params == {
+        "pageSize": "50",
+        "project.eq": "src_abc123",
+        "schema.eq": "entsch_abc123",
+        "name.anyOf": "synthetic experiment",
+        "modifiedAt.gte": "2026-06-15T12:00:00Z",
+        "modifiedAt.lte": "2026-06-15T23:59:59Z",
+    }
+    assert "folderId" not in params
+
+
+async def test_folder_filter_uses_v2_for_the_whole_query(runtime, fake) -> None:
+    page = await runtime.service.list_entries(
+        folder="lib_abc123",
+        project="src_abc123",
+        schema_id="entsch_other",
+        name="late note",
+        modified_after="2026-11-01",
+        modified_before="2026-11-01T08:30:00Z",
+    )
+    assert [item["id"] for item in page["items"]] == ["etr_list4"]
+    assert page["routing"]["api_version"] == 2
+    assert page["routing"]["server_side"] == ["folder", "project", "schema", "name", "modified_at"]
+    assert page["routing"]["client_side"] == []
+    assert _params(fake, "/api/v3/entry/items") == []
+    (params,) = _params(fake, "/api/v2/entries")
+    assert params == {
+        "pageSize": "50",
+        "folderId": "lib_abc123",
+        "projectId": "src_abc123",
+        "schemaId": "entsch_other",
+        "names.anyOf": "late note",
+        "modifiedAt": ">= 2026-11-01T00:00:00Z AND <= 2026-11-01T08:30:00Z",
+    }
+
+
+async def test_entry_pages_follow_upstream_tokens_until_the_limit(runtime, fake) -> None:
+    fake.entry_page_size = 1
+    first = await runtime.service.list_entries(limit=2)
+    assert [item["id"] for item in first["items"]] == [ENTRY_ID, "etr_list2"]
+    assert first["next_token"] == "2"
+    assert len(_params(fake, "/entry/items")) == 2
+    second = await runtime.service.list_entries(limit=2, cursor=first["next_token"])
+    assert [item["id"] for item in second["items"]] == ["etr_list3", "etr_list4"]
+    assert second["next_token"] is None
+    assert len(_params(fake, "/entry/items")) == 4
+
+
+async def test_default_entry_page_is_fifty_and_naive_timestamps_are_utc(runtime, fake) -> None:
+    await runtime.service.list_entries(modified_after="2026-06-15T12:00:00")
+    (params,) = _params(fake, "/entry/items")
+    assert params["pageSize"] == "50"
+    assert params["modifiedAt.gte"] == "2026-06-15T12:00:00Z"
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"limit": 0},
+        {"limit": 101},
+        {"limit": True},
+        {"limit": 1.5},
+        {"name": "a,b"},
+        {"project": "  "},
+        {"folder": ""},
+        {"cursor": ""},
+        {"cursor": 1},
+        {"modified_after": "yesterday"},
+        {"modified_after": "2026-12-01", "modified_before": "2026-01-01"},
+    ],
+)
+async def test_entry_list_rejects_bad_input_before_calling_the_api(runtime, fake, kwargs) -> None:
+    with pytest.raises(ValidationError):
+        await runtime.service.list_entries(**kwargs)
+    assert fake.calls == []
+
+
+async def test_entry_list_rejects_a_malformed_page_a_repeated_token_and_an_oversized_page(
+    runtime, fake
+) -> None:
+    fake.payload_overrides.append(("/entry/items", 200, {"items": "nope"}))
+    with pytest.raises(UpstreamError, match="unexpected shape"):
+        await runtime.service.list_entries()
+
+    fake.payload_overrides.append(("/entry/items", 200, {"items": ["x"], "nextToken": ""}))
+    with pytest.raises(UpstreamError, match="non-object"):
+        await runtime.service.list_entries()
+
+    fake.payload_overrides.append(("/entry/items", 200, {"items": [], "nextToken": 1}))
+    with pytest.raises(UpstreamError, match="not a string"):
+        await runtime.service.list_entries()
+
+    fake.payload_overrides.append(
+        (
+            "/entry/items",
+            200,
+            {"items": [{"id": "etr_a"}, {"id": "etr_b"}], "nextToken": ""},
+        )
+    )
+    with pytest.raises(UpstreamError, match="more items than pageSize"):
+        await runtime.service.list_entries(limit=1)
+
+    fake.repeat_next_token = True
+    fake.entry_page_size = 1
+    with pytest.raises(UpstreamError, match="repeated pagination token"):
+        await runtime.service.list_entries(limit=5)
+
+
+async def test_schema_list_walks_every_kind_and_every_upstream_page(runtime, fake) -> None:
+    fake.schema_page_size = 2
+    seen: list[str] = []
+    cursor = None
+    pages = 0
+    while True:
+        page = await runtime.service.list_schemas(limit=3, cursor=cursor)
+        pages += 1
+        seen.extend(item["id"] for item in page["items"])
+        assert page["kinds"] == ["entry", "result", "run"]
+        cursor = page["next_token"]
+        if cursor is None:
+            break
+    assert pages > 1
+    assert seen == [
+        "entsch_abc123",
+        "entsch_two",
+        "entsch_three",
+        "entsch_four",
+        "entsch_choice",
+        "assaysch_abc123",
+        "assaysch_two",
+        "assaysch_three",
+        "runsch_abc123",
+        "runsch_two",
+    ]
+    entry_calls = _params(fake, "/entry-schema/items")
+    assert len(entry_calls) >= 3
+    assert all(set(params) <= {"pageSize", "nextToken"} for params in entry_calls)
+
+
+async def test_schema_list_kind_and_cursor_stay_on_one_collection(runtime, fake) -> None:
+    fake.schema_page_size = 1
+    first = await runtime.service.list_schemas(kind="run", limit=1)
+    assert [item["id"] for item in first["items"]] == ["runsch_abc123"]
+    assert first["kinds"] == ["run"]
+    second = await runtime.service.list_schemas(kind="run", limit=1, cursor=first["next_token"])
+    assert [item["id"] for item in second["items"]] == ["runsch_two"]
+    assert second["next_token"] is None
+    assert _params(fake, "/entry-schema/items") == []
+    assert _params(fake, "/result-schema/items") == []
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"kind": "sample"},
+        {"kind": ""},
+        {"limit": 0},
+        {"cursor": "%%%"},
+        {"cursor": ""},
+    ],
+)
+async def test_schema_list_rejects_bad_input_before_calling_the_api(runtime, fake, kwargs) -> None:
+    with pytest.raises(ValidationError):
+        await runtime.service.list_schemas(**kwargs)
+    assert fake.calls == []
+
+
+async def test_schema_cursor_from_another_kind_is_rejected(runtime, fake) -> None:
+    page = await runtime.service.list_schemas(limit=1)
+    with pytest.raises(ValidationError, match="does not match"):
+        await runtime.service.list_schemas(kind="result", cursor=page["next_token"])
+
+
+async def test_schema_list_rejects_a_repeated_token_and_an_oversized_page(runtime, fake) -> None:
+    fake.repeat_next_token = True
+    fake.schema_page_size = 1
+    with pytest.raises(UpstreamError, match="repeated pagination token"):
+        await runtime.service.list_schemas(kind="entry", limit=4)
+
+    fake.repeat_next_token = False
+    fake.payload_overrides.append(
+        (
+            "/entry-schema/items",
+            200,
+            {"items": [{"id": "entsch_a"}, {"id": "entsch_b"}], "nextToken": ""},
+        )
+    )
+    with pytest.raises(UpstreamError, match="more items than pageSize"):
+        await runtime.service.list_schemas(kind="entry", limit=1)
+
+
+async def test_get_schema_attaches_dropdown_options_once_per_dropdown(runtime, fake) -> None:
+    fake.field_defs["entsch_choice"].append(
+        {
+            "id": "tsf_direct",
+            "systemName": "direct",
+            "name": "Direct",
+            "__typename": "DropdownLinkFieldDefinition",
+            "derivationType": "DIRECT",
+            "dropdownId": "sfs_status",
+        }
+    )
+    data = await runtime.service.get_schema("entsch_choice")
+    status, again, orphan, direct = data["field_definitions"]
+    options = [
+        {"id": "sfso_open", "name": "Open", "archived": False},
+        {"id": "sfso_closed", "name": "Closed", "archived": True},
+    ]
+    assert status["dropdown"] == {"id": "sfs_status", "name": "Status", "options": options}
+    assert again["dropdown"]["id"] == "sfs_status"
+    assert direct["dropdown"]["options"] == options
+    assert "dropdown" not in orphan
+    dropdown_gets = [call for call in fake.calls if call.path.endswith("/dropdown/sfs_status")]
+    option_gets = [
+        call for call in fake.calls if call.path.endswith("/dropdown/sfs_status/options/items")
+    ]
+    assert len(dropdown_gets) == 1
+    assert len(option_gets) == 1
+
+
+async def test_get_schema_reads_a_run_schema(runtime, fake) -> None:
+    data = await runtime.service.get_schema("runsch_abc123")
+    assert data["schema"] == {"id": "runsch_abc123", "name": "Schema runsch_abc123"}
+    assert data["field_definitions"][0]["systemName"] == "note"
+    assert any(call.path == "/api/v3/run-schema/runsch_abc123" for call in fake.calls)
+
+
+async def test_dropdown_options_must_be_objects(runtime, fake) -> None:
+    fake.payload_overrides.append(("/dropdown/sfs_status/options/items", 200, {"items": "nope"}))
+    with pytest.raises(UpstreamError, match="unexpected shape"):
+        await runtime.service.get_schema("entsch_choice")
+    fake.payload_overrides.append(("/dropdown/sfs_status/options/items", 200, {"items": ["Open"]}))
+    with pytest.raises(UpstreamError, match="non-object dropdown option"):
+        await runtime.service.get_schema("entsch_choice")
+
+
+def test_entry_summary_accepts_flat_and_nested_ids() -> None:
+    nested = entry_summary(
+        {
+            "id": "etr_nested",
+            "schema": "entsch_text",
+            "folder": {"id": "lib_nested"},
+            "project": {"id": "src_nested"},
+        }
+    )
+    assert nested["schema_id"] == "entsch_text"
+    assert nested["folder_id"] == "lib_nested"
+    assert nested["project_id"] == "src_nested"
+    flat = entry_summary(
+        {"schemaId": "entsch_flat", "folderId": "lib_flat", "projectId": "src_flat"}
+    )
+    assert flat["schema_id"] == "entsch_flat"
+    assert flat["folder_id"] == "lib_flat"
+    assert flat["project_id"] == "src_flat"
+
+
+def test_dropdown_id_prefers_a_direct_id_and_ignores_blanks() -> None:
+    assert dropdown_id_of({"dropdownId": "sfs_status", "linkDefinition": {"id": "sfs_other"}}) == (
+        "sfs_status"
+    )
+    assert dropdown_id_of({"linkDefinition": {"id": "sfs_status"}}) == "sfs_status"
+    assert dropdown_id_of({"dropdownId": "", "linkDefinition": {"id": ""}}) is None
+    assert dropdown_id_of({"linkDefinition": "sfs_status"}) is None

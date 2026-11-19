@@ -8,6 +8,13 @@
       "routes_used": [
         "/entry/items",
         "/entry/{entry_id}",
+        "/entry-schema/items",
+        "/result-schema/items",
+        "/run-schema/items",
+        "/run-schema/{run_schema_id}",
+        "/run-schema/{run_schema_id}/field-definitions/items",
+        "/dropdown/{dropdown_id}",
+        "/dropdown/{dropdown_id}/options/items",
         "/entry/{entry_id}/parts/items",
         "/entry-schema/{entry_schema_id}",
         "/entry-schema/{entry_schema_id}/field-definitions/items",

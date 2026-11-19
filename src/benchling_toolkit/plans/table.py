@@ -13,7 +13,7 @@ from ..models import (
     ChangeJournal,
     ChangePlan,
 )
-from .base import PlannerBase, PlanParts
+from .base import PlannerBase, PlanParts, write_event_details
 
 
 class TablePlanning(PlannerBase):
@@ -165,7 +165,7 @@ class TablePlanning(PlannerBase):
         response = await self.api.request(
             "PATCH", f"/document-part-unstructured-table/{part_id}", json=payload
         )
-        self._event(journal, "replace_table", "succeeded", {"response": response})
+        self._event(journal, "replace_table", "succeeded", write_event_details(response))
         return {"table_part_id": part_id, "response": response, "evaluated_values_cleared": True}
 
     def _normalize_row(self, row: Any, expected_columns: int) -> dict[str, Any]:

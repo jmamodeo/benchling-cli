@@ -1,0 +1,429 @@
+"""Paged, read-only discovery of entries, schemas, and dropdown options.
+
+Entry filters are sent to the API version that actually applies them. V3
+``GET /entry/items`` has no folder parameter and live tenants ignore
+``folderId`` on that route, so a folder filter uses V2 ``GET /entries``.
+"""
+
+from __future__ import annotations
+
+import base64
+import json
+from datetime import UTC, datetime
+from typing import Any
+
+from .api import BenchlingAPI
+from .errors import UpstreamError, ValidationError
+
+LIST_LIMIT = 50
+LIST_LIMIT_MAX = 100
+SCHEMA_KINDS = ("entry", "result", "run")
+SCHEMA_PATHS = {
+    "entry": "/entry-schema/items",
+    "result": "/result-schema/items",
+    "run": "/run-schema/items",
+}
+
+# Filters each entry-list route applies on the server. Nothing is filtered locally.
+V3_ENTRY_FILTERS = ("project", "schema", "name", "modified_at")
+V2_ENTRY_FILTERS = ("folder", "project", "schema", "name", "modified_at")
+
+
+def schema_collection(schema_id: str) -> str:
+    """Return the V3 collection path segment for a schema id prefix."""
+    if schema_id.startswith("assaysch_"):
+        return "result-schema"
+    if schema_id.startswith("runsch_"):
+        return "run-schema"
+    return "entry-schema"
+
+
+def check_limit(limit: object) -> int:
+    """Require a page size in the Benchling range of 1 to 100. Booleans are rejected."""
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= LIST_LIMIT_MAX:
+        raise ValidationError("limit must be between 1 and 100")
+    return limit
+
+
+def _text(value: object, label: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValidationError(f"{label} must be a non-empty string")
+    text = value.strip()
+    if "," in text:
+        raise ValidationError(f"{label} must not contain a comma")
+    return text
+
+
+def _optional_text(value: object, label: str) -> str | None:
+    if value is None:
+        return None
+    return _text(value, label)
+
+
+def _bound(value: object, *, end_of_day: bool) -> datetime | None:
+    """Parse a date or RFC3339 timestamp. A bare date is the start or end of that UTC day."""
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ValidationError("Modified date must be YYYY-MM-DD or an RFC3339 timestamp")
+    text = value.strip()
+    if len(text) == 10 and text[4] == "-" and text[7] == "-":
+        text = f"{text}T23:59:59Z" if end_of_day else f"{text}T00:00:00Z"
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValidationError("Modified date must be YYYY-MM-DD or an RFC3339 timestamp") from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _stamp(value: datetime) -> str:
+    return value.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _modified_range(after: object, before: object) -> tuple[datetime | None, datetime | None]:
+    start = _bound(after, end_of_day=False)
+    end = _bound(before, end_of_day=True)
+    if start is not None and end is not None and start > end:
+        raise ValidationError("modified_after must not be later than modified_before")
+    return start, end
+
+
+def _v2_modified(start: datetime | None, end: datetime | None) -> str | None:
+    """Inclusive V2 ``modifiedAt`` expression. V2 takes one comparison string."""
+    parts: list[str] = []
+    if start is not None:
+        parts.append(f">= {_stamp(start)}")
+    if end is not None:
+        parts.append(f"<= {_stamp(end)}")
+    return " AND ".join(parts) or None
+
+
+def _items(payload: dict[str, Any], *, path: str, key: str = "items") -> list[dict[str, Any]]:
+    raw = payload.get(key)
+    if not isinstance(raw, list):
+        raise UpstreamError(
+            "Benchling pagination response has an unexpected shape",
+            details={"path": path, "expected_key": key, "keys": sorted(payload)},
+        )
+    items: list[dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            raise UpstreamError("Benchling returned a non-object list item", details={"path": path})
+        items.append(item)
+    return items
+
+
+def _next_token(payload: dict[str, Any]) -> str | None:
+    token = payload.get("nextToken")
+    if token is None or token == "":
+        return None
+    if not isinstance(token, str):
+        raise UpstreamError("Benchling returned a pagination token that is not a string")
+    return token
+
+
+def entry_summary(item: dict[str, Any]) -> dict[str, Any]:
+    """One entry row, the same shape from a V3 item or a V2 entry."""
+    schema = item.get("typedSchema") or item.get("schema")
+    if isinstance(schema, dict):
+        schema_id = schema.get("id")
+    elif isinstance(schema, str):
+        schema_id = schema
+    else:
+        schema_id = item.get("schemaId")
+    folder = item.get("folder")
+    if isinstance(folder, dict):
+        folder_id = folder.get("id")
+    else:
+        folder_id = item.get("folderId")
+    project = item.get("project") or item.get("reviewSource")
+    if isinstance(project, dict):
+        project_id = project.get("id")
+    else:
+        project_id = item.get("projectId")
+    return {
+        "id": item.get("id"),
+        "name": item.get("name"),
+        "display_id": item.get("displayId"),
+        "modified_at": item.get("modifiedAt"),
+        "schema_id": schema_id,
+        "project_id": project_id,
+        "folder_id": folder_id,
+    }
+
+
+async def _one_page(
+    api: BenchlingAPI,
+    path: str,
+    params: dict[str, Any],
+    *,
+    version: int,
+    item_key: str,
+    limit: int,
+) -> tuple[list[dict[str, Any]], str | None]:
+    """Read upstream pages until ``limit`` items are collected or the list ends."""
+    query = dict(params)
+    query["pageSize"] = limit
+    collected: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    token: str | None = query.get("nextToken")
+    if isinstance(token, str):
+        seen.add(token)
+    while len(collected) < limit:
+        query["pageSize"] = limit - len(collected)
+        payload = await api.request("GET", path, version=version, params=query)
+        page = _items(payload, path=path, key=item_key)
+        if len(page) > query["pageSize"]:
+            raise UpstreamError(
+                "Benchling returned more items than pageSize",
+                details={"path": path, "page_size": query["pageSize"], "returned": len(page)},
+            )
+        collected.extend(page)
+        token = _next_token(payload)
+        if not token:
+            return collected, None
+        if token in seen:
+            raise UpstreamError(
+                "Benchling returned a repeated pagination token",
+                details={"path": path},
+            )
+        seen.add(token)
+        query["nextToken"] = token
+    return collected, token
+
+
+async def list_entries(
+    api: BenchlingAPI,
+    *,
+    project: object = None,
+    folder: object = None,
+    schema_id: object = None,
+    name: object = None,
+    modified_after: object = None,
+    modified_before: object = None,
+    limit: object = LIST_LIMIT,
+    cursor: object = None,
+) -> dict[str, Any]:
+    """Return one page of entries.
+
+    Without a folder, filters are V3 query parameters. With a folder, the whole
+    query goes to V2 so ``folderId`` and the other filters are applied together.
+    """
+    page_size = check_limit(limit)
+    project_id = _optional_text(project, "project")
+    folder_id = _optional_text(folder, "folder")
+    schema = _optional_text(schema_id, "schema")
+    entry_name = _optional_text(name, "name")
+    start, end = _modified_range(modified_after, modified_before)
+    if cursor is not None and (not isinstance(cursor, str) or not cursor):
+        raise ValidationError("cursor must be a non-empty string")
+
+    if folder_id is not None:
+        params: dict[str, Any] = {"folderId": folder_id}
+        if project_id is not None:
+            params["projectId"] = project_id
+        if schema is not None:
+            params["schemaId"] = schema
+        if entry_name is not None:
+            params["names.anyOf"] = entry_name
+        modified = _v2_modified(start, end)
+        if modified is not None:
+            params["modifiedAt"] = modified
+        if isinstance(cursor, str):
+            params["nextToken"] = cursor
+        items, token = await _one_page(
+            api, "/entries", params, version=2, item_key="entries", limit=page_size
+        )
+        routing = {
+            "api_version": 2,
+            "path": "/entries",
+            "server_side": list(V2_ENTRY_FILTERS),
+            "client_side": [],
+        }
+    else:
+        params = {}
+        if project_id is not None:
+            params["project.eq"] = project_id
+        if schema is not None:
+            params["schema.eq"] = schema
+        if entry_name is not None:
+            params["name.anyOf"] = entry_name
+        if start is not None:
+            params["modifiedAt.gte"] = _stamp(start)
+        if end is not None:
+            params["modifiedAt.lte"] = _stamp(end)
+        if isinstance(cursor, str):
+            params["nextToken"] = cursor
+        items, token = await _one_page(
+            api, "/entry/items", params, version=3, item_key="items", limit=page_size
+        )
+        routing = {
+            "api_version": 3,
+            "path": "/entry/items",
+            "server_side": list(V3_ENTRY_FILTERS),
+            "client_side": [],
+        }
+    return {
+        "items": [entry_summary(item) for item in items],
+        "next_token": token,
+        "routing": routing,
+    }
+
+
+def _encode_cursor(kind: str, token: str | None) -> str:
+    raw = json.dumps({"kind": kind, "token": token}, separators=(",", ":")).encode()
+    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+
+def _decode_cursor(cursor: object, order: tuple[str, ...] | list[str]) -> tuple[int, str | None]:
+    if not isinstance(cursor, str) or not cursor:
+        raise ValidationError("cursor must be a non-empty string")
+    stripped = cursor.rstrip("=")
+    padded = stripped + "=" * (-len(stripped) % 4)
+    try:
+        payload = json.loads(base64.urlsafe_b64decode(padded))
+    except (ValueError, json.JSONDecodeError) as exc:
+        raise ValidationError("Schema page token is not valid") from exc
+    if not isinstance(payload, dict):
+        raise ValidationError("Schema page token is not valid")
+    kind = payload.get("kind")
+    token = payload.get("token")
+    if (
+        not isinstance(kind, str)
+        or kind not in order
+        or (token is not None and not isinstance(token, str))
+    ):
+        raise ValidationError(
+            "Schema page token does not match this list",
+            details={"kind": kind},
+        )
+    if token == "":
+        token = None
+    return order.index(kind), token
+
+
+def _schema_summary(item: dict[str, Any], kind: str) -> dict[str, Any]:
+    return {
+        "id": item.get("id"),
+        "name": item.get("name"),
+        "kind": kind,
+        "modified_at": item.get("modifiedAt"),
+    }
+
+
+async def list_schemas(
+    api: BenchlingAPI,
+    *,
+    kind: object = None,
+    limit: object = LIST_LIMIT,
+    cursor: object = None,
+) -> dict[str, Any]:
+    """Return one page of entry, result, and run schemas.
+
+    Upstream pages are followed until the page is full or every requested kind
+    is exhausted. The next token resumes at the following upstream page.
+    """
+    page_size = check_limit(limit)
+    if kind is None:
+        order = list(SCHEMA_KINDS)
+    elif kind in SCHEMA_KINDS:
+        order = [str(kind)]
+    else:
+        raise ValidationError(
+            "Schema kind must be entry, result, or run",
+            details={"supported": list(SCHEMA_KINDS)},
+        )
+    index = 0
+    token: str | None = None
+    if cursor is not None:
+        index, token = _decode_cursor(cursor, order)
+
+    items: list[dict[str, Any]] = []
+    seen: dict[str, set[str]] = {}
+    while index < len(order) and len(items) < page_size:
+        current = order[index]
+        path = SCHEMA_PATHS[current]
+        while len(items) < page_size:
+            params: dict[str, Any] = {"pageSize": page_size - len(items)}
+            if token:
+                params["nextToken"] = token
+            payload = await api.request("GET", path, params=params)
+            page = _items(payload, path=path)
+            if len(page) > params["pageSize"]:
+                raise UpstreamError(
+                    "Benchling returned more items than pageSize",
+                    details={
+                        "path": path,
+                        "page_size": params["pageSize"],
+                        "returned": len(page),
+                    },
+                )
+            items.extend(_schema_summary(item, current) for item in page)
+            token = _next_token(payload)
+            if not token:
+                break
+            seen_tokens = seen.setdefault(current, set())
+            if token in seen_tokens:
+                raise UpstreamError(
+                    "Benchling returned a repeated pagination token",
+                    details={"path": path},
+                )
+            seen_tokens.add(token)
+        if len(items) >= page_size:
+            break
+        index += 1
+        token = None
+
+    next_token: str | None = None
+    if len(items) >= page_size:
+        if token:
+            next_token = _encode_cursor(order[index], token)
+        elif index + 1 < len(order):
+            next_token = _encode_cursor(order[index + 1], None)
+    return {"items": items, "next_token": next_token, "kinds": order}
+
+
+def dropdown_id_of(field: dict[str, Any]) -> str | None:
+    """Return the dropdown id a field definition points at, if it has one."""
+    direct = field.get("dropdownId")
+    if isinstance(direct, str) and direct:
+        return direct
+    link = field.get("linkDefinition")
+    if isinstance(link, dict):
+        linked = link.get("id")
+        if isinstance(linked, str) and linked:
+            return linked
+    return None
+
+
+async def load_dropdown(api: BenchlingAPI, dropdown_id: str) -> dict[str, Any]:
+    """Fetch one dropdown and every option on ``/dropdown/{id}/options/items``."""
+    dropdown = await api.request("GET", f"/dropdown/{dropdown_id}")
+    options = await api.request("GET", f"/dropdown/{dropdown_id}/options/items")
+    raw = options.get("items")
+    if not isinstance(raw, list):
+        raise UpstreamError(
+            "Dropdown options response has an unexpected shape",
+            details={"dropdown_id": dropdown_id, "keys": sorted(options)},
+        )
+    parsed: list[dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            raise UpstreamError(
+                "Benchling returned a non-object dropdown option",
+                details={"dropdown_id": dropdown_id},
+            )
+        parsed.append(
+            {
+                "id": item.get("id"),
+                "name": item.get("name"),
+                "archived": bool(item.get("archived")),
+            }
+        )
+    return {
+        "id": dropdown.get("id", dropdown_id),
+        "name": dropdown.get("name"),
+        "options": parsed,
+    }
