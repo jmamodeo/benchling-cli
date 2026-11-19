@@ -2,7 +2,7 @@ cff-version: 1.2.0
 message: "If you use this software, please cite it as below."
 type: software
 title: "benchling-toolkit"
-version: 0.3.0
+version: 0.4.0
 date-released: "2026-11-19"
 abstract: >-
   Safe, auditable tools for AI agents working in Benchling: a JSON-first CLI

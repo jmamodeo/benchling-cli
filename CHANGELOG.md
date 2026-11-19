@@ -6,8 +6,11 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-19
+
 ### Added
 
+- `.github/workflows/publish.yml` publishes to PyPI when a GitHub release is published. It builds the sdist and wheel, runs `twine check --strict`, requires the release tag to equal `v` plus the package version, and uploads with PyPI trusted publishing (OIDC, GitHub environment `pypi`). No PyPI token is stored in the repository.
 - `SKILL.md` tells an agent when to use benchling-toolkit. It covers listing, reading entries, tables, and results, exporting to a local file, and previewing a change with `changes plan` before `changes apply`. The MCP server is read-only unless started with `--allow-writes ENV`. Credentials come from `benchling auth login --env NAME` and stay in the OS keychain. Frontmatter uses the Agent Skills fields only. `summary`, `version`, and `docs_url` are strings under `metadata`. `tags`, `keywords`, and `use_cases` are lists in `agensi/listing.yaml`.
 - A weekly GitHub Actions workflow, `.github/workflows/openapi-drift.yml`, downloads the public V3 OpenAPI spec from the URL in `contracts/openapi-manifest.json` and fails when the SHA-256 differs. The failure names each `routes_used` path whose operation or referenced definition changed. The workflow also runs on `workflow_dispatch`. The public spec needs no tenant and no credentials. `scripts/check_openapi_drift.py` performs the comparison. Its tests use fixture specs and stay offline.
 - `ARCHITECTURE.md` explains the plan, apply, and journal flow, with a sequence diagram.
@@ -176,7 +179,8 @@ All notable changes to this project are documented here. The format is based on
 - Versioned JSON envelope, stable exit codes, and published JSON schemas.
 - Operating-system trust-store TLS verification.
 
-[Unreleased]: https://github.com/jmamodeo/benchling-toolkit/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/jmamodeo/benchling-toolkit/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/jmamodeo/benchling-toolkit/compare/v0.2.0...v0.4.0
 [0.3.0]: https://github.com/jmamodeo/benchling-toolkit/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/jmamodeo/benchling-toolkit/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/jmamodeo/benchling-toolkit/compare/v0.1.1...v0.1.2
