@@ -136,16 +136,31 @@ apply_changes(env="demo", plan_id=...) ->
 
 ## Install
 
-The distribution name is `benchling-toolkit` and the import package is `benchling_toolkit`. Install the CLI onto your PATH with [`uv`](https://docs.astral.sh/uv/) and Python 3.11 or newer:
+The distribution name is `benchling-toolkit` and the import package is `benchling_toolkit`. Python 3.11 or newer and [`uv`](https://docs.astral.sh/uv/) are required.
+
+Once `benchling-toolkit` is published to PyPI, install the CLI and start the MCP server with:
 
 ```console
 uv tool install benchling-toolkit
 benchling --help
+
+uvx --from benchling-toolkit benchling mcp serve
 ```
 
-`uv sync` in a git checkout installs the package into that project's virtualenv only. It does not put `benchling` on PATH. From a checkout, run `uv run benchling`, or activate `.venv`. The package is not published to PyPI yet; until a release is published, install the command from a checkout with `uv tool install .`. Add `--extra dev` to `uv sync` when you need the test and lint tools.
+`uv tool install benchling-toolkit` puts `benchling` on PATH. `uvx --from benchling-toolkit benchling mcp serve` runs the server from that package without a separate install; the MCP client config below is that same command.
+
+Those are the PyPI forms. They work once the package is published. They are not live yet: `benchling-toolkit` is not on PyPI. Until a release is published, run the same commands against a checkout of this repository:
+
+```console
+uv tool install .
+uvx --from . benchling mcp serve
+```
+
+`uv sync` in a git checkout installs the package into that project's virtualenv only. It does not put `benchling` on PATH. From a checkout, run `uv run benchling`, or activate `.venv`. Add `--extra dev` to `uv sync` when you need the test and lint tools. Creating the Benchling app, granting it project access, and saving it with `benchling auth login --env NAME` are in the [setup guide](docs/setup.md).
 
 ## Configuration
+
+Create the Benchling app and grant it project access first. Those steps, including separate read and write environments, are in the [setup guide](docs/setup.md).
 
 Run `benchling auth login` in your own terminal. The client secret is read from a hidden prompt, or from stdin with `--secret-stdin`, and is never accepted as an argument, so it does not pass through an agent, a shell history entry, or an MCP client config.
 
@@ -228,12 +243,12 @@ If the collection is locked, or the session bus has no `org.freedesktop.secrets`
 
 ## Least privilege
 
-Create two Benchling apps and save them as two environments:
+Create two Benchling apps and save them as two environments. The [setup guide](docs/setup.md) covers creating each app, granting it project access, and saving it with `benchling auth login --env NAME`.
 
 - A read-only app, via `benchling auth login --env read`. Use this for agents and everyday MCP sessions. Do not pass `--allow-writes read`.
 - A write app, via `benchling auth login --env write`. Start a server that may apply changes with `benchling mcp serve --allow-writes write` only.
 
-In Benchling, grant each app access only to the specific projects it should see. `--allow-writes` is a local switch on the MCP server. It cannot widen the access the Benchling app was given.
+In Benchling, grant each app access only to the specific projects it should see. Give the read app the Read access policy. Give the write app Write, or Append when it should create records and leave existing ones unchanged. `--allow-writes` is a local switch on the MCP server. It cannot widen the access the Benchling app was given.
 
 ## Quickstart
 
@@ -245,7 +260,7 @@ benchling --env dev doctor
 benchling --env dev entry resolve EXP-0001
 ```
 
-`auth login` prompts for `https://your-tenant.benchling.com`, the client ID, and the client secret. Run it in your own terminal.
+`uv tool install benchling-toolkit` works once the package is published. Until then, install from a checkout with `uv tool install .`. `auth login` prompts for `https://your-tenant.benchling.com`, the client ID, and the client secret. Run it in your own terminal. App setup is in the [setup guide](docs/setup.md).
 
 ## CLI examples
 
@@ -335,7 +350,7 @@ Table upload plans use local correlation UUIDs; the tenant assigns the actual re
 
 ## MCP server
 
-One server serves every environment saved with `auth login`. The client config carries no secrets; the server reads the same `environments.json` file and OS keychain as the CLI. Log in in your own terminal before starting the server.
+One server serves every environment saved with `auth login`. The client config carries no secrets; the server reads the same `environments.json` file and OS keychain as the CLI. Log in in your own terminal before starting the server. The shell form of the config below is `uvx --from benchling-toolkit benchling mcp serve`. That command works once the package is published to PyPI. From a checkout, run `uvx --from . benchling mcp serve`.
 
 ```json
 {
@@ -487,7 +502,7 @@ uv run python scripts/sandbox_exercise.py \
 - The offline suite uses a synthetic fake; it cannot prove compatibility with every tenant configuration.
 - `entry list --name` is an exact case-insensitive match when the name has no comma (`name.anyOf` on V3, `names.anyOf` on V2 with `--folder`). It does not search substrings. A name that contains a comma is sent as V2 `name`, because those list parameters are comma-separated and document no escape. A modified timestamp must include a time zone. Folder filters use the V2 entry list because the V3 list ignores `folderId`. Listing timestamps are UTC with a `Z` suffix.
 
-See [API limitations](docs/api-limitations.md) and the [research record](docs/research.md) before enabling writes against production data.
+See the [setup guide](docs/setup.md) before the first login, and [API limitations](docs/api-limitations.md) and the [research record](docs/research.md) before enabling writes against production data.
 
 ## Citation
 
