@@ -5,7 +5,7 @@ license: MIT
 compatibility: "Requires the benchling command from benchling-toolkit (Python 3.11+), an OS keychain, and network access to the tenant saved for that environment. The MCP server is local stdio."
 metadata:
   summary: "Safe reads and previewed writes for a Benchling notebook. Lists, reads, and exports entries, tables, and assay results. Applies a change only after a local plan. The MCP server is read-only unless started with --allow-writes ENV."
-  version: "0.3.0"
+  version: "0.4.0"
   docs_url: "https://github.com/jmamodeo/benchling-toolkit"
 ---
 

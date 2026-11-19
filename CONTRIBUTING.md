@@ -52,6 +52,10 @@ Unit tests for the script use fixture specs and do not download anything.
 - CI (ruff format and lint, mypy, pytest with coverage on Python 3.11–3.13, `agentskills validate` for `SKILL.md`, and the package build) must pass.
 - Preserve the safety model: preview-then-apply, version preconditions, read-only MCP by default.
 
+## Releasing
+
+Only the maintainer releases. Set the same version in `src/benchling_toolkit/__init__.py`, `CITATION.cff`, and `SKILL.md`, move the `CHANGELOG.md` entries under the new version, and merge that pull request. Then publish a GitHub release from `main` whose tag is `v` plus the version. The `Publish to PyPI` workflow builds the package and uploads it with PyPI trusted publishing (GitHub environment `pypi`); no token is stored in the repository.
+
 ## No secrets or real tenant data
 
 Never include tokens, client secrets, real tenant URLs, real entry or record IDs, or sample data from a real lab in issues, pull requests, tests, or fixtures. Use placeholders such as `https://your-tenant-dev.benchling.com/` and `EXP-0001`.
