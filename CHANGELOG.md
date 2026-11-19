@@ -6,8 +6,13 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-19
+
 ### Added
 
+- Agents follow a mandatory rule, written into `SKILL.md`, the MCP server instructions, `AGENTS.md` and the README: when the toolkit cannot do what the person asked, the agent explains the limitation and asks whether to log a bug or a feature request on the repository. Only after an explicit yes does it draft the issue, show it, and file it once the person confirms.
+- `benchling issue draft` and the MCP tool `issue_draft` build that issue from structured fields: kind, summary, attempted action, expected and actual behaviour, interface, command or tool, description, proposed solution, and Benchling docs citations. The toolkit version, Python version and OS are filled in. Each citation must be an https URL on docs.benchling.com, help.benchling.com, or the API reference under benchling.com/api/, with a quoted line. A draft is refused when any field looks like a tenant URL, a Benchling record or display ID, a token or secret, or an email address. The output is a title, a body, the `bug` or `enhancement` label, and a prefilled GitHub new-issue URL. Nothing is filed by default; the CLI's `--file` runs `gh issue create`, and the MCP tool never files.
+- Bug and feature issue forms in `.github/ISSUE_TEMPLATE` ask for the same fields and require a Benchling documentation citation. They replace the Markdown templates.
 - After a successful results upload, `changes apply` and the MCP tool `apply_changes` return a `next_step` that names the entry and results table and tells the user to click the plug icon to accept the pending results.
 - `SKILL.md` has a "Results land as pending" section. Results created through the API are not put in a notebook results table directly. They are pending, with no entry, until a person accepts them in the table. Benchling documents this for V3 (`documentPartResultsTableId`) and for V2 bulk create. The accept control may insert every pending result that matches the table's schema, so stray results should be avoided.
 
@@ -189,7 +194,8 @@ All notable changes to this project are documented here. The format is based on
 - Versioned JSON envelope, stable exit codes, and published JSON schemas.
 - Operating-system trust-store TLS verification.
 
-[Unreleased]: https://github.com/jmamodeo/benchling-toolkit/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/jmamodeo/benchling-toolkit/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/jmamodeo/benchling-toolkit/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/jmamodeo/benchling-toolkit/compare/v0.2.0...v0.4.0
 [0.2.0]: https://github.com/jmamodeo/benchling-toolkit/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/jmamodeo/benchling-toolkit/compare/v0.1.1...v0.1.2

@@ -126,6 +126,11 @@ def test_body_covers_the_read_and_preview_workflows() -> None:
         "export --kind",
         "changes plan",
         "changes apply",
+        "issue draft",
+        "When the toolkit cannot do it",
+        "ALWAYS",
+        "explicit yes",
+        "docs.benchling.com",
     ):
         assert phrase in body
     assert "client secret" in body.casefold()

@@ -1,0 +1,69 @@
+name: Feature request
+description: Something benchling-toolkit cannot do yet.
+title: "Feature: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Do not include secrets, real tenant URLs, real entry or record IDs, or personal data.** Use placeholders such as `your-tenant.benchling.com` and `etr_XXXX`.
+        Agents can build this with `benchling issue draft` or the MCP tool `issue_draft`, which check the fields below.
+  - type: textarea
+    id: attempted
+    attributes:
+      label: What you tried
+      description: What you, or your agent, asked the toolkit to do.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      description: What the toolkit does today, with tenant data removed.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: benchling-toolkit version
+      description: Output of `benchling --version`.
+      placeholder: benchling-toolkit 0.4.1
+    validations:
+      required: true
+  - type: input
+    id: command
+    attributes:
+      label: Command or MCP tool
+      placeholder: benchling results rows / list_results_table_rows
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: The limitation in detail and why it matters.
+    validations:
+      required: true
+  - type: textarea
+    id: proposed_solution
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: textarea
+    id: benchling_docs
+    attributes:
+      label: Benchling documentation
+      description: |
+        At least one link on docs.benchling.com, help.benchling.com, or the API reference (benchling.com/api/), with the quoted line that shows the proposed solution is possible.
+      placeholder: |
+        - https://docs.benchling.com/docs/...
+          > quoted line
+    validations:
+      required: true

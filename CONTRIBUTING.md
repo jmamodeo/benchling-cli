@@ -44,6 +44,10 @@ uv run python scripts/check_openapi_drift.py --spec-file path/to/openapi.yaml
 
 Unit tests for the script use fixture specs and do not download anything.
 
+## Issues
+
+Use the bug or feature form. Both ask what you tried, the expected and actual behaviour, the version and command or MCP tool, a description, a proposed solution, and at least one Benchling documentation link (docs.benchling.com, help.benchling.com, or the API reference) with the quoted line that shows the solution is possible. `benchling issue draft` builds the same body and refuses drafts that look like they hold tenant data or secrets.
+
 ## Pull requests
 
 - Branch from `main` and keep each PR focused.
