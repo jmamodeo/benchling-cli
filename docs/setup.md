@@ -6,7 +6,7 @@ This project is unofficial and not affiliated with or endorsed by Benchling, Inc
 
 The toolkit calls the API as the app. The app has its own permissions and its own audit identity. Login uses the OAuth client-credentials grant described in Benchling's [authentication](https://docs.benchling.com/docs/authentication) guide. A personal API key is not accepted, and delegated login (the app acting as the signed-in user) is not used.
 
-Install the `benchling` command before the login step. `uv tool install benchling-toolkit` and `uvx --from benchling-toolkit benchling mcp serve` work once the package is published to PyPI. The package is not published yet. From a checkout, use `uv tool install .` and `uvx --from . benchling mcp serve`. Details are in the README section Install.
+Install the `benchling` command before the login step. `uv tool install benchling-toolkit` and `uvx --from benchling-toolkit benchling mcp serve` install the package from PyPI. From a checkout, use `uv tool install .` and `uvx --from . benchling mcp serve`. Details are in the README section Install.
 
 ## Create an app
 
