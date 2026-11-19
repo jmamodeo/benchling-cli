@@ -24,7 +24,7 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     env = dict(os.environ)
     env["BENCHLING_DEV_CLIENT_SECRET"] = getpass.getpass("Client secret (not echoed): ")
-    env["BENCHLING_AGENT_HOME"] = str(output_dir / "state")
+    env["BENCHLING_TOOLKIT_HOME"] = str(output_dir / "state")
     executable = root / ".venv" / "bin" / "benchling"
     print("CLI test session ready. Send JSON command objects; exit with EOF.", flush=True)
     for line in sys.stdin:

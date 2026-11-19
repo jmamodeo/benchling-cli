@@ -1,4 +1,6 @@
-# benchling-agent
+# benchling-toolkit
+
+Safe, auditable tools for AI agents working in Benchling.
 
 [![CI](https://github.com/jmamodeo/benchling-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/jmamodeo/benchling-cli/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -9,7 +11,7 @@
 
 ## Why this exists
 
-An electronic lab notebook is a scientific record, so letting an AI agent write to one directly is hard to trust. `benchling-agent` puts a narrow, auditable layer between an agent and a [Benchling](https://www.benchling.com) tenant. Every change is first previewed as an immutable, checksummed plan that records what will change and the version preconditions it depends on. A separate, explicit step applies it: that step re-checks the preconditions, refuses stale or already-used plans, and records each stage in a local execution journal. The same typed service layer backs a JSON-first CLI and a local [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server, and the MCP server cannot apply writes unless an operator opts a specific environment in with `--allow-writes`.
+An electronic lab notebook is a scientific record, so letting an AI agent write to one directly is hard to trust. `benchling-toolkit` is a toolkit of safe, auditable tools that AI agents use to work with a [Benchling](https://www.benchling.com) tenant: a JSON-first CLI and a local [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server that is read-only by default. Every change is first previewed as an immutable, checksummed plan that records what will change and the version preconditions it depends on. A separate, explicit step applies it: that step re-checks the preconditions, refuses stale or already-used plans, and records each stage in a local execution journal. The MCP server cannot apply writes unless an operator opts a specific environment in with `--allow-writes`.
 
 - Public Benchling API only; it never automates the browser.
 - Four change families: document text, unstructured tables, entry fields, and assay results.
@@ -135,7 +137,7 @@ apply_changes(env="demo", plan_id=...) ->
 
 ## Install
 
-The package is not published to PyPI; install from source with [`uv`](https://docs.astral.sh/uv/) and Python 3.11 or newer.
+The package is not published to PyPI. The distribution name is `benchling-toolkit` and the import package is `benchling_toolkit`. Install from source with [`uv`](https://docs.astral.sh/uv/) and Python 3.11 or newer.
 
 ```console
 git clone https://github.com/jmamodeo/benchling-cli.git
@@ -237,7 +239,7 @@ Table upload plans use local correlation UUIDs; the tenant assigns the actual re
 
 ## MCP server
 
-Configure an MCP client to inherit the `BENCHLING_<ENV>_*` variables for every environment the agent may use (or supply them through the client's secure environment configuration). One server serves all configured environments:
+Configure an MCP client to inherit the `BENCHLING_<ENV>_*` variables for every environment an AI agent may use (or supply them through the client's secure environment configuration). One server serves all configured environments. The `benchling` command below starts that read-only-by-default server:
 
 ```json
 {
@@ -273,7 +275,7 @@ flowchart TD
     AUTH --> BENCHLING
 ```
 
-| Module (`src/benchling_agent`) | Role |
+| Module (`src/benchling_toolkit`) | Role |
 |---|---|
 | `cli.py` | Typer command-line interface |
 | `mcp_server.py` | MCP tools, read-only default, write allow-list |
@@ -300,12 +302,12 @@ flowchart TD
 
 ## Design decisions and tradeoffs
 
-- **Plan/apply instead of one-call edit tools.** An agent reviews a concrete diff before anything is written, and replays are impossible. The cost is an extra step and some local state to manage.
+- **Plan/apply instead of one-call edit tools.** An AI agent reviews a concrete diff before anything is written, and replays are impossible. The cost is an extra step and some local state to manage.
 - **Environment variables only, no default environment.** Nothing sensitive is stored and the target tenant is always explicit. The cost is verbosity and no keychain convenience.
-- **App identity, not user identity.** OAuth client credentials give the agent its own permissions and audit identity, separate from any person's. The app must be granted access to each project it touches.
+- **App identity, not user identity.** OAuth client credentials give the toolkit its own permissions and audit identity, separate from any person's. The app must be granted access to each project it touches.
 - **One service layer, two interfaces.** The CLI and MCP server call the same typed services and return the same envelope, so behavior is specified and tested once. The cost is a more verbose, JSON-first CLI.
 - **Honest handling of API limits.** Benchling's document API cannot edit table cells individually, so table edits send a complete replacement that preserves supported cell fields; evaluated values are cleared. Replacing text is an insert followed by a delete and can end in a reported partial completion.
-- **Local, single-machine state.** Plans, journals and locks are plain files under the application directory (`BENCHLING_AGENT_HOME` overrides it). That keeps the tool dependency-free but means concurrency control does not extend across machines.
+- **Local, single-machine state.** Plans, journals and locks are plain files under the application directory (`BENCHLING_TOOLKIT_HOME` overrides it). That keeps the tool dependency-free but means concurrency control does not extend across machines.
 - **Offline tests against a stateful fake.** The suite runs the real client, services and planner against an in-process fake Benchling API instead of stubbing each call. This tests behavior end to end; the cost is that the fake can drift from the real API, which is why the opt-in sandbox exercise exists.
 
 ## JSON envelope and exit codes

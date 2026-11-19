@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping improve benchling-agent. This project is unofficial and not affiliated with Benchling, Inc.
+Thanks for helping improve benchling-toolkit. This project is unofficial and not affiliated with Benchling, Inc.
 
 ## Development setup
 

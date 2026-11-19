@@ -4,8 +4,8 @@ import httpx
 import pytest
 from conftest import make_environment
 
-from benchling_agent.auth import AuthManager
-from benchling_agent.errors import AuthenticationError, UpstreamError
+from benchling_toolkit.auth import AuthManager
+from benchling_toolkit.errors import AuthenticationError, UpstreamError
 
 
 def auth_for(handler, secrets=None) -> AuthManager:

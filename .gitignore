@@ -9,7 +9,7 @@ build/
 dist/
 .coverage
 htmlcov/
-.benchling-agent/
+.benchling-toolkit/
 .env
 .env.*
 !.env.example

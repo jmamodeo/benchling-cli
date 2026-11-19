@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-19
+
+### Changed
+
+- **Breaking:** the distribution is renamed from `benchling-agent` to `benchling-toolkit`, and the import package from `benchling_agent` to `benchling_toolkit`. Install and import the new name. The old install name and import path are not provided.
+- **Breaking:** per-user state now lives in a `benchling-toolkit` directory. Override it with `BENCHLING_TOOLKIT_HOME` (previously `BENCHLING_AGENT_HOME`). Plans and journals written by 0.2.x are not read.
+- **Breaking:** schema `$id` values and the installed data files under `share/benchling-toolkit/` use the new name.
+- The `benchling` command is unchanged. It still runs the CLI and `benchling mcp serve`. `benchling --version` prints `benchling-toolkit 0.3.0`.
+- Docs describe this project as a toolkit of safe, auditable tools — a JSON-first CLI and a read-only-by-default MCP server — that AI agents use to work with Benchling.
+
 ## [0.2.0] - 2026-11-18
 
 ### Changed
@@ -74,7 +84,8 @@ All notable changes to this project are documented here. The format is based on
 - Versioned JSON envelope, stable exit codes, and published JSON schemas.
 - Operating-system trust-store TLS verification.
 
-[Unreleased]: https://github.com/jmamodeo/benchling-cli/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/jmamodeo/benchling-cli/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/jmamodeo/benchling-cli/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/jmamodeo/benchling-cli/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/jmamodeo/benchling-cli/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/jmamodeo/benchling-cli/compare/v0.1.0...v0.1.1

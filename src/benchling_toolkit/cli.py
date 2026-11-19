@@ -20,7 +20,7 @@ from .runtime import Runtime
 
 app = typer.Typer(
     name="benchling",
-    help="Agent-friendly access to structured Benchling entry data.",
+    help="Safe, auditable tools for structured Benchling entry data.",
     no_args_is_help=True,
     pretty_exceptions_enable=False,
 )
@@ -58,7 +58,7 @@ class State:
 
 def _show_version(value: bool) -> None:
     if value:
-        typer.echo(f"benchling-agent {__version__}")
+        typer.echo(f"benchling-toolkit {__version__}")
         raise typer.Exit()
 
 
@@ -72,7 +72,7 @@ def root(
         False, "--version", callback=_show_version, is_eager=True, help="Show version and exit."
     ),
 ) -> None:
-    """Agent-friendly access to structured Benchling entry data."""
+    """Safe, auditable tools for structured Benchling entry data."""
     ctx.obj = State(env)
 
 
