@@ -5,7 +5,7 @@ Safe, auditable tools for AI agents working in Benchling.
 [![CI](https://github.com/jmamodeo/benchling-toolkit/actions/workflows/ci.yml/badge.svg)](https://github.com/jmamodeo/benchling-toolkit/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
-[![Coverage](https://img.shields.io/badge/coverage-98%25-brightgreen)](https://github.com/jmamodeo/benchling-toolkit/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/badge/coverage-97%25-brightgreen)](https://github.com/jmamodeo/benchling-toolkit/actions/workflows/ci.yml)
 
 > **Unofficial; not affiliated with or endorsed by Benchling, Inc.** Benchling is a trademark of Benchling, Inc.
 
@@ -366,9 +366,9 @@ On Linux the standard MCP SDK starts the stdio server with only `HOME`, `LOGNAME
 
 Startup failures, including a missing keychain, are a JSON envelope on stderr and a non-zero exit. Stdout is reserved for the MCP protocol. The stderr text names the MCP SDK's default environment and the `env` block. Request logging is off unless you pass `--verbose`.
 
-Every tool except `list_environments` takes a required `env` argument, and each call is authenticated with that environment's credentials. The server is read-only by default. To permit `apply_changes` in specific environments, add `--allow-writes ENV` after `serve` (repeatable, e.g. `--allow-writes dev --allow-writes test`); reads remain available in all environments. `list_entries` and `list_schemas` are reads, so they work without `--allow-writes`. A plan can only be applied or checked in the environment that created it. `plan_changes` remains available because it performs remote reads and writes only an immutable local preview. Large entry, section, table, result, and schema responses expose offset/limit or cursor pagination and never silently truncate data. `list_entries`, `list_schemas`, and `list_results_table_rows` use `limit` (default 50, maximum 100) and return `next_token` for the following page. `list_results_table_rows` is a read, so it works without `--allow-writes`. `export` reads every page internally and writes a local JSON or CSV file. Its response is the same summary as the CLI (row count, columns, path, SHA-256) and does not include the rows. It does not write to Benchling, and it does not need `--allow-writes`. An existing file is left unchanged unless `overwrite` is true.
+Every tool except `list_environments` takes a required `env` argument, and each call is authenticated with that environment's credentials. Every parameter on every tool has a description in the published input schema. The server is read-only by default. To permit `apply_changes` in specific environments, add `--allow-writes ENV` after `serve` (repeatable, e.g. `--allow-writes dev --allow-writes test`); reads remain available in all environments. `list_entries` and `list_schemas` are reads, so they work without `--allow-writes`. A plan can only be applied or checked in the environment that created it. `plan_changes` remains available because it performs remote reads and writes only an immutable local preview. Its `specification` is a typed object, the same shapes as [schemas/change-spec.schema.json](schemas/change-spec.schema.json): a document or table `operation`, `schema_fields`, inline `assay_results`, or a result update with `operation` `update`, `csv_path`, `id_column`, and `column_map`. A specification that does not match is a `validation_error` in the standard envelope, and nothing is planned. The CLI still passes its JSON file to the planner. Large entry, section, table, result, and schema responses expose offset/limit or cursor pagination and never silently truncate data. `list_entries`, `list_schemas`, and `list_results_table_rows` use `limit` (default 50, maximum 100) and return `next_token` for the following page. `list_results_table_rows` is a read, so it works without `--allow-writes`. `export` reads every page internally and writes a local JSON or CSV file. Its response is the same summary as the CLI (row count, columns, path, SHA-256) and does not include the rows. It does not write to Benchling, and it does not need `--allow-writes`. An existing file is left unchanged unless `overwrite` is true.
 
-The CLI and MCP tools share the same versioned envelope. Static schemas for the envelope and change specifications live under [`schemas/`](schemas/); MCP also publishes the generated input and output schema for each typed tool during tool discovery.
+The CLI and MCP tools share the same versioned envelope. Static schemas for the envelope and change specifications live under [`schemas/`](schemas/). MCP publishes the generated input and output schema for each tool during discovery. Each input parameter includes a description, and `plan_changes` `specification` is the typed union of those change shapes.
 
 ## Architecture
 
@@ -394,6 +394,7 @@ flowchart TD
 |---|---|
 | `cli.py` | Typer command-line interface |
 | `mcp_server.py` | MCP tools, read-only default, write allow-list |
+| `change_spec.py` | Typed `plan_changes` specifications and their validation |
 | `services.py` | Typed read services and entry snapshots |
 | `export.py` | Local JSON or CSV export; the response is a summary, not the rows |
 | `listing.py` | Paged entry, schema, and dropdown discovery |
@@ -458,7 +459,7 @@ uv run mypy
 uv run pytest --cov
 ```
 
-The suite has 342 test functions (534 collected cases, parametrization included) and reaches 98% branch coverage. CI enforces a `fail_under` floor of 96% in `pyproject.toml`, and also builds the sdist and wheel, runs `twine check`, and smoke-tests the built wheel.
+The suite has 370 test functions (594 collected cases, parametrization included) and reaches 97% branch coverage. CI enforces a `fail_under` floor of 96% in `pyproject.toml`, and also builds the sdist and wheel, runs `twine check`, and smoke-tests the built wheel.
 
 ### Opt-in sandbox exercise
 

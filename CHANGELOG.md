@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+
+- MCP `plan_changes` takes a typed `specification` for document, table, field, inline result, and CSV result-update changes. A value that does not match is a `validation_error` in the standard envelope, and nothing is planned. Every MCP tool parameter has a description. The CLI still accepts the same JSON specs.
+
 ### Added
 
 - `benchling changes plan --family results` accepts a CSV file. `--id-column` names the result id and each `--map CSV_COLUMN=FIELD` maps a column to a field display name, system name, or field-definition id. The plan resolves those names to field-definition ids, previews only the values that change, and writes nothing until apply. Apply sends `PATCH /result/{id}` after re-checking each result's `modifiedAt`. Unknown columns and bad rows are reported at plan time. An assay-result export CSV round-trips when the mapped columns are that export's headers.
