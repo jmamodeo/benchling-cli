@@ -88,6 +88,7 @@ class AuthManager:
             return {"Authorization": f"Bearer {bundle.access_token}"}
 
     def _token_request(self, environment: Environment, data: dict[str, str]) -> dict[str, Any]:
+        identity = {"env": environment.name, "tenant_url": environment.base_url}
         try:
             response = self.http.post(
                 f"{environment.base_url}/oauth/token",
@@ -97,19 +98,18 @@ class AuthManager:
         except httpx.HTTPError as exc:
             raise UpstreamError(
                 "Could not reach the Benchling token endpoint. Check the tenant URL.",
-                details={"env": environment.name, "reason": redact_text(str(exc))},
+                details={**identity, "reason": redact_text(str(exc))},
                 retryable=True,
             ) from exc
         if response.status_code == 401:
             raise AuthenticationError(
-                "Benchling rejected the client ID or client secret. "
-                "Check the tenant URL, the client ID, and the secret.",
-                details={"status": response.status_code},
+                f"Benchling at {environment.base_url} rejected the client ID or secret.",
+                details={**identity, "status": response.status_code},
             )
         if response.status_code >= 400:
             raise AuthenticationError(
                 "Benchling rejected authentication",
-                details={"status": response.status_code},
+                details={**identity, "status": response.status_code},
             )
         try:
             token_response: dict[str, Any] = response.json()

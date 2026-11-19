@@ -8,11 +8,11 @@ All notable changes to this project are documented here. The format is based on
 
 ### Fixed
 
-- The keychain error's `dbus-run-session` command also runs `benchling auth login` in that same shell. A session that only unlocks the keyring exits, and the bus vanishes. The message is short lines. It says `DBUS_SESSION_BUS_ADDRESS` is unset only when it is unset, and says the bus has no Secret Service when the variable is set but the bus has no keyring.
-- The README Headless Linux section no longer says `gnome-keyring-daemon --unlock` prints `DBUS_SESSION_BUS_ADDRESS`. It shows a long-lived `dbus-daemon --session --fork` bus that MCP, later shells, and cron can share, and notes a systemd user bus.
+- The keychain error is the cause, one fix command, and a pointer to the README Headless Linux section. `dbus-run-session` also runs `benchling auth login` in that same shell. It says `DBUS_SESSION_BUS_ADDRESS` is unset only when it is unset, and says the bus has no Secret Service when the variable is set but the bus has no keyring. The MCP client `env` block and cron note is included only when `benchling mcp serve` raises the error.
+- The README Headless Linux section no longer says `gnome-keyring-daemon --unlock` prints `DBUS_SESSION_BUS_ADDRESS`. It shows a long-lived `dbus-daemon --session --fork` bus that MCP, later shells, and cron can share, notes a systemd user bus, and says a wrong `KEYRING_PASSWORD` for an existing login keyring hangs the first keyring call.
 - Closing MCP stdin after a tool call exits 0 and does not print `MCP server failed to start` / `Event loop is closed`.
-- A token request that cannot reach the host says to check the tenant URL. The raw transport error, including SSL text, stays in `details.reason`.
-- A 401 from login also says to check the tenant URL. `--secret-stdin` with an empty stdin says `No client secret was received on stdin`.
+- A token request that cannot reach the host says to check the tenant URL. The raw transport error, including SSL text, stays in `details.reason`. `details` also includes `env` and `tenant_url`.
+- A 401 from token exchange says `Benchling at https://<tenant> rejected the client ID or secret.` `details` includes `env`, `tenant_url`, and `status`. `--secret-stdin` with an empty stdin says `No client secret was received on stdin`.
 
 ### Added
 
@@ -34,10 +34,10 @@ All notable changes to this project are documented here. The format is based on
 - Repository links now point at `https://github.com/jmamodeo/benchling-toolkit` after the GitHub repository rename. Older changelog text is unchanged.
 - **Breaking:** `BENCHLING_<ENV>_API_ENDPOINT`, `BENCHLING_<ENV>_CLIENT_ID`, and `BENCHLING_<ENV>_CLIENT_SECRET` are no longer read. There is no fallback or alias. Configure an environment with `benchling auth login --env NAME`.
 - Tenant URLs accept a bare host and a trailing `/api/v2` or `/api/v3`. A trailing slash is not shown. `http://` is rejected on its own. The tenant URL and the client ID are validated separately.
-- A 401 from the token endpoint says to check the tenant URL, the client ID, and the secret.
+- A 401 from the token endpoint names the configured tenant URL and includes `env` and `tenant_url` in `details`.
 - `benchling doctor` exits 3 with `ok: false` when a check fails. Each failed check has a hint. `auth status --check` puts the specific cause in the top-level message.
 - An invalid environment name explains the lowercase-letters-and-digits rule. Logging out an environment that is not configured says so.
-- MCP startup errors, including a missing keychain, are a JSON envelope on stderr and a non-zero exit. The keychain text states that the MCP SDK launches stdio servers with only `HOME`, `LOGNAME`, `PATH`, `SHELL`, `TERM` and `USER`, so `DBUS_SESSION_BUS_ADDRESS` has to be set in the client `env` block.
+- MCP startup errors, including a missing keychain, are a JSON envelope on stderr and a non-zero exit. Only that `mcp serve` path adds that the MCP SDK launches stdio servers with only `HOME`, `LOGNAME`, `PATH`, `SHELL`, `TERM` and `USER`, so `DBUS_SESSION_BUS_ADDRESS` has to be set in the client `env` block. Cron needs the same long-lived bus.
 - `--secret-stdin` reads the controlling terminal with `os.open` and `FileIO`. Opening `/dev/tty` in text mode `r+` is rejected on Linux and macOS, which made that flag fail even when a terminal existed.
 
 ### Removed

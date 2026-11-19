@@ -14,7 +14,7 @@ from .errors import (
     UpstreamError,
     ValidationError,
 )
-from .keychain import Keychain
+from .keychain import Keychain, _in_mcp_serve
 from .models import Envelope, PlanFamily
 from .runtime import Runtime, RuntimePool
 from .services import part_content
@@ -448,6 +448,16 @@ def run_mcp_server(
     Raises AuthenticationError if no environment is configured and ValidationError
     if writable_envs names an unconfigured one. verbose turns on request logging.
     """
+    token = _in_mcp_serve.set(True)
+    try:
+        _serve(pool_writable=writable_envs, verbose=verbose)
+    finally:
+        _in_mcp_serve.reset(token)
+
+
+def _serve(*, pool_writable: set[str] | frozenset[str], verbose: bool) -> None:
+    """Run the stdio server. Caller sets the MCP keychain-message flag."""
+    writable_envs = pool_writable
     pool = RuntimePool()
     configured = pool.config.configured_names()
     if not configured:

@@ -31,6 +31,8 @@ def test_unreachable_tenant_keeps_the_ssl_reason_and_names_the_url() -> None:
     assert "SSL" not in message
     assert "CERTIFICATE_VERIFY_FAILED" in reason
     assert "wrong.example" in reason
+    assert caught.value.details["env"] == "sandbox"
+    assert caught.value.details["tenant_url"] == "https://tenant.benchling.com"
 
 
 def test_missing_secret_is_an_authentication_error() -> None:

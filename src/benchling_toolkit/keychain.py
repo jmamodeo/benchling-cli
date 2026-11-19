@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import shutil
 import sys
+from contextvars import ContextVar
 from typing import Any, Protocol
 
 import keyring
@@ -19,9 +20,6 @@ from .redact import register_secret
 
 SERVICE_NAME = "benchling-toolkit"
 _SECRET_SERVICE_NAME = "org.freedesktop.secrets"
-_NO_PLAINTEXT = (
-    "Client secrets are stored in the system keychain and are never written to plaintext files."
-)
 _UNLOCK = "gnome-keyring-daemon --unlock --components=secrets"
 _LOGIN = (
     'printf "%s" "$BENCHLING_CLIENT_SECRET" | benchling auth login --env dev '
@@ -30,24 +28,20 @@ _LOGIN = (
 # dbus-run-session exits with its shell, and the bus exits with it. The login
 # has to be in that same shell or the secret is stored on a bus that is already gone.
 _SESSION = f'dbus-run-session -- sh -c \'printf "%s\\n" "$KEYRING_PASSWORD" | {_UNLOCK}; {_LOGIN}\''
-_NO_SUBSTITUTION = (
-    "Do not capture gnome-keyring-daemon --unlock with $(...) or backticks.\n"
-    "The daemon does not exit, so the substitution hangs."
-)
-_SHARE_BUS = (
-    "A dbus-run-session bus vanishes when that command exits.\n"
-    "For MCP, later shells, and cron, use a long-lived bus. See the README section Headless Linux."
-)
+_INSTALL = "sudo apt-get install -y gnome-keyring dbus"
+_README = "See the README section Headless Linux."
+# Shown only for `benchling mcp serve`. CLI login already has a terminal session.
 _MCP_ENV = (
     "The standard MCP SDK launches stdio servers with only HOME, LOGNAME, PATH, "
-    "SHELL, TERM and USER in the environment, so DBUS_SESSION_BUS_ADDRESS is missing.\n"
-    "Set DBUS_SESSION_BUS_ADDRESS in the MCP client config env block."
+    "SHELL, TERM and USER, so DBUS_SESSION_BUS_ADDRESS is missing. "
+    "Set it in the MCP client config env block. Cron needs that same long-lived bus exported."
 )
+# Set for the lifetime of run_mcp_server, including its keychain check.
+_in_mcp_serve: ContextVar[bool] = ContextVar("benchling_in_mcp_serve", default=False)
 NO_KEYRING_MESSAGE = (
-    "No usable OS keychain is available.\n"
-    f"{_NO_PLAINTEXT}\n"
-    "On Linux, see the README section Headless Linux.\n"
-    "macOS and Windows use the system keychain automatically."
+    "No usable OS keychain is available because no Secret Service backend is installed.\n"
+    f"{_INSTALL}\n"
+    f"{_README}"
 )
 
 
@@ -164,43 +158,33 @@ def _lines(*parts: str) -> str:
     return "\n".join(part for part in parts if part)
 
 
-def keychain_message(cause: str) -> str:
-    """Actionable text for one keychain failure cause. Never includes secret values."""
+def _cause(cause: str) -> str:
     if cause == "locked":
-        return _lines(
-            "No usable OS keychain is available because the Secret Service collection is locked.",
-            _NO_PLAINTEXT,
-            "Unlock it in this session by piping the keyring password on stdin, not as an argument:",
-            f"printf '%s\\n' \"$KEYRING_PASSWORD\" | {_UNLOCK}",
-            "Run the login in that same session. A dbus-run-session that only unlocks the keyring exits, and the bus vanishes:",
-            _SESSION,
-            _NO_SUBSTITUTION,
-            _SHARE_BUS,
-            _MCP_ENV,
-        )
+        return "No usable OS keychain is available because the Secret Service collection is locked."
     if cause == "dbus_unreachable":
-        return _lines(
-            "No usable OS keychain is available because Secret Service is not reachable on D-Bus.",
-            _NO_PLAINTEXT,
-            _dbus_bus_line(),
-            "Unlock a keyring and log in inside one session. dbus-run-session exits when its shell exits, and the bus vanishes with it:",
-            _SESSION,
-            _NO_SUBSTITUTION,
-            _SHARE_BUS,
-            _MCP_ENV,
-            "macOS and Windows use the system keychain automatically.",
+        return (
+            "No usable OS keychain is available because Secret Service is not reachable on D-Bus. "
+            + _dbus_bus_line()
         )
-    return _lines(
-        "No usable OS keychain is available because no Secret Service backend is installed.",
-        _NO_PLAINTEXT,
-        "On Linux, install gnome-keyring and dbus (for example `sudo apt-get install -y gnome-keyring dbus`).",
-        "Then unlock a keyring and log in inside one session:",
-        _SESSION,
-        _NO_SUBSTITUTION,
-        _SHARE_BUS,
-        _MCP_ENV,
-        "macOS and Windows use the system keychain automatically.",
-    )
+    return "No usable OS keychain is available because no Secret Service backend is installed."
+
+
+def _fix_command(cause: str) -> str:
+    """One command. The README has the rest, including a long-lived bus."""
+    if cause == "no_backend":
+        return _INSTALL
+    return _SESSION
+
+
+def keychain_message(cause: str) -> str:
+    """Cause, one fix command, and a README pointer. MCP adds the env-block line.
+
+    Never includes secret values. The MCP line is only present while `mcp serve` is running.
+    """
+    parts = [_cause(cause), _fix_command(cause), _README]
+    if _in_mcp_serve.get():
+        parts.append(_MCP_ENV)
+    return _lines(*parts)
 
 
 def _keychain_error(backend: object | None, exc: BaseException | None) -> AuthenticationError:
