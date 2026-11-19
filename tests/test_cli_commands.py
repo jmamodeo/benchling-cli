@@ -4,7 +4,7 @@ import json
 import os
 
 import pytest
-from conftest import runtime_for
+from conftest import plain_stdout, runtime_for
 from fake_benchling import ENTRY_ID, TABLE_PART, TEXT_PART
 from typer.testing import CliRunner
 
@@ -370,5 +370,5 @@ def test_invalid_saved_endpoint_fails_validation_without_echoing_value(invoke) -
 
 
 def test_cli_without_arguments_shows_help() -> None:
-    result = CliRunner().invoke(cli.app, [])
-    assert "Usage" in result.stdout and "changes" in result.stdout
+    text = plain_stdout([])
+    assert "Usage" in text and "changes" in text

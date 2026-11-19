@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 
 import httpx
 import keyring
@@ -18,6 +19,21 @@ from benchling_toolkit.redact import clear_registered_secrets
 from benchling_toolkit.runtime import Runtime, RuntimePool
 
 SANDBOX_SECRET = "sandbox-client-secret"
+_ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+# Rich on GitHub Actions forces a terminal and can insert styling inside option
+# names such as --secret-stdin. These overrides plus ANSI stripping keep help
+# assertions independent of that rendering.
+_PLAIN_TERMINAL = {"NO_COLOR": "1", "TERM": "dumb", "COLUMNS": "200"}
+
+
+def plain_stdout(args: list[str]) -> str:
+    """Run the CLI and return stdout with ANSI escapes removed."""
+    from typer.testing import CliRunner
+
+    from benchling_toolkit import cli
+
+    result = CliRunner().invoke(cli.app, args, env=_PLAIN_TERMINAL)
+    return _ANSI.sub("", result.stdout)
 
 
 @pytest.fixture(autouse=True)

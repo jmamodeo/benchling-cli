@@ -7,7 +7,7 @@ import stat
 import httpx
 import keyring
 import pytest
-from conftest import SANDBOX_SECRET, configure_env, runtime_for
+from conftest import SANDBOX_SECRET, configure_env, plain_stdout, runtime_for
 from fake_benchling import ENTRY_ID, TEXT_PART, FakeBenchling
 from memory_keyring import MemoryKeyring
 from typer.testing import CliRunner
@@ -132,7 +132,7 @@ def test_secret_is_not_accepted_as_an_argument(monkeypatch) -> None:
     )
     assert result.exit_code != 0
     assert not EnvironmentConfigStore().environments_path.exists()
-    help_text = CliRunner().invoke(cli.app, ["auth", "login", "--help"]).stdout
+    help_text = plain_stdout(["auth", "login", "--help"])
     assert "--secret-stdin" in help_text
     assert "--client-secret" not in help_text
 
