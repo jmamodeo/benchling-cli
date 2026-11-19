@@ -8,6 +8,9 @@ All notable changes to this project are documented here. The format is based on
 
 ### Added
 
+- `ARCHITECTURE.md` explains the plan, apply, and journal flow, with a sequence diagram.
+- `docs/threat-model.md` covers credentials, stale or replayed plans, write scoping, and agent misuse. It names the code for each control and the cases that code does not close.
+- The README embeds a GIF of the offline fixture demo and links an asciinema cast built from the same `scripts/demo.py` output. The session uses the in-process fake API. No live tenant is contacted.
 - `docs/setup.md` explains how to create a Benchling app, grant it project access, log in with `benchling auth login --env NAME` (OS keychain, including headless login), and keep separate read and write environments.
 
 ### Changed
