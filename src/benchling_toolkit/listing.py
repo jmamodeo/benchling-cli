@@ -3,6 +3,9 @@
 Entry filters are sent to the API version that actually applies them. V3
 ``GET /entry/items`` has no folder parameter and live tenants ignore
 ``folderId`` on that route, so a folder filter uses V2 ``GET /entries``.
+A name that contains a comma also uses V2. ``name.anyOf`` and
+``names.anyOf`` are comma-separated lists, and the contract documents no
+escape for a comma inside one name. V2 ``name`` is a single entry name.
 """
 
 from __future__ import annotations
@@ -60,8 +63,21 @@ def _optional_text(value: object, label: str) -> str | None:
     return _text(value, label)
 
 
+def _entry_name(value: object) -> str | None:
+    """One entry name. A comma is allowed; the caller chooses a parameter that can carry it."""
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ValidationError("name must be a non-empty string")
+    return value.strip()
+
+
 def _bound(value: object, *, end_of_day: bool) -> datetime | None:
-    """Parse a date or RFC3339 timestamp. A bare date is the start or end of that UTC day."""
+    """Parse a date or an RFC3339 timestamp that includes a time zone.
+
+    A bare date is the start or end of that UTC day. A timestamp with no zone
+    is rejected.
+    """
     if value is None:
         return None
     if not isinstance(value, str) or not value.strip():
@@ -73,9 +89,43 @@ def _bound(value: object, *, end_of_day: bool) -> datetime | None:
         parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
     except ValueError as exc:
         raise ValidationError("Modified date must be YYYY-MM-DD or an RFC3339 timestamp") from exc
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
+    if parsed.tzinfo is None or parsed.tzinfo.utcoffset(parsed) is None:
+        raise ValidationError(
+            "Modified timestamp has no time zone. Use YYYY-MM-DD or an RFC3339 "
+            "timestamp with a zone, such as 2026-06-15T12:00:00Z."
+        )
     return parsed.astimezone(UTC)
+
+
+def _timestamp_fraction(value: str) -> str:
+    """The source fractional seconds, including the dot, so ``.500`` stays ``.500``."""
+    start = value.find(".")
+    if start == -1:
+        return ""
+    end = start + 1
+    while end < len(value) and value[end].isdigit():
+        end += 1
+    if end == start + 1:
+        return ""
+    return value[start:end]
+
+
+def utc_timestamp(value: object) -> object:
+    """Rewrite a timezone-aware timestamp as UTC with a ``Z`` suffix.
+
+    V2 listing responses use ``+00:00`` and V3 responses use ``Z``. A value that
+    is not a timezone-aware timestamp is returned unchanged.
+    """
+    if not isinstance(value, str) or not value:
+        return value
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return value
+    if parsed.tzinfo is None or parsed.tzinfo.utcoffset(parsed) is None:
+        return value
+    utc = parsed.astimezone(UTC)
+    return f"{utc.strftime('%Y-%m-%dT%H:%M:%S')}{_timestamp_fraction(value)}Z"
 
 
 def _stamp(value: datetime) -> str:
@@ -147,7 +197,7 @@ def entry_summary(item: dict[str, Any]) -> dict[str, Any]:
         "id": item.get("id"),
         "name": item.get("name"),
         "display_id": item.get("displayId"),
-        "modified_at": item.get("modifiedAt"),
+        "modified_at": utc_timestamp(item.get("modifiedAt")),
         "schema_id": schema_id,
         "project_id": project_id,
         "folder_id": folder_id,
@@ -208,26 +258,34 @@ async def list_entries(
 ) -> dict[str, Any]:
     """Return one page of entries.
 
-    Without a folder, filters are V3 query parameters. With a folder, the whole
-    query goes to V2 so ``folderId`` and the other filters are applied together.
+    Without a folder, and when the name has no comma, filters are V3 query
+    parameters. A folder filter, or a name that contains a comma, sends the
+    whole query to V2 so every filter is applied together.
     """
     page_size = check_limit(limit)
     project_id = _optional_text(project, "project")
     folder_id = _optional_text(folder, "folder")
     schema = _optional_text(schema_id, "schema")
-    entry_name = _optional_text(name, "name")
+    entry_name = _entry_name(name)
     start, end = _modified_range(modified_after, modified_before)
     if cursor is not None and (not isinstance(cursor, str) or not cursor):
         raise ValidationError("cursor must be a non-empty string")
+    # V3 name.anyOf and V2 names.anyOf split on commas. V2 name is one name.
+    comma_name = entry_name is not None and "," in entry_name
 
-    if folder_id is not None:
-        params: dict[str, Any] = {"folderId": folder_id}
+    if folder_id is not None or comma_name:
+        params: dict[str, Any] = {}
+        if folder_id is not None:
+            params["folderId"] = folder_id
         if project_id is not None:
             params["projectId"] = project_id
         if schema is not None:
             params["schemaId"] = schema
         if entry_name is not None:
-            params["names.anyOf"] = entry_name
+            if comma_name:
+                params["name"] = entry_name
+            else:
+                params["names.anyOf"] = entry_name
         modified = _v2_modified(start, end)
         if modified is not None:
             params["modifiedAt"] = modified
@@ -309,7 +367,7 @@ def _schema_summary(item: dict[str, Any], kind: str) -> dict[str, Any]:
         "id": item.get("id"),
         "name": item.get("name"),
         "kind": kind,
-        "modified_at": item.get("modifiedAt"),
+        "modified_at": utc_timestamp(item.get("modifiedAt")),
     }
 
 

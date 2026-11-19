@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import pytest
-from fake_benchling import ENTRY_ID
+from fake_benchling import ENTRY_ID, Call
 
 from benchling_toolkit.errors import UpstreamError, ValidationError
-from benchling_toolkit.listing import dropdown_id_of, entry_summary
+from benchling_toolkit.listing import dropdown_id_of, entry_summary, utc_timestamp
 
 
 def _params(fake, suffix: str) -> list[dict[str, str]]:
@@ -81,11 +81,16 @@ async def test_entry_pages_follow_upstream_tokens_until_the_limit(runtime, fake)
     assert len(_params(fake, "/entry/items")) == 4
 
 
-async def test_default_entry_page_is_fifty_and_naive_timestamps_are_utc(runtime, fake) -> None:
-    await runtime.service.list_entries(modified_after="2026-06-15T12:00:00")
+async def test_default_entry_page_is_fifty_and_a_timestamp_needs_a_zone(runtime, fake) -> None:
+    await runtime.service.list_entries()
     (params,) = _params(fake, "/entry/items")
-    assert params["pageSize"] == "50"
-    assert params["modifiedAt.gte"] == "2026-06-15T12:00:00Z"
+    assert params == {"pageSize": "50"}
+    fake.calls.clear()
+    with pytest.raises(ValidationError, match="no time zone"):
+        await runtime.service.list_entries(modified_after="2026-06-15T12:00:00")
+    with pytest.raises(ValidationError, match="no time zone"):
+        await runtime.service.list_entries(modified_before="2026-06-15T12:00:00")
+    assert fake.calls == []
 
 
 @pytest.mark.parametrize(
@@ -95,12 +100,17 @@ async def test_default_entry_page_is_fifty_and_naive_timestamps_are_utc(runtime,
         {"limit": 101},
         {"limit": True},
         {"limit": 1.5},
-        {"name": "a,b"},
+        {"name": ""},
+        {"name": 1},
+        {"project": "src_a,src_b"},
         {"project": "  "},
         {"folder": ""},
         {"cursor": ""},
         {"cursor": 1},
+        {"modified_after": ""},
+        {"modified_after": 5},
         {"modified_after": "yesterday"},
+        {"modified_after": "2026-06-15T12:00:00"},
         {"modified_after": "2026-12-01", "modified_before": "2026-01-01"},
     ],
 )
@@ -108,6 +118,123 @@ async def test_entry_list_rejects_bad_input_before_calling_the_api(runtime, fake
     with pytest.raises(ValidationError):
         await runtime.service.list_entries(**kwargs)
     assert fake.calls == []
+
+
+def _comma_entry() -> dict[str, str]:
+    return {
+        "id": "etr_comma",
+        "name": "Assay, replicate 1",
+        "displayId": "EXP-5",
+        "modifiedAt": "2026-07-01T00:00:00Z",
+        "schemaId": "entsch_abc123",
+        "projectId": "src_abc123",
+        "folderId": "lib_abc123",
+    }
+
+
+async def test_a_name_containing_a_comma_uses_the_v2_name_parameter(runtime, fake) -> None:
+    fake.extra_entries.append(_comma_entry())
+    page = await runtime.service.list_entries(
+        name="Assay, replicate 1",
+        project="src_abc123",
+        modified_after="2026-07-01T00:00:00Z",
+    )
+    assert [item["id"] for item in page["items"]] == ["etr_comma"]
+    assert page["items"][0]["modified_at"] == "2026-07-01T00:00:00Z"
+    assert page["routing"]["api_version"] == 2
+    assert page["routing"]["path"] == "/entries"
+    assert page["routing"]["client_side"] == []
+    assert _params(fake, "/api/v3/entry/items") == []
+    (params,) = _params(fake, "/api/v2/entries")
+    assert params["name"] == "Assay, replicate 1"
+    assert params["projectId"] == "src_abc123"
+    assert params["modifiedAt"] == ">= 2026-07-01T00:00:00Z"
+    assert "names.anyOf" not in params
+    assert "name.anyOf" not in params
+
+
+async def test_a_comma_name_with_a_folder_stays_on_one_v2_query(runtime, fake) -> None:
+    fake.extra_entries.append(_comma_entry())
+    page = await runtime.service.list_entries(folder="lib_abc123", name="Assay, replicate 1")
+    assert [item["id"] for item in page["items"]] == ["etr_comma"]
+    (params,) = _params(fake, "/api/v2/entries")
+    assert params["folderId"] == "lib_abc123"
+    assert params["name"] == "Assay, replicate 1"
+    assert "names.anyOf" not in params
+
+
+async def test_identifier_filters_still_reject_commas(runtime, fake) -> None:
+    with pytest.raises(ValidationError, match="project must not contain a comma"):
+        await runtime.service.list_entries(project="src_a,src_b")
+    with pytest.raises(ValidationError, match="folder must not contain a comma"):
+        await runtime.service.list_entries(folder="lib_a,lib_b")
+    with pytest.raises(ValidationError, match="schema must not contain a comma"):
+        await runtime.service.list_entries(schema_id="entsch_a,entsch_b")
+    assert fake.calls == []
+
+
+async def test_listing_timestamps_are_normalized_to_utc_z(runtime, fake) -> None:
+    fake.payload_overrides.append(
+        (
+            "/entry/items",
+            200,
+            {
+                "items": [
+                    {"id": "etr_z", "modifiedAt": "2026-06-15T12:00:00+00:00"},
+                    {"id": "etr_off", "modifiedAt": "2026-06-15T08:00:00-04:00"},
+                    {"id": "etr_frac", "modifiedAt": "2026-06-15T12:00:00.500+00:00"},
+                    {"id": "etr_already", "modifiedAt": "2026-06-15T12:00:00Z"},
+                    {"id": "etr_naive", "modifiedAt": "2026-06-15T12:00:00"},
+                    {"id": "etr_blank", "name": "No stamp"},
+                ],
+                "nextToken": "",
+            },
+        )
+    )
+    page = await runtime.service.list_entries()
+    stamps = {item["id"]: item["modified_at"] for item in page["items"]}
+    assert stamps == {
+        "etr_z": "2026-06-15T12:00:00Z",
+        "etr_off": "2026-06-15T12:00:00Z",
+        "etr_frac": "2026-06-15T12:00:00.500Z",
+        "etr_already": "2026-06-15T12:00:00Z",
+        "etr_naive": "2026-06-15T12:00:00",
+        "etr_blank": None,
+    }
+    status, payload = fake._list_entries_v2(Call("GET", "/api/v2/entries", {}, None))
+    assert status == 200
+    assert payload["entries"][0]["modifiedAt"].endswith("+00:00")
+    listed = await runtime.service.list_entries(folder="lib_abc123", limit=1)
+    assert listed["items"][0]["modified_at"].endswith("Z")
+
+
+async def test_schema_timestamps_are_normalized_to_utc_z(runtime, fake) -> None:
+    fake.payload_overrides.append(
+        (
+            "/entry-schema/items",
+            200,
+            {
+                "items": [
+                    {
+                        "id": "entsch_z",
+                        "name": "Zed",
+                        "modifiedAt": "2026-01-01T00:00:00+00:00",
+                    }
+                ],
+                "nextToken": "",
+            },
+        )
+    )
+    page = await runtime.service.list_schemas(kind="entry", limit=1)
+    assert page["items"][0]["modified_at"] == "2026-01-01T00:00:00Z"
+
+
+def test_utc_timestamp_leaves_non_timestamps_unchanged() -> None:
+    assert utc_timestamp(None) is None
+    assert utc_timestamp(5) == 5
+    assert utc_timestamp("") == ""
+    assert utc_timestamp("yesterday") == "yesterday"
+    assert utc_timestamp("2026-06-15T12:00:00") == "2026-06-15T12:00:00"
 
 
 async def test_entry_list_rejects_a_malformed_page_a_repeated_token_and_an_oversized_page(

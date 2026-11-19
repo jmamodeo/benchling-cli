@@ -117,6 +117,13 @@ _TABLE_ROW_KEYS = (
 )
 
 
+def _require_part_id(value: object) -> str:
+    """A document-part ID with surrounding whitespace removed."""
+    if not isinstance(value, str) or not value.strip():
+        raise ValidationError("part_id must be a non-empty string")
+    return value.strip()
+
+
 def entry_version(entry: dict[str, Any]) -> str:
     """Return the entry's version ID; raises UpstreamError if version metadata is absent."""
     metadata = entry.get("versionMetadata") or {}
@@ -515,6 +522,65 @@ class BenchlingService:
             fallback_typename="DocumentPartResultsTable",
             require_text=False,
         )
+
+    async def list_results_table_rows(
+        self,
+        part_id: object,
+        *,
+        limit: object = listing.LIST_LIMIT,
+        cursor: object = None,
+    ) -> dict[str, Any]:
+        """Return one page of rows from a V3 results table.
+
+        The part is read first, and its published rows URL must be
+        ``/document-part-results-table/{id}/rows/items``. That endpoint is paged
+        with ``pageSize`` (1 to 100, default 50) and ``nextToken``. A short
+        upstream page is followed until ``limit`` rows are collected or the
+        list ends. Cells use the same shape as an entry snapshot.
+        """
+        page_size = listing.check_limit(limit)
+        table_id = _require_part_id(part_id)
+        if cursor is not None and (not isinstance(cursor, str) or not cursor):
+            raise ValidationError("cursor must be a non-empty string")
+        detail = await self.api.request("GET", f"/document-part-results-table/{table_id}")
+        version = entry_version(detail)
+        path = rows_items_path(
+            self.api.environment.base_url,
+            table_id,
+            detail.get("rows"),
+            collection="document-part-results-table",
+        )
+        row_count = detail.get("rowCount")
+        if isinstance(row_count, bool) or not isinstance(row_count, int):
+            raise UpstreamError(
+                "Table response contained an invalid row count",
+                details={"part_id": table_id},
+            )
+        columns = detail.get("columnDefinitions") or []
+        if not isinstance(columns, list):
+            raise UpstreamError(
+                "Results table response contained invalid columns",
+                details={"part_id": table_id},
+            )
+        params: dict[str, Any] = {}
+        if isinstance(cursor, str):
+            params["nextToken"] = cursor
+        raw_rows, token = await listing._one_page(
+            self.api, path, params, version=3, item_key="items", limit=page_size
+        )
+        schema = detail.get("resultSchema")
+        schema_id = schema.get("id") if isinstance(schema, dict) else None
+        return {
+            "id": detail.get("id", table_id),
+            "version_id": version,
+            "name": detail.get("name"),
+            "column_definitions": columns,
+            "result_schema_id": schema_id if isinstance(schema_id, str) and schema_id else None,
+            "row_count": row_count,
+            "submission_status": detail.get("submissionStatus"),
+            "items": [normalize_table_row(row, require_text=False) for row in raw_rows],
+            "next_token": token,
+        }
 
     async def _read_part_table(
         self,

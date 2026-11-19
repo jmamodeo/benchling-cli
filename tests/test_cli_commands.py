@@ -539,6 +539,71 @@ def test_schema_list_pages_with_a_cursor(invoke, fake) -> None:
     assert fake.writes() == []
 
 
+def test_entry_list_sends_a_comma_name_as_the_v2_name_parameter(invoke, fake) -> None:
+    fake.extra_entries.append(
+        {
+            "id": "etr_comma",
+            "name": "Assay, replicate 1",
+            "displayId": "EXP-5",
+            "modifiedAt": "2026-07-01T00:00:00Z",
+            "schemaId": "entsch_abc123",
+            "projectId": "src_abc123",
+            "folderId": "lib_abc123",
+        }
+    )
+    code, payload, _ = invoke("entry", "list", "--name", "Assay, replicate 1")
+    assert code == 0, payload
+    assert payload["ok"] is True
+    assert [item["id"] for item in payload["data"]["items"]] == ["etr_comma"]
+    assert payload["data"]["items"][0]["modified_at"].endswith("Z")
+    assert payload["data"]["routing"]["api_version"] == 2
+    (call,) = [item for item in fake.calls if item.path.endswith("/entries")]
+    assert call.params["name"] == "Assay, replicate 1"
+    assert "names.anyOf" not in call.params
+    assert fake.writes() == []
+
+
+def test_entry_list_rejects_a_timestamp_without_a_zone(invoke, fake) -> None:
+    code, payload, _ = invoke("entry", "list", "--modified-after", "2026-06-15T12:00:00")
+    assert code == 2
+    assert payload["error"]["code"] == "validation_error"
+    assert "no time zone" in payload["error"]["message"]
+    assert fake.calls == []
+
+
+def test_results_rows_pages_with_the_standard_envelope(invoke, fake) -> None:
+    fake.add_results_table()
+    code, first, _ = invoke("results", "rows", "docpart_rt1", "--limit", "2")
+    assert code == 0, first
+    assert first["ok"] is True and first["error"] is None
+    assert first["meta"]["env"] == "sandbox"
+    assert [row["id"] for row in first["data"]["items"]] == ["strow_1", "strow_2"]
+    assert first["data"]["column_definitions"][0]["columnId"] == "col_ct"
+    assert first["data"]["next_token"]
+    code, second, _ = invoke(
+        "results",
+        "rows",
+        "docpart_rt1",
+        "--limit",
+        "2",
+        "--cursor",
+        first["data"]["next_token"],
+    )
+    assert code == 0, second
+    assert [row["id"] for row in second["data"]["items"]] == ["strow_3"]
+    assert second["data"]["next_token"] is None
+    assert fake.writes() == []
+
+
+@pytest.mark.parametrize("size", ["0", "101"])
+def test_results_rows_limit_bounds_are_enforced_by_the_cli(invoke, fake, size) -> None:
+    result = CliRunner().invoke(
+        cli.app, ["--env", "sandbox", "results", "rows", "docpart_rt1", "--limit", size]
+    )
+    assert result.exit_code == 2
+    assert fake.calls == []
+
+
 def test_list_commands_reject_bad_input_with_the_validation_exit_code(invoke, fake) -> None:
     code, payload, _ = invoke("entry", "list", "--modified-after", "yesterday")
     assert code == 2

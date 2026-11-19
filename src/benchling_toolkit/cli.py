@@ -42,7 +42,7 @@ section_app = typer.Typer(help="Read entry sections.")
 part_app = typer.Typer(help="Read document parts.")
 table_app = typer.Typer(help="Read unstructured tables.")
 schema_app = typer.Typer(help="List and read entry, result, and run schemas.")
-results_app = typer.Typer(help="Read and submit result records.")
+results_app = typer.Typer(help="Read result records and results-table rows.")
 changes_app = typer.Typer(help="Preview and explicitly apply safe changes.")
 mcp_app = typer.Typer(help="Run the local MCP server.")
 
@@ -478,12 +478,20 @@ def entry_list(
     project: str | None = typer.Option(None, "--project", help="Project ID."),
     folder: str | None = typer.Option(None, "--folder", help="Folder ID. Uses the V2 entry list."),
     schema: str | None = typer.Option(None, "--schema", help="Entry schema ID."),
-    name: str | None = typer.Option(None, "--name", help="Exact entry name."),
+    name: str | None = typer.Option(
+        None,
+        "--name",
+        help="Exact entry name. A comma in the name uses the V2 name parameter.",
+    ),
     modified_after: str | None = typer.Option(
-        None, "--modified-after", help="Inclusive modified-at lower bound."
+        None,
+        "--modified-after",
+        help="Inclusive lower bound: YYYY-MM-DD or an RFC3339 timestamp with a time zone.",
     ),
     modified_before: str | None = typer.Option(
-        None, "--modified-before", help="Inclusive modified-at upper bound."
+        None,
+        "--modified-before",
+        help="Inclusive upper bound: YYYY-MM-DD or an RFC3339 timestamp with a time zone.",
     ),
     limit: int = typer.Option(50, "--limit", min=1, max=100, help="Page size, from 1 to 100."),
     cursor: str | None = typer.Option(None, "--cursor", help="next_token from the previous page."),
@@ -587,6 +595,27 @@ def results_tables(ctx: typer.Context, reference: str) -> None:
     """Discover explicit V2 result-table IDs and assigned schemas on one entry."""
     state: State = ctx.obj
     _execute(state.env, lambda runtime: runtime.service.list_result_tables(reference))
+
+
+@results_app.command("rows")
+def results_rows(
+    ctx: typer.Context,
+    part_id: str,
+    limit: int = typer.Option(50, "--limit", min=1, max=100, help="Page size, from 1 to 100."),
+    cursor: str | None = typer.Option(None, "--cursor", help="next_token from the previous page."),
+) -> None:
+    """Read one page of rows from a results table.
+
+    Calls GET /document-part-results-table/{id}/rows/items. Pass the previous
+    next_token with --cursor.
+    """
+    state: State = ctx.obj
+    _execute(
+        state.env,
+        lambda runtime: runtime.service.list_results_table_rows(
+            part_id, limit=limit, cursor=cursor
+        ),
+    )
 
 
 def _read_spec(path: str) -> dict[str, Any]:
