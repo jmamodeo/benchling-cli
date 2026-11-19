@@ -49,7 +49,7 @@ Unit tests for the script use fixture specs and do not download anything.
 - Branch from `main` and keep each PR focused.
 - Describe what changed and why; link related issues.
 - Update the README, docs, and `CHANGELOG.md` (under "Unreleased") when behavior changes.
-- CI (ruff format and lint, mypy, pytest with coverage on Python 3.11–3.13, and the package build) must pass.
+- CI (ruff format and lint, mypy, pytest with coverage on Python 3.11–3.13, `agentskills validate` for `SKILL.md`, and the package build) must pass.
 - Preserve the safety model: preview-then-apply, version preconditions, read-only MCP by default.
 
 ## No secrets or real tenant data

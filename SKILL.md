@@ -3,32 +3,10 @@ name: benchling-toolkit
 description: "Use the benchling CLI and its local MCP server to list, read, and export a Benchling notebook, and to preview a change before applying it. Use when the user asks to list entries, read an entry, section, part, unstructured table, schema, or assay result, export a table or results to JSON or CSV, or plan and then apply a document, table, field, or result change. Credentials come from benchling auth login --env NAME and stay in the OS keychain. The MCP server is read-only unless it was started with --allow-writes ENV. Do not use this for browser automation, or when no environment has been saved with auth login."
 license: MIT
 compatibility: "Requires the benchling command from benchling-toolkit (Python 3.11+), an OS keychain, and network access to the tenant saved for that environment. The MCP server is local stdio."
-summary: "Safe reads and previewed writes for a Benchling notebook. Lists, reads, and exports entries, tables, and assay results. Applies a change only after a local plan. The MCP server is read-only unless started with --allow-writes ENV."
-version: "0.3.0"
-tags:
-  - benchling
-  - eln
-  - cli
-  - mcp
-  - lab-notebook
-  - assay-results
-  - export
-  - change-plan
-keywords:
-  - benchling entry
-  - assay results
-  - results table
-  - change plan
-  - OS keychain
-  - allow-writes
-  - export csv
-  - unstructured table
-use_cases:
-  - List entries and read one entry, its tables, and its assay results
-  - Export a table or assay results to a local JSON or CSV file
-  - Preview a document, table, field, or result change, then apply that plan
-  - Confirm a saved environment without printing the client secret
-docs_url: "https://github.com/jmamodeo/benchling-toolkit"
+metadata:
+  summary: "Safe reads and previewed writes for a Benchling notebook. Lists, reads, and exports entries, tables, and assay results. Applies a change only after a local plan. The MCP server is read-only unless started with --allow-writes ENV."
+  version: "0.3.0"
+  docs_url: "https://github.com/jmamodeo/benchling-toolkit"
 ---
 
 # benchling-toolkit

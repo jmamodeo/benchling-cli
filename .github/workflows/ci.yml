@@ -27,6 +27,16 @@ jobs:
       - run: uv run mypy
       - run: uv run pytest --cov --cov-report=term-missing
 
+  skill:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      - name: Validate SKILL.md
+        # skills-ref 0.1.1 provides `agentskills`. Pass the absolute path:
+        # `validate .` reports an empty directory name.
+        run: uvx --from skills-ref==0.1.1 agentskills validate "$PWD"
+
   build:
     runs-on: ubuntu-latest
     steps:

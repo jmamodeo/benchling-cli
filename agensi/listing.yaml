@@ -1,0 +1,25 @@
+# Catalog lists for this skill. summary, version, and docs_url are strings
+# under metadata in SKILL.md. This file is not a skill.
+tags:
+  - benchling
+  - eln
+  - cli
+  - mcp
+  - lab-notebook
+  - assay-results
+  - export
+  - change-plan
+keywords:
+  - benchling entry
+  - assay results
+  - results table
+  - change plan
+  - OS keychain
+  - allow-writes
+  - export csv
+  - unstructured table
+use_cases:
+  - List entries and read one entry, its tables, and its assay results
+  - Export a table or assay results to a local JSON or CSV file
+  - Preview a document, table, field, or result change, then apply that plan
+  - Confirm a saved environment without printing the client secret
