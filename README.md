@@ -306,6 +306,14 @@ benchling --env dev changes plan \
   --family table \
   --spec examples/table-set-cells.json
 
+benchling --env dev changes plan \
+  --entry etr_abc123 \
+  --family results \
+  --csv assay.csv \
+  --id-column id \
+  --map Ct=Ct \
+  --map Note=Note
+
 benchling --env dev changes apply PLAN_ID
 benchling --env dev changes status PLAN_ID
 ```
@@ -315,9 +323,11 @@ Supported specifications are documented in [schemas/change-spec.schema.json](sch
 - `document`: insert, delete, move, or replace a text part;
 - `table`: set selected cells or append rows on an unstructured table;
 - `fields`: update fields already present on the entry's assigned schema; and
-- `results`: submit V2 assay result records to an explicit `strtbl_…` table.
+- `results`: submit V2 assay result records to an explicit `strtbl_…` table, or update existing results from a CSV file.
 
-Field inputs must use a schema field's V3 `systemName` or its field-definition ID and have the shape `{"value": ...}`. Plans show both identifiers, send the field-definition ID, validate value types and constraints, and re-check the affected definitions and values immediately before applying. Result plans also verify that the table belongs to the selected entry, that every record uses the table's result schema, and that any supplied project IDs are readable. Result field keys stay system names.
+Field inputs must use a schema field's V3 `systemName` or its field-definition ID and have the shape `{"value": ...}`. Plans show both identifiers, send the field-definition ID, validate value types and constraints, and re-check the affected definitions and values immediately before applying. Result uploads also verify that the table belongs to the selected entry, that every record uses the table's result schema, and that any supplied project IDs are readable. Result upload field keys stay system names.
+
+A result update reads a CSV file instead of inline records. `--id-column` is the column that holds the result id (`id` in an assay-result export). Each `--map CSV_COLUMN=FIELD` is required; columns are not guessed from the header. `FIELD` is the export display name, the system name, or the field-definition id. The preview resolves every mapped column to a field-definition id and shows only the values that would change. Unmapped columns, including `createdAt` and `modifiedAt`, are not written. A blank cell clears a value that is present. A blank cell on an empty field is not a change, so an unmodified export round-trips: export writes both null and an empty string as a blank cell. Unknown columns, ambiguous names, and bad rows are one error and nothing is written. Apply re-reads each result and sends `PATCH /result/{id}` with `schemaFields` keyed by field-definition id, and only when `modifiedAt` and the mapped values still match the plan. The CSV is not read again at apply time. The limit is 500 rows. The same specification (`operation`, `csv_path`, `id_column`, `column_map`) is what `plan_changes` accepts.
 
 Result submissions remain pending until a person integrates them in Benchling. A table write updates the named cells or appends rows, checked against the entry version, and resets table evaluation until Benchling's browser evaluates it again.
 Table upload plans use local correlation UUIDs; the tenant assigns the actual result IDs. Local UUIDs are not idempotency keys. Caller-supplied result IDs are rejected by the CLI because the tested tenant rejects them on this endpoint despite the public OpenAPI declaration. Notebook table uploads are limited to 500 records. The immediate apply result is `submission_pending`; task success is reported separately as `pending_integration`.

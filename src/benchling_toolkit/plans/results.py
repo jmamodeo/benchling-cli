@@ -17,13 +17,17 @@ from ..models import (
     ChangePlan,
 )
 from .base import PlanParts, write_event_details
-from .fields import FieldNormalization
+from .result_update import ResultUpdatePlanning, request_is_result_update
 
 
-class ResultsPlanning(FieldNormalization):
-    """Planning and submission of new result records."""
+class ResultsPlanning(ResultUpdatePlanning):
+    """Planning of new result records and updates to existing ones."""
 
     async def _plan_results(self, entry_id: str, request: dict[str, Any]) -> PlanParts:
+        if request_is_result_update(request):
+            if "table_id" in request or "assay_results" in request:
+                raise ValidationError("A result update does not use table_id or assay_results")
+            return await self._plan_result_updates(entry_id, request)
         table_id = request.get("table_id")
         records = request.get("assay_results")
         if not isinstance(table_id, str) or not table_id.startswith("strtbl_"):
@@ -132,6 +136,8 @@ class ResultsPlanning(FieldNormalization):
         return warnings
 
     async def _apply_results(self, plan: ChangePlan, journal: ChangeJournal) -> dict[str, Any]:
+        if plan.preconditions.get("operation") == "update":
+            return await self._apply_result_updates(plan, journal)
         if any("id" in record for record in plan.after["records"]):
             raise ConflictError(
                 "This result plan uses an unsupported bulk-table contract; create a new preview"

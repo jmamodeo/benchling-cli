@@ -27,6 +27,7 @@ from ..models import (
 from .document import DocumentPlanning
 from .fields import FieldsPlanning
 from .repository import checksum_for, json_diff
+from .result_update import request_is_result_update
 from .results import ResultsPlanning
 from .table import TablePlanning
 
@@ -67,6 +68,11 @@ class ChangePlanner(DocumentPlanning, TablePlanning, FieldsPlanning, ResultsPlan
                 details={"family": str(family), "supported": [item.value for item in PlanFamily]},
             ) from exc
         request = deepcopy(request)
+        if family != PlanFamily.RESULTS and request_is_result_update(request):
+            raise ValidationError(
+                "CSV result updates require the results family",
+                details={"family": family.value},
+            )
         resolved = await self.service.resolve_entry(reference)
         entry_id = resolved["entry_id"]
         planners = {

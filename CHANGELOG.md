@@ -8,6 +8,7 @@ All notable changes to this project are documented here. The format is based on
 
 ### Added
 
+- `benchling changes plan --family results` accepts a CSV file. `--id-column` names the result id and each `--map CSV_COLUMN=FIELD` maps a column to a field display name, system name, or field-definition id. The plan resolves those names to field-definition ids, previews only the values that change, and writes nothing until apply. Apply sends `PATCH /result/{id}` after re-checking each result's `modifiedAt`. Unknown columns and bad rows are reported at plan time. An assay-result export CSV round-trips when the mapped columns are that export's headers.
 - `benchling export` and the MCP tool `export` write an unstructured table, a results table, or assay results to a JSON or CSV file. The response is a summary only: row count, column names, file path, and the SHA-256 checksum of the file. Pages are read internally. An existing file is left unchanged unless overwrite is set. Benchling is only read.
 - `benchling results rows PART_ID` and the MCP tool `list_results_table_rows` read one page of a results table from `GET /document-part-results-table/{id}/rows/items`. The page size defaults to 50 and stops at 100. The response uses the standard JSON envelope and includes `next_token`.
 

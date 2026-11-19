@@ -621,6 +621,72 @@ def test_list_limit_bounds_are_enforced_by_the_cli(invoke, fake, size) -> None:
     assert fake.calls == []
 
 
+def test_csv_result_plan_and_apply(invoke, fake, tmp_path) -> None:
+    fake.results = [
+        {
+            "id": "result_1",
+            "modifiedAt": "2026-01-02T00:00:00Z",
+            "createdAt": "2026-01-01T00:00:00Z",
+            "entry": {"id": ENTRY_ID},
+            "schema": {"id": "assaysch_abc123"},
+            "schemaFields": [
+                {
+                    "fieldDefinition": {"id": "assayfield_ct"},
+                    "value": {"__typename": "IntegerValue", "value": 12},
+                }
+            ],
+        }
+    ]
+    path = tmp_path / "assay.csv"
+    path.write_text("id,createdAt,Ct\nresult_1,2026-01-01T00:00:00Z,15\n", encoding="utf-8")
+    code, planned, _ = invoke(
+        "changes",
+        "plan",
+        "--entry",
+        ENTRY_ID,
+        "--family",
+        "results",
+        "--csv",
+        str(path),
+        "--id-column",
+        "id",
+        "--map",
+        "Ct=Ct",
+    )
+    assert code == 0, planned
+    assert fake.writes() == []
+    assert planned["data"]["after"]["results"][0]["schema_fields"] == {
+        "assayfield_ct": {"value": 15}
+    }
+    assert planned["data"]["before"]["results"][0]["fields"]["ct"]["value"] == 12
+    code, applied, _ = invoke("changes", "apply", planned["data"]["id"])
+    assert code == 0, applied
+    assert applied["data"]["journal"]["result"]["updated"][0]["http_status"] == 200
+    assert fake.result_updates[0]["body"] == {"schemaFields": {"assayfield_ct": {"value": 15}}}
+
+
+@pytest.mark.parametrize(
+    ("extra", "match"),
+    [
+        ([], "needs --spec"),
+        (["--spec", "spec.json", "--csv", "rows.csv"], "not both"),
+        (
+            ["--family", "document", "--csv", "rows.csv", "--id-column", "id", "--map", "Ct=Ct"],
+            "results family",
+        ),
+        (["--csv", "rows.csv", "--id-column", "id", "--map", "Ct"], "CSV_COLUMN=FIELD"),
+    ],
+)
+def test_csv_plan_flags_are_rejected_before_a_write(invoke, fake, tmp_path, extra, match) -> None:
+    args = ["changes", "plan", "--entry", ENTRY_ID, "--family", "results", *extra]
+    if "--family" in extra:
+        args = ["changes", "plan", "--entry", ENTRY_ID, *extra]
+    code, payload, _ = invoke(*args)
+    assert code == 2
+    assert match in payload["error"]["message"]
+    assert fake.calls == []
+
+
 def test_schema_get_includes_dropdown_options(invoke) -> None:
     code, payload, _ = invoke("schema", "get", "entsch_choice")
     assert code == 0, payload
