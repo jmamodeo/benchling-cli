@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator, Callable, Coroutine
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Annotated, Any
 
-from pydantic import Field, WithJsonSchema
+from pydantic import BaseModel, Field, WithJsonSchema
 
 from .change_spec import CHANGE_SPECIFICATION_SCHEMA, parse_change_specification
 from .errors import (
@@ -18,6 +18,7 @@ from .errors import (
     ValidationError,
 )
 from .export import export_dataset
+from .issues import Interface, IssueKind, build_issue_draft
 from .keychain import Keychain, _in_mcp_serve
 from .models import Envelope, PlanFamily
 from .runtime import Runtime, RuntimePool
@@ -133,7 +134,14 @@ def build_mcp_server(
             "Results created by apply_changes land as pending: relay its next_step, "
             "because a person must accept them in the results table in Benchling. "
             "Use export to write a large table or assay results to a file; "
-            "the tool returns a summary, not the rows."
+            "the tool returns a summary, not the rows. "
+            "When these tools cannot do what the user asked, ALWAYS explain the "
+            "limitation, then ask whether to log it as a bug or a feature request on "
+            "the open-source repository. Only after an explicit yes, call issue_draft "
+            "with a detailed description and a proposed solution that cites official "
+            "Benchling docs (URL plus quoted line) proving it could work, show the user "
+            "the draft, and file it only when they confirm. Never include tenant URLs, "
+            "record IDs, secrets, or personal data."
         ),
         log_level="DEBUG" if verbose else "WARNING",
         lifespan=lifespan,
@@ -144,6 +152,7 @@ def build_mcp_server(
     _register_result_tools(mcp, pool)
     _register_export_tool(mcp, pool)
     _register_change_tools(mcp, pool, writable_envs)
+    _register_issue_tool(mcp)
     return mcp
 
 
@@ -788,6 +797,81 @@ def _register_change_tools(
     ) -> Envelope[Any]:
         """Read an immutable plan and its local execution journal."""
         return await safe(env, lambda rt: rt.planner.status(plan_id))
+
+
+class _CitationInput(BaseModel):
+    """One official Benchling docs link and the line that supports the solution."""
+
+    url: str = Field(
+        description=(
+            "https link on docs.benchling.com, help.benchling.com, or the API "
+            "reference under benchling.com/api/."
+        )
+    )
+    quote: str = Field(description="The exact line on that page that shows the fix is possible.")
+
+
+def _register_issue_tool(mcp: MCPServer) -> None:
+    """Register the local, draft-only issue tool. It needs no environment."""
+
+    @mcp.tool(annotations=_annotations(True))
+    async def issue_draft(
+        kind: Annotated[IssueKind, Field(description="bug or feature.")],
+        summary: Annotated[str, Field(description="One-line issue title, 8 to 120 characters.")],
+        attempted_action: Annotated[
+            str, Field(description="What the user asked the agent to do, in plain words.")
+        ],
+        expected: Annotated[str, Field(description="What should have happened.")],
+        actual: Annotated[str, Field(description="What the toolkit did or returned instead.")],
+        interface: Annotated[Interface, Field(description="cli or mcp.")],
+        command_or_tool: Annotated[
+            str, Field(description="The benchling command or MCP tool that was used.")
+        ],
+        description: Annotated[
+            str, Field(description="Detailed description of the limitation and its impact.")
+        ],
+        proposed_solution: Annotated[
+            str, Field(description="How the toolkit could support this, step by step.")
+        ],
+        citations: Annotated[
+            list[_CitationInput],
+            Field(
+                description=(
+                    "At least one official Benchling docs citation proving the proposed "
+                    "solution is possible."
+                )
+            ),
+        ],
+    ) -> Envelope[Any]:
+        """Draft a GitHub issue for something these tools cannot do. Nothing is filed.
+
+        Call this only after you explained the limitation and the user said yes to
+        logging it. Returns a title, a body, labels, and a prefilled new_issue_url
+        for the toolkit's repository. Show the user the draft; they open the URL to
+        file it. Drafts with tenant URLs, record IDs, secrets, or email addresses are
+        refused, and every draft needs a Benchling docs citation.
+        """
+        spec = {
+            "kind": kind,
+            "summary": summary,
+            "attempted_action": attempted_action,
+            "expected": expected,
+            "actual": actual,
+            "interface": interface,
+            "command_or_tool": command_or_tool,
+            "description": description,
+            "proposed_solution": proposed_solution,
+            "citations": [citation.model_dump() for citation in citations],
+        }
+        try:
+            draft = build_issue_draft(spec)
+        except BenchlingAgentError as exc:
+            return Envelope.failure(exc)
+        draft["next_step"] = (
+            "Show the user this title and body. They file it by opening new_issue_url; "
+            "this tool never files an issue."
+        )
+        return Envelope.success(draft)
 
 
 def run_mcp_server(

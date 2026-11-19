@@ -27,6 +27,12 @@ def register_secret(value: object) -> None:
         _secrets.add(value)
 
 
+def registered_secrets() -> tuple[str, ...]:
+    """Return the secrets tracked so far, for checks that must refuse rather than scrub."""
+    with _lock:
+        return tuple(_secrets)
+
+
 def clear_registered_secrets() -> None:
     """Drop tracked secrets. Tests use this so cases do not affect each other."""
     with _lock:

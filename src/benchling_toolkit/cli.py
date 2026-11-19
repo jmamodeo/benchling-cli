@@ -21,10 +21,12 @@ from .errors import (
     AuthenticationError,
     BenchlingAgentError,
     ExitCode,
+    UnsupportedError,
     UpstreamError,
     ValidationError,
 )
 from .export import export_dataset
+from .issues import REPOSITORY, build_issue_draft
 from .keychain import Keychain, bind_login_fix
 from .models import Envelope, Environment, PlanFamily
 from .redact import redact_text
@@ -46,6 +48,9 @@ schema_app = typer.Typer(help="List and read entry, result, and run schemas.")
 results_app = typer.Typer(help="Read result records and results-table rows.")
 changes_app = typer.Typer(help="Preview and explicitly apply safe changes.")
 mcp_app = typer.Typer(help="Run the local MCP server.")
+issue_app = typer.Typer(
+    help="Draft a bug report or feature request for this toolkit. Drafts are local by default."
+)
 
 app.add_typer(auth_app, name="auth")
 app.add_typer(entry_app, name="entry")
@@ -57,6 +62,7 @@ app.add_typer(schema_app, name="schema")
 app.add_typer(results_app, name="results")
 app.add_typer(changes_app, name="changes")
 app.add_typer(mcp_app, name="mcp")
+app.add_typer(issue_app, name="issue")
 
 
 class State:
@@ -791,6 +797,123 @@ def changes_status(ctx: typer.Context, plan_id: str) -> None:
         return await runtime.planner.status(plan_id)
 
     _execute(state.env, call)
+
+
+def _issue_spec(
+    spec: str | None,
+    options: dict[str, Any],
+    cite_urls: list[str],
+    cite_quotes: list[str],
+) -> dict[str, Any]:
+    """Merge a JSON spec with flags. A flag overrides the same key in the spec."""
+    merged: dict[str, Any] = _read_spec(spec) if spec is not None else {}
+    for key, value in options.items():
+        if value is not None:
+            merged[key] = value
+    if len(cite_urls) != len(cite_quotes):
+        raise ValidationError(
+            "Pass --cite-url and --cite-quote the same number of times, in matching order"
+        )
+    if cite_urls:
+        merged["citations"] = [
+            {"url": url, "quote": quote} for url, quote in zip(cite_urls, cite_quotes)
+        ]
+    return merged
+
+
+def _file_with_gh(draft: dict[str, Any]) -> dict[str, Any]:
+    """Create the issue with the GitHub CLI. Called only for an explicit --file."""
+    import shutil
+    import subprocess
+
+    gh = shutil.which("gh")
+    if gh is None:
+        raise UnsupportedError(
+            "The GitHub CLI (gh) is not installed. Open new_issue_url instead.",
+            details={"new_issue_url": draft["new_issue_url"]},
+        )
+    command = [gh, "issue", "create", "--repo", REPOSITORY, "--title", draft["title"]]
+    for label in draft["labels"]:
+        command += ["--label", label]
+    command += ["--body-file", "-"]
+    completed = subprocess.run(
+        command, input=draft["body"], capture_output=True, text=True, check=False
+    )
+    if completed.returncode != 0:
+        raise UpstreamError(
+            "gh issue create failed; nothing was filed. Open new_issue_url instead.",
+            details={
+                "reason": redact_text(completed.stderr.strip())[-500:],
+                "new_issue_url": draft["new_issue_url"],
+            },
+        )
+    lines = completed.stdout.strip().splitlines()
+    return {**draft, "filed": True, "issue_url": lines[-1] if lines else None, "next_step": None}
+
+
+@issue_app.command("draft")
+def issue_draft(
+    spec: str | None = typer.Option(
+        None, "--spec", help="JSON file with the draft fields, or '-' for stdin."
+    ),
+    kind: str | None = typer.Option(None, "--kind", help="bug or feature."),
+    summary: str | None = typer.Option(None, "--summary", help="One-line issue title."),
+    attempted: str | None = typer.Option(
+        None, "--attempted", help="What the user asked the agent to do."
+    ),
+    expected: str | None = typer.Option(None, "--expected", help="What should have happened."),
+    actual: str | None = typer.Option(None, "--actual", help="What the toolkit did instead."),
+    interface: str | None = typer.Option(None, "--interface", help="cli or mcp."),
+    command_or_tool: str | None = typer.Option(
+        None, "--command", help="The benchling command or MCP tool that was used."
+    ),
+    description: str | None = typer.Option(
+        None, "--description", help="Detailed description of the limitation."
+    ),
+    solution: str | None = typer.Option(None, "--solution", help="Proposed solution."),
+    cite_url: list[str] = typer.Option(
+        [],
+        "--cite-url",
+        help="Benchling docs URL that supports the solution. Repeat with --cite-quote.",
+    ),
+    cite_quote: list[str] = typer.Option(
+        [], "--cite-quote", help="The quoted line from the matching --cite-url page."
+    ),
+    file: bool = typer.Option(
+        False,
+        "--file",
+        help=(
+            "File the issue on GitHub with `gh issue create`. Use only after the user "
+            "said yes to this exact draft."
+        ),
+    ),
+) -> None:
+    """Build a ready-to-file issue for something the toolkit cannot do.
+
+    Prints the title, body, labels, and a prefilled GitHub new-issue URL. Nothing
+    is sent unless --file is passed. The proposed solution must cite official
+    Benchling docs, and drafts that look like they hold tenant URLs, record IDs,
+    secrets, or email addresses are refused. Benchling is not contacted.
+    """
+    options = {
+        "kind": kind,
+        "summary": summary,
+        "attempted_action": attempted,
+        "expected": expected,
+        "actual": actual,
+        "interface": interface,
+        "command_or_tool": command_or_tool,
+        "description": description,
+        "proposed_solution": solution,
+    }
+    try:
+        draft = build_issue_draft(_issue_spec(spec, options, cite_url, cite_quote))
+        if file:
+            draft = _file_with_gh(draft)
+    except BenchlingAgentError as exc:
+        _emit(Envelope.failure(exc))
+        raise typer.Exit(int(exc.exit_code)) from None
+    _emit(Envelope.success(draft, repository=REPOSITORY))
 
 
 def _write_stderr_envelope(envelope: Envelope[Any]) -> None:

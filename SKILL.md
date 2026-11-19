@@ -5,7 +5,7 @@ license: MIT
 compatibility: "Requires the benchling command from benchling-toolkit (Python 3.11+), an OS keychain, and network access to the tenant saved for that environment. The MCP server is local stdio."
 metadata:
   summary: "Safe reads and previewed writes for a Benchling notebook. Lists, reads, and exports entries, tables, and assay results. Applies a change only after a local plan. The MCP server is read-only unless started with --allow-writes ENV."
-  version: "0.4.0"
+  version: "0.4.1"
   docs_url: "https://github.com/jmamodeo/benchling-toolkit"
 ---
 
@@ -29,6 +29,7 @@ Stop and do not improvise when:
 - no environment is saved yet
 - the person has not accepted a specific plan id, and the next step would write to Benchling
 - the task needs the Benchling website rather than the API
+- the toolkit cannot do what was asked: follow "When the toolkit cannot do it" below
 
 ## Safety defaults
 
@@ -228,6 +229,31 @@ Check, do not assume. Re-read with `results list --entry ENTRY` and `results row
 
 The accept control may insert every pending result that matches the table's schema, not only the ones just pushed. Do not create stray or test results against a table you care about.
 
+## When the toolkit cannot do it
+
+This rule is mandatory. When the person asks for something this toolkit cannot do, ALWAYS:
+
+1. Explain the limitation in plain words: what they asked for, what the toolkit does today, and why it stops (a missing command, an unsupported part type, a Benchling API limit, or a bug).
+2. Ask whether they want it logged as a bug or a feature request on the open-source repository, jmamodeo/benchling-toolkit. Do not file anything yet.
+3. Only after an explicit yes, build the issue with `benchling issue draft` or the MCP tool `issue_draft`. Give it:
+   - `kind`: `bug` (label `bug`) or `feature` (label `enhancement`)
+   - `summary`: a one-line title
+   - `attempted_action`, `expected`, and `actual`: what they tried and what happened
+   - `interface` (`cli` or `mcp`) and `command_or_tool`; the toolkit version is filled in
+   - `description`: a detailed description of the limitation and its impact
+   - `proposed_solution`: a concrete way the toolkit could do it
+   - `citations`: at least one official Benchling docs page (docs.benchling.com, help.benchling.com, or the API reference under benchling.com/api/) with the quoted line that proves the solution is possible, for example the endpoint or behaviour it relies on. Read the page before you quote it. If no Benchling doc supports a solution, say so and do not invent one.
+4. Show the person the full title and body. File it only when they confirm that draft. The draft returns `new_issue_url`, a prefilled GitHub new-issue link they can open. `--file` runs `gh issue create`; use it only after that confirmation.
+
+Never put tenant names or URLs, entry or record IDs from a private tenant, display IDs, secrets, tokens, or personal data in an issue. Use placeholders such as `your-tenant.benchling.com` and `etr_XXXX`. The draft is refused when a field looks like any of these.
+
+```console
+benchling issue draft --spec issue.json
+benchling issue draft --spec issue.json --file
+```
+
+`issue.json` holds the fields above. `--cite-url` and `--cite-quote` can be repeated instead of `citations`, and every other field has a flag; run `benchling issue draft --help` for the list. The MCP tool `issue_draft` is draft-only and never files.
+
 ## MCP server
 
 If the benchling MCP tools are already connected, call them with the same environment name. Do not put a client secret in the client config. The server reads the OS keychain.
@@ -246,4 +272,4 @@ benchling mcp serve --allow-writes ENV
 
 Do not add `--allow-writes` unless the person asked to allow writes for that environment. `export` takes `kind`, `path`, `format`, and optional `part_id`, `entry`, and `schema_id`. It returns the same summary as the CLI and writes a local file only. `apply_changes` for a results upload returns `next_step`: relay it to the user. `plan_changes` takes `env`, `entry`, `family` (`document`, `table`, `fields`, or `results`), and `specification` (the same JSON shapes as `--spec`). `get_change_status` reads the journal and does not need `--allow-writes`.
 
-Tools for this workflow: `list_entries`, `list_schemas`, `resolve_entry`, `inspect_entry`, `get_entry`, `get_entry_fields`, `get_section`, `get_part`, `get_table`, `get_schema`, `list_results`, `get_result`, `list_result_tables`, `list_results_table_rows`, `export`, `plan_changes`, `apply_changes`, `get_change_status`. `list_environments` takes no environment.
+Tools for this workflow: `list_entries`, `list_schemas`, `resolve_entry`, `inspect_entry`, `get_entry`, `get_entry_fields`, `get_section`, `get_part`, `get_table`, `get_schema`, `list_results`, `get_result`, `list_result_tables`, `list_results_table_rows`, `export`, `plan_changes`, `apply_changes`, `get_change_status`, `issue_draft`. `list_environments` and `issue_draft` take no environment.

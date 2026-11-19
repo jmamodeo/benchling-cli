@@ -129,8 +129,11 @@ One server process can open every environment that has a keychain secret. The ag
 
 A secret pasted into an agent transcript is already outside this process. The CLI will not accept that secret as an argument. It will accept it on stdin if something pipes it to `auth login --secret-stdin`. The intended path is a person at a terminal, or a CI secret that never enters the agent's prompt.
 
+Issue drafts are a path from the tenant to a public repository. `issue_draft` and `benchling issue draft` refuse a draft when any field looks like a tenant host (a `benchling.com` subdomain other than docs, help, or the placeholder tenants), a Benchling record or display ID, a known client secret, a token or key, or an email address. Findings name the field and the kind, never the value. The MCP tool only drafts; filing is the person opening the prefilled URL, or the CLI with `--file` after they confirm.
+
 ### What this does not do
 
+- It does not prove an issue draft is free of tenant data. The checks are patterns, and free text such as a project or sample name passes them.
 - It does not filter, quote, or sandbox entry text.
 - It does not require a person to approve each MCP apply. Process start is the approval.
 - It does not stop an agent with a shell. That agent is the OS user.
