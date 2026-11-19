@@ -142,7 +142,7 @@ apply_changes(env="demo", plan_id=...) ->
 
 The distribution name is `benchling-toolkit` and the import package is `benchling_toolkit`. Python 3.11 or newer and [`uv`](https://docs.astral.sh/uv/) are required.
 
-Once `benchling-toolkit` is published to PyPI, install the CLI and start the MCP server with:
+`benchling-toolkit` is on [PyPI](https://pypi.org/project/benchling-toolkit/). Install the CLI and start the MCP server with:
 
 ```console
 uv tool install benchling-toolkit
@@ -151,9 +151,9 @@ benchling --help
 uvx --from benchling-toolkit benchling mcp serve
 ```
 
-`uv tool install benchling-toolkit` puts `benchling` on PATH. `uvx --from benchling-toolkit benchling mcp serve` runs the server from that package without a separate install; the MCP client config below is that same command.
+`pip install benchling-toolkit` works too. `uv tool install benchling-toolkit` puts `benchling` on PATH. `uvx --from benchling-toolkit benchling mcp serve` runs the server from that package without a separate install; the MCP client config below is that same command.
 
-Those are the PyPI forms. They work once the package is published. They are not live yet: `benchling-toolkit` is not on PyPI. Until a release is published, run the same commands against a checkout of this repository:
+To work on the toolkit itself, run the same commands against a checkout of this repository:
 
 ```console
 uv tool install .
@@ -264,7 +264,7 @@ benchling --env dev doctor
 benchling --env dev entry resolve EXP-0001
 ```
 
-`uv tool install benchling-toolkit` works once the package is published. Until then, install from a checkout with `uv tool install .`. `auth login` prompts for `https://your-tenant.benchling.com`, the client ID, and the client secret. Run it in your own terminal. App setup is in the [setup guide](docs/setup.md).
+`uv tool install benchling-toolkit` installs it from PyPI. From a checkout, use `uv tool install .`. `auth login` prompts for `https://your-tenant.benchling.com`, the client ID, and the client secret. Run it in your own terminal. App setup is in the [setup guide](docs/setup.md).
 
 ## CLI examples
 
@@ -354,7 +354,7 @@ Table upload plans use local correlation UUIDs; the tenant assigns the actual re
 
 ## MCP server
 
-One server serves every environment saved with `auth login`. The client config carries no secrets; the server reads the same `environments.json` file and OS keychain as the CLI. Log in in your own terminal before starting the server. The shell form of the config below is `uvx --from benchling-toolkit benchling mcp serve`. That command works once the package is published to PyPI. From a checkout, run `uvx --from . benchling mcp serve`.
+One server serves every environment saved with `auth login`. The client config carries no secrets; the server reads the same `environments.json` file and OS keychain as the CLI. Log in in your own terminal before starting the server. The shell form of the config below is `uvx --from benchling-toolkit benchling mcp serve`. That command installs the package from PyPI. From a checkout, run `uvx --from . benchling mcp serve`.
 
 ```json
 {
@@ -517,7 +517,7 @@ uv run python scripts/sandbox_exercise.py \
 - Entry field updates are protected by a best-effort value comparison, not an atomic precondition.
 - Replacing text can end in a partial completion that a person must reconcile.
 - Assay result submissions stay pending until a person integrates them in Benchling.
-- State is local to one machine and the package is not published on PyPI.
+- State is local to one machine.
 - The offline suite uses a synthetic fake; it cannot prove compatibility with every tenant configuration.
 - `entry list --name` is an exact case-insensitive match when the name has no comma (`name.anyOf` on V3, `names.anyOf` on V2 with `--folder`). It does not search substrings. A name that contains a comma is sent as V2 `name`, because those list parameters are comma-separated and document no escape. A modified timestamp must include a time zone. Folder filters use the V2 entry list because the V3 list ignores `folderId`. Listing timestamps are UTC with a `Z` suffix.
 

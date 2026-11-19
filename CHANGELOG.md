@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+
+- The README and setup guide say `benchling-toolkit` is on PyPI and show `uv tool install benchling-toolkit`, `pip install benchling-toolkit` and `uvx --from benchling-toolkit benchling mcp serve`.
+
 ## [0.4.0] - 2026-11-19
 
 ### Added
@@ -181,7 +185,6 @@ All notable changes to this project are documented here. The format is based on
 
 [Unreleased]: https://github.com/jmamodeo/benchling-toolkit/compare/v0.4.0...HEAD
 [0.4.0]: https://github.com/jmamodeo/benchling-toolkit/compare/v0.2.0...v0.4.0
-[0.3.0]: https://github.com/jmamodeo/benchling-toolkit/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/jmamodeo/benchling-toolkit/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/jmamodeo/benchling-toolkit/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/jmamodeo/benchling-toolkit/compare/v0.1.0...v0.1.1
