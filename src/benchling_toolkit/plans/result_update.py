@@ -609,7 +609,11 @@ def _row_refusal(
         return {
             "row": number,
             "id": result_id,
-            "message": "Result is not on the selected entry",
+            "message": (
+                "Result is not on the selected entry. Results created through the API stay "
+                "pending until a person accepts them in the entry's results table in Benchling "
+                "(the plug icon in the table toolbar). Accept them there first, then plan again."
+            ),
         }
     if not _result_schema_id(record):
         return {"row": number, "id": result_id, "message": "Result has no schema"}

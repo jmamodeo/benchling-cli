@@ -6,8 +6,14 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- After a successful results upload, `changes apply` and the MCP tool `apply_changes` return a `next_step` that names the entry and results table and tells the user to click the plug icon to accept the pending results.
+- `SKILL.md` has a "Results land as pending" section. Results created through the API are not put in a notebook results table directly. They are pending, with no entry, until a person accepts them in the table. Benchling documents this for V3 (`documentPartResultsTableId`) and for V2 bulk create. The accept control may insert every pending result that matches the table's schema, so stray results should be avoided.
+
 ### Changed
 
+- A results update that names a result not on the entry now says that pending results must be accepted in the table first. The README, `docs/api-limitations.md`, `ARCHITECTURE.md`, the MCP tool descriptions and `agensi/listing.yaml` use the same wording.
 - The README and setup guide say `benchling-toolkit` is on PyPI and show `uv tool install benchling-toolkit`, `pip install benchling-toolkit` and `uvx --from benchling-toolkit benchling mcp serve`.
 
 ## [0.4.0] - 2026-11-19

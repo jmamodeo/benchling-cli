@@ -28,7 +28,7 @@ from .document import DocumentPlanning
 from .fields import FieldsPlanning
 from .repository import checksum_for, json_diff
 from .result_update import request_is_result_update
-from .results import ResultsPlanning
+from .results import ResultsPlanning, pending_results_next_step
 from .table import TablePlanning
 
 
@@ -184,10 +184,14 @@ class ChangePlanner(DocumentPlanning, TablePlanning, FieldsPlanning, ResultsPlan
         journal.result = result
         self._event(journal, "apply", "succeeded", result)
         self.repository.save_journal(journal)
-        return {
+        response: dict[str, Any] = {
             "plan": plan.model_dump(mode="json"),
             "journal": journal.model_dump(mode="json"),
         }
+        next_step = pending_results_next_step(plan)
+        if next_step:
+            response["next_step"] = next_step
+        return response
 
     def _record_unknown(
         self, plan_id: str, journal: ChangeJournal, exc: PartialCompletionError

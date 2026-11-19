@@ -201,7 +201,7 @@ Fields. Each key is a V3 system name or a field-definition id. Each value is an 
 { "schema_fields": { "temperature": { "value": 21 } } }
 ```
 
-Result upload. `table_id` is an `strtbl_…` id from `results tables`. Field keys stay system names. The submission stays pending until a person integrates it in Benchling. Read that state with `changes status PLAN_ID`.
+Result upload. `table_id` is an `strtbl_…` id from `results tables`. Field keys stay system names. The results land as pending (see "Results land as pending" below). Read the task state with `changes status PLAN_ID`.
 
 ```json
 {
@@ -217,6 +217,16 @@ CSV update of existing results. `--id-column` names the result id. Each `--map` 
 ```console
 benchling --env NAME changes plan --entry etr_example --family results --csv assay.csv --id-column id --map Ct=Ct --map Note=Note
 ```
+
+## Results land as pending
+
+Results created through the API do not go straight into a notebook results table. Benchling marks them pending. They stay out of the table, and have no entry (`entry` is null), until a person clicks the plug (integrate) icon in that table's toolbar in the Benchling UI. This is the expected behaviour in practice. Benchling documents it for V3 results created with `documentPartResultsTableId` and for V2 `assay-results:bulk-create` with a `tableId`, so do not assume V3 changes it. Results created without a table id are not attached to a table at all. The public V2 and V3 specs have no call that accepts pending results, so the toolkit cannot do it.
+
+After every successful results create, tell the user, naming the entry and the table: "Open entry X, go to results table Y, and click the plug icon in its toolbar to accept the pending results. Until you do, they do not show in the table and I cannot update them, because a results update needs a result that is on the entry. Refresh the page if the entry is already open." The apply response carries the same text in `next_step`. Say it every time.
+
+Check, do not assume. Re-read with `results list --entry ENTRY` and `results rows PART_ID`. Pending results are missing from the entry and the table. After acceptance they appear on the entry. Only then plan a results update. A result that is not on the entry is refused at plan time with "Result is not on the selected entry", and nothing is written.
+
+The accept control may insert every pending result that matches the table's schema, not only the ones just pushed. Do not create stray or test results against a table you care about.
 
 ## MCP server
 
@@ -234,6 +244,6 @@ benchling mcp serve
 benchling mcp serve --allow-writes ENV
 ```
 
-Do not add `--allow-writes` unless the person asked to allow writes for that environment. `export` takes `kind`, `path`, `format`, and optional `part_id`, `entry`, and `schema_id`. It returns the same summary as the CLI and writes a local file only. `plan_changes` takes `env`, `entry`, `family` (`document`, `table`, `fields`, or `results`), and `specification` (the same JSON shapes as `--spec`). `get_change_status` reads the journal and does not need `--allow-writes`.
+Do not add `--allow-writes` unless the person asked to allow writes for that environment. `export` takes `kind`, `path`, `format`, and optional `part_id`, `entry`, and `schema_id`. It returns the same summary as the CLI and writes a local file only. `apply_changes` for a results upload returns `next_step`: relay it to the user. `plan_changes` takes `env`, `entry`, `family` (`document`, `table`, `fields`, or `results`), and `specification` (the same JSON shapes as `--spec`). `get_change_status` reads the journal and does not need `--allow-writes`.
 
 Tools for this workflow: `list_entries`, `list_schemas`, `resolve_entry`, `inspect_entry`, `get_entry`, `get_entry_fields`, `get_section`, `get_part`, `get_table`, `get_schema`, `list_results`, `get_result`, `list_result_tables`, `list_results_table_rows`, `export`, `plan_changes`, `apply_changes`, `get_change_status`. `list_environments` takes no environment.

@@ -19,6 +19,27 @@ from ..models import (
 from .base import PlanParts, write_event_details
 from .result_update import ResultUpdatePlanning, request_is_result_update
 
+PENDING_RESULTS_WARNING = (
+    "Created results stay pending until a person accepts them in the entry's results table "
+    "in Benchling (the plug icon in the table toolbar)"
+)
+
+
+def pending_results_next_step(plan: ChangePlan) -> str | None:
+    """Tell the user how to accept pending results, or None when the plan created none."""
+    if plan.family.value != "results" or plan.after.get("state") != "pending_integration":
+        return None
+    table = (plan.before or {}).get("table") or {}
+    name = table.get("name") or plan.after.get("table_id")
+    return (
+        f'Results are pending. Open entry {plan.entry_id}, go to the results table "{name}", '
+        "and click the plug (integrate) icon in its toolbar to accept the pending results. "
+        "Until you do, they do not appear in the table and cannot be updated with this "
+        "toolkit, because an update needs a result that is on the entry. Refresh the page "
+        "if the entry is already open. To check, re-read with `results list --entry` or "
+        "`results rows`."
+    )
+
 
 class ResultsPlanning(ResultUpdatePlanning):
     """Planning of new result records and updates to existing ones."""
@@ -126,7 +147,7 @@ class ResultsPlanning(ResultUpdatePlanning):
     def _result_plan_warnings(self, planned: list[Any]) -> list[str]:
         """Warnings shown in the preview for submitted results."""
         warnings = [
-            "Created results remain pending until a person integrates them in Benchling",
+            PENDING_RESULTS_WARNING,
             "Result IDs are assigned by Benchling; local correlation UUIDs are not idempotency keys",
         ]
         if any(record.get("projectId") is None for record in planned):
