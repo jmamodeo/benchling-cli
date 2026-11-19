@@ -95,7 +95,7 @@ def test_version_flag_matches_package_metadata(invoke) -> None:
         (["entry", "fields", "get", ENTRY_ID], "entry_id", ENTRY_ID),
         (["section", "get", ENTRY_ID, "Results"], "version_id", "ver_1"),
         (["part", "get", ENTRY_ID, TEXT_PART], "entry_id", ENTRY_ID),
-        (["table", "get", TABLE_PART], "versionId", "tver_1"),
+        (["table", "get", TABLE_PART], "versionMetadata", {"versionId": "ver_1"}),
         (
             ["schema", "get", "entsch_abc123"],
             "schema",

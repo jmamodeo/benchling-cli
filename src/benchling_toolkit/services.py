@@ -76,7 +76,44 @@ KNOWN_PART_TYPES = {
     "BenchlingItemDocumentContent",
     "RunDocumentContent",
     "TextBoxDocumentContent",
+    "DocumentPartResultsTable",
+    "DocumentPartUnavailable",
 }
+
+TABLE_ROW_PAGE_SIZE = 100
+
+_BENCHLING_VALUE_TYPES = {
+    "TextValue": "text_value",
+    "BooleanValue": "boolean_value",
+    "DateValue": "date_value",
+    "DateTimeValue": "datetime_value",
+    "DecimalValue": "decimal_value",
+    "IntegerValue": "integer_value",
+    "JsonValue": "json_value",
+    "ArrayValue": "array_value",
+    "ObjectLinkValue": "object_link_value",
+    "ObjectLinkListValue": "object_link_list_value",
+    "TextAndUrlValue": "text_and_url_value",
+}
+
+_TABLE_CONTENT_KEYS = (
+    "name",
+    "isEvaluated",
+    "caption",
+    "resultSchema",
+    "submissionStatus",
+    "isSubmittable",
+    "indentation",
+)
+
+_TABLE_ROW_KEYS = (
+    "id",
+    "rowIndex",
+    "rowId",
+    "submissionStatus",
+    "isArchived",
+    "isSubmittable",
+)
 
 
 def entry_version(entry: dict[str, Any]) -> str:
@@ -127,6 +164,110 @@ def is_structured_table(part: dict[str, Any]) -> bool:
         or kind.startswith("DocumentPart")
         and "StructuredTable" in kind
     ) and "Unstructured" not in kind
+
+
+def is_results_table(part: dict[str, Any]) -> bool:
+    """True for a first-class results table part."""
+    return part_type(part).split(".")[-1] == "DocumentPartResultsTable"
+
+
+def is_unavailable_part(part: dict[str, Any]) -> bool:
+    """True when Benchling withheld the part's concrete type at this API stability."""
+    return part_type(part).split(".")[-1] == "DocumentPartUnavailable"
+
+
+def rows_items_path(base_url: str, part_id: str, rows_url: Any, *, collection: str) -> str:
+    """Return the `/rows/items` path for a table part, rejecting any other URL."""
+    expected = f"/{collection}/{part_id}/rows/items"
+    if not isinstance(rows_url, str) or not rows_url:
+        raise UpstreamError("Table response contained invalid rows", details={"part_id": part_id})
+    parsed = urlparse(rows_url)
+    if parsed.scheme or parsed.netloc:
+        if parsed.scheme != "https" or parsed.netloc != urlparse(base_url).netloc:
+            raise UpstreamError(
+                "Table rows URL does not belong to this tenant",
+                details={"part_id": part_id},
+            )
+        path = parsed.path
+    else:
+        path = parsed.path or rows_url.split("?", 1)[0]
+    marker = "/api/v3"
+    index = path.find(marker)
+    if index != -1:
+        path = path[index + len(marker) :]
+    if not path.startswith("/"):
+        path = f"/{path}"
+    if path != expected:
+        raise UpstreamError("Table response contained invalid rows", details={"part_id": part_id})
+    return path
+
+
+def normalize_benchling_value(value: Any, *, require_text: bool) -> dict[str, Any]:
+    """Map a Benchling value object (`__typename` plus `value`) onto `{type, value}`."""
+    if not isinstance(value, dict):
+        raise UpstreamError("Table response contained invalid rows")
+    typename = value.get("__typename")
+    kind = _BENCHLING_VALUE_TYPES.get(typename) if isinstance(typename, str) else None
+    if kind is None or (require_text and kind != "text_value"):
+        raise UpstreamError("Table response contained invalid rows")
+    if "value" not in value or (require_text and not isinstance(value.get("value"), str)):
+        raise UpstreamError("Table response contained invalid rows")
+    normalized: dict[str, Any] = {"type": kind, "value": value["value"]}
+    if kind == "text_and_url_value" and "url" in value:
+        normalized["url"] = value["url"]
+    if kind == "decimal_value" and "numericValue" in value:
+        normalized["numericValue"] = value["numericValue"]
+    return normalized
+
+
+def normalize_table_cell(cell: Any, *, require_text: bool) -> dict[str, Any]:
+    """Normalize one table cell. Unstructured cells must carry a text input."""
+    if not isinstance(cell, dict):
+        raise UpstreamError("Table response contained invalid rows")
+    normalized: dict[str, Any] = {}
+    if cell.get("inputValue") is not None:
+        normalized["inputValue"] = normalize_benchling_value(
+            cell["inputValue"], require_text=require_text
+        )
+    elif require_text:
+        raise UpstreamError("Table response contained invalid rows")
+    evaluation = cell.get("evaluationValue")
+    if evaluation is not None:
+        normalized["evaluationValue"] = normalize_benchling_value(evaluation, require_text=False)
+    for key in ("format", "mergeRange", "mergeRangeParent", "selectorId"):
+        if cell.get(key) is not None:
+            normalized[key] = cell[key]
+    return normalized
+
+
+def normalize_table_row(row: Any, *, require_text: bool) -> dict[str, Any]:
+    """Normalize one table row and its cells."""
+    if not isinstance(row, dict) or not isinstance(row.get("cells"), list):
+        raise UpstreamError("Table response contained invalid rows")
+    normalized: dict[str, Any] = {
+        "cells": [normalize_table_cell(cell, require_text=require_text) for cell in row["cells"]]
+    }
+    for key in _TABLE_ROW_KEYS:
+        if key in row and row[key] is not None:
+            normalized[key] = row[key]
+    if row.get("result") is not None:
+        normalized["result"] = row["result"]
+    return normalized
+
+
+def table_content_from_detail(
+    detail: dict[str, Any], rows: list[dict[str, Any]], *, fallback: str
+) -> dict[str, Any]:
+    """Build the snapshot content object from a table-part response and its rows."""
+    content: dict[str, Any] = {
+        "__typename": str(detail.get("__typename") or fallback),
+        "columnDefinitions": detail.get("columnDefinitions") or [],
+        "rows": rows,
+    }
+    for key in _TABLE_CONTENT_KEYS:
+        if key in detail:
+            content[key] = detail[key]
+    return content
 
 
 def field_definition_type(definition: dict[str, Any]) -> str:
@@ -353,36 +494,63 @@ class BenchlingService:
         raise NotFoundError("Document part was not found", details={"part_id": part_id})
 
     async def get_table(self, part_id: str) -> dict[str, Any]:
-        """Fetch every page of an unstructured table and merge the rows into one response.
+        """Read an unstructured table: part metadata, then every row page.
 
-        Raises UpstreamError on invalid rows or a repeated pagination token.
+        Rows come from `/rows/items` at pageSize 100. The returned version is the
+        entry version (`versionMetadata.versionId`), which later writes must send.
         """
-        rows: list[dict[str, Any]] = []
-        detail: dict[str, Any] | None = None
-        params: dict[str, Any] = {"pageSize": 1000}
-        seen: set[str] = set()
-        while True:
-            payload = await self.api.request(
-                "GET", f"/document-part-unstructured-table/{part_id}", params=params
+        return await self._read_part_table(
+            part_id,
+            collection="document-part-unstructured-table",
+            fallback_typename="DocumentPartUnstructuredTable",
+            require_text=True,
+        )
+
+    async def get_results_table_part(self, part_id: str) -> dict[str, Any]:
+        """Read a results table's typed columns and every row page."""
+        return await self._read_part_table(
+            part_id,
+            collection="document-part-results-table",
+            fallback_typename="DocumentPartResultsTable",
+            require_text=False,
+        )
+
+    async def _read_part_table(
+        self,
+        part_id: str,
+        *,
+        collection: str,
+        fallback_typename: str,
+        require_text: bool,
+    ) -> dict[str, Any]:
+        """GET a table part, then page its rows URL. A bad shape or count is an error."""
+        detail = await self.api.request("GET", f"/{collection}/{part_id}")
+        version = entry_version(detail)
+        path = rows_items_path(
+            self.api.environment.base_url, part_id, detail.get("rows"), collection=collection
+        )
+        rows = [
+            normalize_table_row(item, require_text=require_text)
+            async for item in self.api.paginate(path, params={"pageSize": TABLE_ROW_PAGE_SIZE})
+        ]
+        row_count = detail.get("rowCount")
+        if isinstance(row_count, bool) or not isinstance(row_count, int):
+            raise UpstreamError(
+                "Table response contained an invalid row count",
+                details={"part_id": part_id},
             )
-            if detail is None:
-                detail = payload
-            content = part_content(payload)
-            page_rows = content.get("rows") or []
-            if not isinstance(page_rows, list):
-                raise UpstreamError("Table response contained invalid rows")
-            rows.extend(page_rows)
-            token = payload.get("nextToken")
-            if not token:
-                break
-            if token in seen:
-                raise UpstreamError("Table response repeated a pagination token")
-            seen.add(token)
-            params["nextToken"] = token
-        assert detail is not None
-        part_content(detail)["rows"] = rows
-        detail["pagination"] = {"rows": len(rows), "complete": True}
-        return detail
+        if row_count != len(rows):
+            raise UpstreamError(
+                "Table row count did not match the rows that were returned",
+                details={"part_id": part_id, "row_count": row_count, "returned": len(rows)},
+            )
+        return {
+            "id": detail.get("id", part_id),
+            "versionMetadata": {"versionId": version},
+            "rowCount": row_count,
+            "content": table_content_from_detail(detail, rows, fallback=fallback_typename),
+            "pagination": {"rows": len(rows), "complete": True},
+        }
 
     async def get_table_for_entry(self, reference: str, part_id: str) -> dict[str, Any]:
         """Resolve and verify that an unstructured table part belongs to one entry."""
@@ -413,7 +581,7 @@ class BenchlingService:
             )
         table = await self.get_table(part_id)
         part_version = part.get("versionId") or (part.get("versionMetadata") or {}).get("versionId")
-        table_version = table.get("versionId")
+        table_version = (table.get("versionMetadata") or {}).get("versionId")
         if part_version and table_version and part_version != table_version:
             raise ConflictError(
                 "Table changed while its target entry was being verified",
@@ -642,7 +810,8 @@ class BenchlingService:
             "capabilities": {
                 "document_parts": v3_ok,
                 "entry_fields": v3_ok and v2_ok,
-                "unstructured_table_replace": v3_ok,
+                "unstructured_table_cell_edit": v3_ok,
+                "unstructured_table_row_insert": v3_ok,
                 "structured_table_edit": False,
                 "result_upload_pending_integration": v2_ok,
                 "mcp_transport": "stdio",
@@ -682,12 +851,30 @@ class BenchlingService:
     async def _collect_part_tables(
         self, parts: list[dict[str, Any]], issues: list[CompletenessIssue]
     ) -> dict[str, dict[str, Any]]:
-        """Fetch unstructured table details, recording issues for unknown or unavailable parts."""
+        """Fetch table rows. A table this client can read fails the snapshot if its rows do not.
+
+        Unknown part types stay in the snapshot as opaque data. A part Benchling marks
+        unavailable is reported on its own, not as an unknown type.
+        """
         tables: dict[str, dict[str, Any]] = {}
         for part in parts:
             part_id = part.get("id")
             kind = part_type(part).split(".")[-1]
-            if kind not in KNOWN_PART_TYPES:
+            if is_unavailable_part(part):
+                issues.append(
+                    CompletenessIssue(
+                        scope=f"part:{part_id or 'unknown'}",
+                        reason="document_part_unavailable",
+                        details={
+                            "type": part_type(part),
+                            "message": (
+                                "Benchling did not return this part's type at the "
+                                "requested API stability"
+                            ),
+                        },
+                    )
+                )
+            elif kind not in KNOWN_PART_TYPES:
                 issues.append(
                     CompletenessIssue(
                         scope=f"part:{part_id or 'unknown'}",
@@ -696,16 +883,9 @@ class BenchlingService:
                     )
                 )
             if is_unstructured_table(part) and part_id:
-                try:
-                    tables[part_id] = await self.get_table(part_id)
-                except Exception as exc:
-                    issues.append(
-                        CompletenessIssue(
-                            scope=f"table:{part_id}",
-                            reason="detail_unavailable",
-                            details={"error": _error_text(exc)},
-                        )
-                    )
+                tables[part_id] = await self.get_table(part_id)
+            elif is_results_table(part) and part_id:
+                tables[part_id] = await self.get_results_table_part(part_id)
             elif is_structured_table(part) and part_id:
                 issues.append(
                     CompletenessIssue(

@@ -90,6 +90,13 @@ class UpstreamError(BenchlingAgentError):
     exit_code = ExitCode.UPSTREAM
 
 
+class ApiDriftError(UpstreamError):
+    """Benchling rejected a method this client still sends. The published API has moved."""
+
+    code = "api_drift"
+    exit_code = ExitCode.UPSTREAM
+
+
 class PartialCompletionError(BenchlingAgentError):
     """An apply finished only in part, or its outcome cannot be confirmed; inspect the journal."""
 

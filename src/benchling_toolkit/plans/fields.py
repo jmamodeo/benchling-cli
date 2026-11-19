@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Literal
 
 from ..errors import (
     UnsupportedError,
@@ -29,6 +29,7 @@ class FieldNormalization(PlannerBase):
         definitions: list[dict[str, Any]],
         *,
         require_all_required: bool = False,
+        address_by: Literal["system_name", "field_definition_id"] = "system_name",
     ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         by_system = {
             str(item["systemName"]): item for item in definitions if item.get("systemName")
@@ -41,17 +42,19 @@ class FieldNormalization(PlannerBase):
         normalized: dict[str, Any] = {}
         targets: list[dict[str, Any]] = []
         unknown: list[str] = []
+        seen_systems: set[str] = set()
         for supplied_key, field_input in updates.items():
             definition = by_system.get(supplied_key) or by_id.get(supplied_key)
             if definition is None:
                 unknown.append(supplied_key)
                 continue
             system_name = str(definition["systemName"])
-            if system_name in normalized:
+            if system_name in seen_systems:
                 raise ValidationError(
                     "The same schema field was supplied more than once",
                     details={"system_name": system_name},
                 )
+            seen_systems.add(system_name)
             if not isinstance(field_input, dict) or set(field_input) != {"value"}:
                 raise ValidationError(
                     "Each schema field input must contain exactly one value property",
@@ -71,10 +74,20 @@ class FieldNormalization(PlannerBase):
                     },
                 )
             self._validate_schema_field_value(definition, field_input["value"])
-            normalized[system_name] = deepcopy(field_input)
+            field_id = definition.get("id")
+            if address_by == "field_definition_id":
+                if not isinstance(field_id, str) or not field_id:
+                    raise UnsupportedError(
+                        "Schema field has no field-definition ID",
+                        details={"field": system_name},
+                    )
+                wire_key = field_id
+            else:
+                wire_key = system_name
+            normalized[wire_key] = deepcopy(field_input)
             targets.append(
                 {
-                    "field_definition_id": definition.get("id"),
+                    "field_definition_id": field_id,
                     "system_name": system_name,
                     "name": definition.get("name"),
                     "type": field_definition_type(definition),
@@ -97,7 +110,7 @@ class FieldNormalization(PlannerBase):
                 and item.get("isRequired")
                 and not item.get("archived")
                 and item.get("derivationType") in {None, "DIRECT"}
-                and str(item["systemName"]) not in normalized
+                and str(item["systemName"]) not in seen_systems
             )
             if missing_required:
                 raise ValidationError(
@@ -217,20 +230,39 @@ class FieldsPlanning(FieldNormalization):
         if not current.get("schema"):
             raise UnsupportedError("Entry has no assigned schema")
         definitions = current.get("field_definitions") or []
-        normalized, targets = self._normalize_schema_field_updates(updates, definitions)
+        normalized, targets = self._normalize_schema_field_updates(
+            updates, definitions, address_by="field_definition_id"
+        )
         request["schema_fields"] = normalized
         fields = current.get("fields_by_system_name") or {}
-        before_values = {key: fields.get(key) for key in normalized}
-        after_values = {**before_values, **normalized}
+        before_fields = {
+            target["system_name"]: {
+                "field_definition_id": target["field_definition_id"],
+                "system_name": target["system_name"],
+                "value": fields.get(target["system_name"]),
+            }
+            for target in targets
+        }
+        after_fields = {
+            target["system_name"]: {
+                "field_definition_id": target["field_definition_id"],
+                "system_name": target["system_name"],
+                "value": normalized[str(target["field_definition_id"])],
+            }
+            for target in targets
+        }
+        observed_values = {
+            target["system_name"]: fields.get(target["system_name"]) for target in targets
+        }
         schema_id = (current.get("schema") or {}).get("id")
         return (
-            {"fields": before_values, "targets": targets},
-            {"fields": after_values, "targets": targets},
+            {"fields": before_fields, "targets": targets},
+            {"fields": after_fields, "targets": targets},
             {
                 "schema_id": schema_id,
-                "observed_values": before_values,
+                "observed_values": observed_values,
                 "field_definitions": self._field_definition_fingerprints(
-                    definitions, set(normalized)
+                    definitions, set(observed_values)
                 ),
                 "modified_at": current.get("modified_at"),
             },

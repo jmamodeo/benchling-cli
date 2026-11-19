@@ -322,7 +322,7 @@ async def test_get_table_pages_rows_across_upstream_pages(client, fake) -> None:
         )
     )["data"]
     assert page["pagination"] == {"offset": 2, "returned": 1, "total": 3, "next_offset": None}
-    assert page["versionId"] == "tver_1"
+    assert page["versionMetadata"]["versionId"] == "ver_1"
     missing = await call(client, "get_table", env="sandbox", part_id="docpart_unknown")
     assert missing["error"]["code"] == "not_found"
 

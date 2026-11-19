@@ -88,7 +88,7 @@ async def test_insert_applies_one_versioned_mutation_and_discovers_new_part_id(
         {
             "operationType": "insert",
             "version": "ver_1",
-            "coordinates": {"position": "beginning_of_document"},
+            "position": "beginning_of_document",
             "parts": [{"contentType": "text", "text": "intro"}],
         }
     ]
@@ -141,9 +141,9 @@ async def test_delete_range_removes_inclusive_parts_and_reports_their_ids(runtim
     assert planned.after["parts"] == []
     applied = await runtime.planner.apply(planned.id)
     assert fake.part_ids() == ["docpart_sec1", TEXT_PART, "docpart_struct1", "docpart_text2"]
-    assert mutations(fake)[0]["coordinates"] == {
-        "fromDocumentPartId": "docpart_sec2",
-        "toDocumentPartId": TABLE_PART,
+    assert mutations(fake)[0]["sourceRange"] == {
+        "start": "docpart_sec2",
+        "end": TABLE_PART,
     }
     assert applied["journal"]["result"]["changed_part_ids"] == ["docpart_sec2", TABLE_PART]
 
@@ -151,9 +151,9 @@ async def test_delete_range_removes_inclusive_parts_and_reports_their_ids(runtim
 async def test_delete_single_part_defaults_end_of_range_to_start(runtime, fake) -> None:
     planned = await plan(runtime, {"operation": "delete", "from_part_id": "docpart_text2"})
     await runtime.planner.apply(planned.id)
-    assert mutations(fake)[0]["coordinates"] == {
-        "fromDocumentPartId": "docpart_text2",
-        "toDocumentPartId": "docpart_text2",
+    assert mutations(fake)[0]["sourceRange"] == {
+        "start": "docpart_text2",
+        "end": "docpart_text2",
     }
     assert "docpart_text2" not in fake.part_ids()
 
@@ -180,12 +180,13 @@ async def test_move_range_to_destination(runtime, fake) -> None:
     ]
     mutation = mutations(fake)[0]
     assert mutation["operationType"] == "move"
-    assert mutation["destinationCoordinates"] == {"position": "beginning_of_document"}
+    assert mutation["sourceRange"] == {"start": "docpart_sec2", "end": "docpart_struct1"}
+    assert mutation["destinationPosition"] == "beginning_of_document"
 
 
 async def test_replace_text_preserves_existing_formatting_unless_overridden(runtime, fake) -> None:
     kept = await plan(runtime, {"operation": "replace_text", "part_id": TEXT_PART, "text": "new"})
-    assert kept.after["part"]["formats"] == [{"type": "bold", "start": 0, "end": 3}]
+    assert kept.after["part"]["formats"] == [{"start": 0, "end": 3, "properties": ["BOLD"]}]
     assert kept.after["part"]["contentType"] == "text"
     assert kept.warnings and "partially complete" in kept.warnings[0]
     overridden = await plan(
@@ -235,13 +236,10 @@ async def test_replace_text_inserts_replacement_then_deletes_original(runtime, f
     applied = await runtime.planner.apply(planned.id)
     insert, delete = mutations(fake)
     assert insert["operationType"] == "insert" and insert["version"] == "ver_1"
-    assert insert["coordinates"] == {"position": TEXT_PART}
+    assert insert["position"] == TEXT_PART
     assert insert["parts"][0]["text"] == "after edit"
     assert delete["operationType"] == "delete" and delete["version"] == "ver_2"
-    assert delete["coordinates"] == {
-        "fromDocumentPartId": TEXT_PART,
-        "toDocumentPartId": TEXT_PART,
-    }
+    assert delete["sourceRange"] == {"start": TEXT_PART, "end": TEXT_PART}
     assert TEXT_PART not in fake.part_ids()
     assert fake.part_text("docpart_new1") == "after edit"
     assert applied["journal"]["result"]["changed_part_ids"] == [TEXT_PART, "docpart_new1"]
