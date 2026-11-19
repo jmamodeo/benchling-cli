@@ -157,22 +157,57 @@ benchling auth login --env dev
 # Client secret (not echoed):
 ```
 
-Login requests an OAuth `client_credentials` token before it saves anything. On success it writes the tenant URL and client ID to `environments.json` (mode 0600) under the state directory, and stores the client secret in the OS keychain under the service name `benchling-toolkit`. The username in the keychain is the environment name. Access tokens stay in process memory and are renewed before expiry in a long-running MCP process. If no usable keychain is available (for example a headless Linux session without Secret Service), login fails with an actionable error. There is no plaintext file fallback.
+Agents and CI can log in with no terminal. Pass the tenant and client ID as flags, and the secret on stdin:
+
+```console
+printf '%s' "$BENCHLING_CLIENT_SECRET" | benchling auth login --env dev \
+  --tenant-url https://your-tenant.benchling.com \
+  --client-id your-app-client-id \
+  --secret-stdin
+```
+
+`--tenant-url` accepts `https://host`, a bare host, or the same URL with a trailing `/api/v2` or `/api/v3` (those suffixes and a trailing slash are removed). `http://` is rejected. If a flag is missing and there is no terminal, login exits with one error that names `--tenant-url`, `--client-id`, and `--secret-stdin`. It does not fall back to `getpass` on a pipe, so you will not see echo warnings.
+
+Login requests an OAuth `client_credentials` token before it saves anything. On success it writes the tenant URL and client ID to `environments.json` (mode 0600) under the state directory, and stores the client secret in the OS keychain under the service name `benchling-toolkit`. The username in the keychain is the environment name. Access tokens stay in process memory and are renewed before expiry in a long-running MCP process. If no usable keychain is available, login fails with the cause (no backend, Secret Service not on D-Bus, or a locked collection) and the commands to fix it. There is no plaintext file fallback. A 401 means Benchling rejected the client ID or secret; check both in the Benchling developer console.
 
 The toolkit acts as the **app**, with the app's permissions and audit identity, not the signed-in browser user. Profiles saved by previous versions are never read.
 
-Environment names are lowercase letters and digits. The environment is required on every API command; there is no default. `-e` is short for `--env`.
+Environment names use lowercase letters and digits, start with a letter, and are at most 32 characters. The environment is required on every API command; there is no default. `-e` is short for `--env`.
 
 ```console
 benchling auth login --env test
-benchling envs list
 benchling auth status
 benchling --env dev auth status --check
 benchling --env test doctor
 benchling auth logout --env dev
 ```
 
-`auth status` lists saved environments and whether a keychain secret is present. It never prints the secret. `--check` requests a token and reports success or failure without printing or saving it. `doctor` makes read-only API checks. `auth logout` removes the `environments.json` record and the keychain secret; it does not revoke the app in Benchling.
+`auth status` is the only way to list saved environments. It shows each tenant URL without a trailing slash and whether a keychain secret is present. It never prints the secret. `--check` requests a token and puts the specific failure in the top-level message (for example `Client secret is not in the keychain; run benchling auth login --env dev`). `doctor` makes read-only API checks. When a check fails, the envelope is `ok: false`, the process exits 3, and each failed check includes a hint. `auth logout` removes the `environments.json` record and the keychain secret; it does not revoke the app in Benchling. Logging out an environment that was never configured says that it is not configured.
+
+## Headless Linux
+
+Linux servers and agent machines often have no Secret Service on the session bus. `benchling` will not write the client secret to a plaintext file. Install a provider if it is missing (`gnome-keyring` and `dbus` on Debian/Ubuntu), then unlock a keyring and run the login in that same session. Pipe the keyring password on stdin so it is not a shell argument:
+
+```console
+dbus-run-session -- sh -c '
+  printf "%s\n" "$KEYRING_PASSWORD" | gnome-keyring-daemon --unlock --components=secrets
+  printf "%s" "$BENCHLING_CLIENT_SECRET" | benchling auth login --env dev \
+    --tenant-url https://your-tenant.benchling.com \
+    --client-id your-app-client-id \
+    --secret-stdin
+'
+```
+
+Do not capture `gnome-keyring-daemon --unlock` with `$(...)` or backticks. The daemon does not exit, and the child keeps the substitution's pipe open, so the shell waits forever:
+
+```console
+# Hangs. Do not do this.
+eval "$(printf '%s\n' "$KEYRING_PASSWORD" | gnome-keyring-daemon --unlock --components=secrets)"
+```
+
+The `dbus-run-session` command runs the daemon and `benchling` in one shell, so the shell does not wait for the daemon to exit. `gnome-keyring-daemon` prints `DBUS_SESSION_BUS_ADDRESS=...` to the terminal. Later shells, cron jobs, and `benchling mcp serve` must inherit that same value. A new shell without it cannot see the keychain, so the command fails again.
+
+If the collection is locked, or no provider is installed, or the session bus has no `org.freedesktop.secrets` name, the error names that cause and repeats these commands. macOS and Windows use the system keychain and do not need this session.
 
 `BENCHLING_TOOLKIT_HOME` overrides the state directory (the platform config directory plus `benchling-toolkit` otherwise). It does not hold secrets. HTTPS uses the operating system's certificate trust store, with certificate-chain and hostname verification enabled. No insecure TLS fallback is available.
 
@@ -259,6 +294,24 @@ One server serves every environment saved with `auth login`. The client config c
   }
 }
 ```
+
+On Linux the standard MCP SDK starts the stdio server with only `HOME`, `LOGNAME`, `PATH`, `SHELL`, `TERM` and `USER`. `DBUS_SESSION_BUS_ADDRESS` is not among them, so the server cannot see the keyring and exits before the protocol starts. Put the session bus in the client config `env` block (the value printed when the keyring was unlocked):
+
+```json
+{
+  "mcpServers": {
+    "benchling": {
+      "command": "uvx",
+      "args": ["--from", "benchling-toolkit", "benchling", "mcp", "serve"],
+      "env": {
+        "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus"
+      }
+    }
+  }
+}
+```
+
+Startup failures, including a missing keychain, are a JSON envelope on stderr and a non-zero exit. Stdout is reserved for the MCP protocol. The stderr text names the MCP SDK's default environment and the `env` block. Request logging is off unless you pass `--verbose`.
 
 Every tool except `list_environments` takes a required `env` argument, and each call is authenticated with that environment's credentials. The server is read-only by default. To permit `apply_changes` in specific environments, add `--allow-writes ENV` after `serve` (repeatable, e.g. `--allow-writes dev --allow-writes test`); reads remain available in all environments. A plan can only be applied or checked in the environment that created it. `plan_changes` remains available because it performs remote reads and writes only an immutable local preview. Large entry, section, table, result, and schema responses expose offset/limit or cursor pagination and never silently truncate data.
 
@@ -348,7 +401,7 @@ uv run mypy
 uv run pytest --cov
 ```
 
-The suite has 231 test functions (389 collected cases, parametrization included) and reaches 98% branch coverage. CI enforces a `fail_under` floor of 96% in `pyproject.toml`, and also builds the sdist and wheel, runs `twine check`, and smoke-tests the built wheel.
+The suite has 249 test functions (409 collected cases, parametrization included) and reaches 98% branch coverage. CI enforces a `fail_under` floor of 96% in `pyproject.toml`, and also builds the sdist and wheel, runs `twine check`, and smoke-tests the built wheel.
 
 ### Opt-in sandbox exercise
 

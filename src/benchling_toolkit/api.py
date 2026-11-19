@@ -66,9 +66,7 @@ class BenchlingAPI:
             raise ValidationError("API path must start with '/'")
         base = f"{self.environment.base_url}/api/v{version}"
         headers = {"Accept": "application/json", **self.auth.headers(self.environment)}
-        if version == 3 and (
-            self.environment.early_access if early_access is None else early_access
-        ):
+        if version == 3 and early_access is not False:
             headers["EARLY-ACCESS"] = "true"
         attempts = self.max_read_attempts if method == "GET" else 1
         response: httpx.Response | None = None

@@ -6,10 +6,12 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, Generic, Literal, TypeVar, cast
+from urllib.parse import urlsplit, urlunsplit
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_serializer, field_validator
+from pydantic import ValidationError as ModelValidationError
 
-from .errors import BenchlingAgentError
+from .errors import BenchlingAgentError, ValidationError
 from .redact import redact, redact_text
 
 T = TypeVar("T")
@@ -66,6 +68,72 @@ class AuthMethod(str, Enum):
     CLIENT_CREDENTIALS = "client_credentials"
 
 
+_API_SUFFIXES = ("/api/v2", "/api/v3")
+
+
+def prepare_tenant_url(value: object) -> object:
+    """Normalize a tenant URL string before it is parsed.
+
+    A bare host gets https://. A trailing /api/v2 or /api/v3 and a trailing
+    slash are removed. http:// is rejected with a message that does not echo
+    the input, which may contain credentials.
+    """
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if not text:
+        raise ValueError("Tenant URL is required")
+    if text.lower().startswith("http://"):
+        raise ValueError("Tenant URL must use https://, not http://")
+    if "://" not in text:
+        text = "https://" + text
+    elif not text.lower().startswith("https://"):
+        raise ValueError("Tenant URL must use https://")
+    parts = urlsplit(text)
+    path = parts.path.rstrip("/")
+    folded = path.casefold()
+    for suffix in _API_SUFFIXES:
+        if folded.endswith(suffix):
+            path = path[: -len(suffix)].rstrip("/")
+            break
+    return urlunsplit(("https", parts.netloc, path, parts.query, parts.fragment))
+
+
+def explain_environment_error(exc: ModelValidationError, *, env: str) -> ValidationError:
+    """Turn a model failure into a field-specific error that does not echo the input."""
+    url_errors = [err for err in exc.errors() if "tenant_url" in err.get("loc", ())]
+    id_errors = [err for err in exc.errors() if "client_id" in err.get("loc", ())]
+    if url_errors:
+        return ValidationError(
+            _tenant_url_message(str(url_errors[0].get("msg", ""))),
+            details={"env": env, "field": "tenant_url"},
+        )
+    if id_errors:
+        return ValidationError("Invalid client ID", details={"env": env, "field": "client_id"})
+    return ValidationError(
+        "Invalid tenant URL. Expected https://host, a bare host, or a host ending in /api/v2 or /api/v3.",
+        details={"env": env, "field": "tenant_url"},
+    )
+
+
+def _tenant_url_message(msg: str) -> str:
+    folded = msg.casefold()
+    if "not http://" in folded:
+        return "Tenant URL must use https://, not http://."
+    if "must use https" in folded:
+        return "Tenant URL must use https://."
+    if "credential" in folded:
+        return "Invalid tenant URL: user and password are not allowed."
+    if "only scheme and host" in folded or "path" in folded:
+        return (
+            "Invalid tenant URL: expected a host only. A trailing /api/v2 or /api/v3 "
+            "is removed; other paths are not allowed."
+        )
+    if "required" in folded:
+        return "Tenant URL is required."
+    return "Invalid tenant URL. Expected https://host, a bare host, or a host ending in /api/v2 or /api/v3."
+
+
 class Environment(BaseModel):
     """A named tenant configuration; holds no secrets, only the tenant URL and auth method."""
 
@@ -75,7 +143,12 @@ class Environment(BaseModel):
     tenant_url: HttpUrl
     auth_method: AuthMethod
     client_id: str | None = None
-    early_access: bool = True
+
+    @field_validator("tenant_url", mode="before")
+    @classmethod
+    def normalize_tenant_url(cls, value: object) -> object:
+        """Accept a bare host and a trailing /api/v2 or /api/v3; reject http://."""
+        return prepare_tenant_url(value)
 
     @field_validator("tenant_url")
     @classmethod
@@ -94,6 +167,11 @@ class Environment(BaseModel):
     def strip_client_id(cls, value: str | None) -> str | None:
         """Trim whitespace; blank values become None."""
         return value.strip() if value else None
+
+    @field_serializer("tenant_url")
+    def serialize_tenant_url(self, value: HttpUrl) -> str:
+        """Display and persist the host without a trailing slash."""
+        return str(value).rstrip("/")
 
     @property
     def base_url(self) -> str:

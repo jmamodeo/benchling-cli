@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import io
 import json
 import logging
+import os
 import stat
 
 import httpx
@@ -16,7 +18,7 @@ from benchling_toolkit import cli
 from benchling_toolkit.credentials import build_environment, login, logout
 from benchling_toolkit.environment import EnvironmentConfigStore
 from benchling_toolkit.errors import AuthenticationError, ValidationError
-from benchling_toolkit.keychain import NO_KEYRING_MESSAGE, Keychain
+from benchling_toolkit.keychain import Keychain
 from benchling_toolkit.models import Envelope
 from benchling_toolkit.redact import redact, register_secret
 
@@ -39,11 +41,28 @@ def test_login_saves_only_after_the_token_request_and_hides_the_secret(monkeypat
     fake = FakeBenchling()
     fake.access_token = TOKEN
     patch_token_client(monkeypatch, fake)
-    monkeypatch.setattr("benchling_toolkit.cli.getpass.getpass", lambda prompt="": SECRET)
+    monkeypatch.setattr(
+        "benchling_toolkit.cli.getpass.getpass",
+        lambda prompt="": (_ for _ in ()).throw(AssertionError("getpass")),
+    )
+    monkeypatch.setattr(
+        "benchling_toolkit.cli._read_terminal",
+        lambda label: (_ for _ in ()).throw(AssertionError("tty")),
+    )
     result = CliRunner().invoke(
         cli.app,
-        ["auth", "login", "--env", "dev"],
-        input="https://your-tenant.benchling.com\ndev-client\n",
+        [
+            "auth",
+            "login",
+            "--env",
+            "dev",
+            "--tenant-url",
+            "https://your-tenant.benchling.com",
+            "--client-id",
+            "dev-client",
+            "--secret-stdin",
+        ],
+        input=SECRET,
     )
     assert result.exit_code == 0, result.stdout
     assert SECRET not in result.stdout
@@ -75,17 +94,29 @@ def test_failed_token_request_saves_nothing_and_hides_the_response(monkeypatch, 
     )
     result = CliRunner().invoke(
         cli.app,
-        ["--env", "dev", "auth", "login"],
-        input="https://your-tenant.benchling.com\ndev-client\n",
+        [
+            "--env",
+            "dev",
+            "auth",
+            "login",
+            "--tenant-url",
+            "https://your-tenant.benchling.com",
+            "--client-id",
+            "dev-client",
+            "--secret-stdin",
+        ],
+        input=SECRET,
     )
     assert result.exit_code == 3
     assert SECRET not in result.stdout
     assert TOKEN not in result.stdout
     assert SECRET not in caplog.text
-    assert json.loads(result.stdout)["error"]["code"] == "authentication_error"
+    error = json.loads(result.stdout)["error"]
+    assert error["code"] == "authentication_error"
+    assert "Check the client ID and secret" in error["message"]
     assert not EnvironmentConfigStore().environments_path.exists()
     assert Keychain().get("dev") is None
-    assert seen == ["prompted"]
+    assert seen == []
 
 
 def test_invalid_url_is_rejected_before_the_secret_is_read(monkeypatch) -> None:
@@ -93,14 +124,29 @@ def test_invalid_url_is_rejected_before_the_secret_is_read(monkeypatch) -> None:
         raise AssertionError("secret prompt")
 
     monkeypatch.setattr("benchling_toolkit.cli.getpass.getpass", forbidden)
+    monkeypatch.setattr(
+        "benchling_toolkit.cli._read_terminal",
+        lambda label: (_ for _ in ()).throw(AssertionError("tty")),
+    )
     result = CliRunner().invoke(
         cli.app,
-        ["auth", "login", "--env", "dev"],
-        input="https://user:sensitive-test-secret@your-tenant.benchling.com\ndev-client\n",
+        [
+            "auth",
+            "login",
+            "--env",
+            "dev",
+            "--tenant-url",
+            "https://user:sensitive-test-secret@your-tenant.benchling.com",
+            "--client-id",
+            "dev-client",
+            "--secret-stdin",
+        ],
+        input=SECRET,
     )
     assert result.exit_code == 2
     assert SECRET not in result.stdout
     assert "sensitive-test-secret" not in result.stdout
+    assert "user and password" in json.loads(result.stdout)["error"]["message"]
     assert not EnvironmentConfigStore().environments_path.exists()
 
 
@@ -108,6 +154,7 @@ def test_secret_stdin_and_terminal_prompts(monkeypatch) -> None:
     fake = FakeBenchling()
     patch_token_client(monkeypatch, fake)
     answers = iter(["https://your-tenant.benchling.com", "stdin-client"])
+    monkeypatch.setattr("benchling_toolkit.cli._prompts_available", lambda **kwargs: True)
     monkeypatch.setattr("benchling_toolkit.cli._read_terminal", lambda label: next(answers))
     result = CliRunner().invoke(
         cli.app,
@@ -134,21 +181,30 @@ def test_secret_is_not_accepted_as_an_argument(monkeypatch) -> None:
     assert not EnvironmentConfigStore().environments_path.exists()
     help_text = plain_stdout(["auth", "login", "--help"])
     assert "--secret-stdin" in help_text
+    assert "--tenant-url" in help_text
+    assert "--client-id" in help_text
     assert "--client-secret" not in help_text
 
 
 def test_missing_keyring_fails_before_prompting_and_names_a_fix(monkeypatch) -> None:
     keyring.set_keyring(keyring.backends.fail.Keyring())
+    monkeypatch.setattr("benchling_toolkit.keychain.provider_installed", lambda: False)
+    monkeypatch.setattr("benchling_toolkit.keychain.secret_service_reachable", lambda: False)
     monkeypatch.setattr(
         "benchling_toolkit.cli.getpass.getpass",
         lambda prompt="": (_ for _ in ()).throw(AssertionError("prompted")),
     )
     result = CliRunner().invoke(cli.app, ["auth", "login", "--env", "dev"])
     assert result.exit_code == 3
-    message = json.loads(result.stdout)["error"]["message"]
-    assert message == NO_KEYRING_MESSAGE
+    error = json.loads(result.stdout)["error"]
+    message = error["message"]
+    assert error["details"]["cause"] == "no_backend"
     assert "gnome-keyring" in message
     assert "plaintext" in message
+    assert "dbus-run-session" in message
+    assert "gnome-keyring-daemon --unlock --components=secrets" in message
+    assert "DBUS_SESSION_BUS_ADDRESS" in message
+    assert "Do not capture" in message
     assert not EnvironmentConfigStore().environments_path.exists()
 
 
@@ -194,9 +250,9 @@ def test_logout_removes_an_orphaned_secret_and_rejects_unknown_names() -> None:
     assert EnvironmentConfigStore().remove("dev") is False
     logout(EnvironmentConfigStore(), Keychain(), "dev")
     assert Keychain().get("dev") is None
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match="not configured"):
         logout(EnvironmentConfigStore(), Keychain(), "missing")
-    with pytest.raises(ValidationError, match="Invalid environment name"):
+    with pytest.raises(ValidationError, match="lowercase letters and digits"):
         logout(EnvironmentConfigStore(), Keychain(), "DEV")
 
 
@@ -229,6 +285,7 @@ def test_status_check_failure_is_an_authentication_error_without_the_secret(monk
     payload = json.loads(result.stdout)
     assert payload["error"]["details"]["failed_envs"] == ["dev"]
     assert payload["error"]["details"]["environments"]["dev"]["token_check"]["ok"] is False
+    assert "Check the client ID and secret" in payload["error"]["message"]
     assert SECRET not in result.stdout
 
 
@@ -251,7 +308,7 @@ def test_status_without_environments_does_not_require_a_keyring() -> None:
     assert json.loads(result.stdout)["data"]["environments"] == {}
 
 
-def test_keychain_rejects_unusable_backends_and_hides_backend_errors() -> None:
+def test_keychain_rejects_unusable_backends_and_hides_backend_errors(monkeypatch) -> None:
     class PlaintextKeyring(MemoryKeyring):
         pass
 
@@ -260,9 +317,12 @@ def test_keychain_rejects_unusable_backends_and_hides_backend_errors() -> None:
 
     NullKeyring.__module__ = "keyring.backends.null"
     keyring.set_keyring(PlaintextKeyring())
+    monkeypatch.setattr("benchling_toolkit.keychain.provider_installed", lambda: False)
+    monkeypatch.setattr("benchling_toolkit.keychain.secret_service_reachable", lambda: False)
     with pytest.raises(AuthenticationError) as plaintext:
         Keychain().require()
-    assert plaintext.value.message == NO_KEYRING_MESSAGE
+    assert plaintext.value.details["cause"] == "no_backend"
+    assert "plaintext" in plaintext.value.message
 
     keyring.set_keyring(NullKeyring())
     with pytest.raises(AuthenticationError):
@@ -332,12 +392,11 @@ def test_terminal_prompts_and_empty_secret(monkeypatch) -> None:
     monkeypatch.setattr(cli.os, "name", "nt")
     assert cli._read_terminal("Tenant URL") == "https://your-tenant.benchling.com\n"
     monkeypatch.setattr(cli.os, "name", "posix")
-    assert cli._read_terminal("Client ID") == "https://your-tenant.benchling.com\n"
 
     def broken_open(*args, **kwargs):
         raise OSError("no tty")
 
-    monkeypatch.setattr("builtins.open", broken_open)
+    monkeypatch.setattr(cli.os, "open", broken_open)
     with pytest.raises(ValidationError, match="terminal is required"):
         cli._read_terminal("Tenant URL")
 
@@ -495,7 +554,7 @@ def test_remaining_login_logout_and_prompt_edges(monkeypatch) -> None:
     assert cli._read_secret(True) == SECRET
     with pytest.raises(ValidationError, match="Invalid environment name"):
         cli._require_env_name("DEV", store)
-    with pytest.raises(ValidationError, match="Client ID is required"):
+    with pytest.raises(ValidationError, match="Invalid client ID"):
         build_environment("dev", "https://your-tenant.benchling.com", "bad\nid")
 
     bare = build_environment("dev", "https://your-tenant.benchling.com", "dev-client")
@@ -514,7 +573,7 @@ def test_remaining_login_logout_and_prompt_edges(monkeypatch) -> None:
         ),
         encoding="utf-8",
     )
-    with pytest.raises(ValidationError, match="Invalid endpoint or client ID"):
+    with pytest.raises(ValidationError, match="Invalid client ID"):
         store.resolve("dev")
     assert store.remove("missing") is False
 
@@ -601,9 +660,10 @@ def test_logout_without_a_secret_still_removes_the_record(monkeypatch) -> None:
     Keychain().delete("nobody")
     result = CliRunner().invoke(cli.app, ["auth", "logout", "--env", "missing"])
     assert result.exit_code == 2
+    assert "not configured" in json.loads(result.stdout)["error"]["message"]
     store = EnvironmentConfigStore()
     store.environments_path.write_text("{", encoding="utf-8")
-    listed = CliRunner().invoke(cli.app, ["envs", "list"])
+    listed = CliRunner().invoke(cli.app, ["auth", "status"])
     assert listed.exit_code == 2
     assert SECRET not in listed.stdout
 
@@ -633,9 +693,340 @@ def test_status_check_reports_a_missing_secret(monkeypatch) -> None:
     row = json.loads(result.stdout)["error"]["details"]["environments"]["dev"]
     assert row["secret_present"] is False
     assert row["token_check"]["ok"] is False
+    message = json.loads(result.stdout)["error"]["message"]
+    assert message == "Client secret is not in the keychain; run benchling auth login --env dev"
     assert fake_calls_were_not_made(result)
 
 
 def fake_calls_were_not_made(result) -> bool:
     assert "oauth" not in result.stdout
     return True
+
+
+def test_noninteractive_login_needs_no_tty_and_prints_no_getpass_warning(monkeypatch) -> None:
+    import warnings
+
+    fake = FakeBenchling()
+    patch_token_client(monkeypatch, fake)
+    monkeypatch.setattr(cli, "_prompts_available", lambda **kwargs: False)
+    monkeypatch.setattr(
+        "benchling_toolkit.cli.getpass.getpass",
+        lambda prompt="": (_ for _ in ()).throw(AssertionError("getpass")),
+    )
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        result = CliRunner().invoke(
+            cli.app,
+            [
+                "auth",
+                "login",
+                "--env",
+                "dev",
+                "--tenant-url",
+                "your-tenant.benchling.com/api/v2/",
+                "--client-id",
+                "dev-client",
+                "--secret-stdin",
+            ],
+            input=SECRET + "\n",
+        )
+    assert result.exit_code == 0, result.stdout
+    assert not any("echo" in str(item.message).lower() for item in caught)
+    combined = result.stdout + result.stderr
+    assert "GetPassWarning" not in combined
+    assert "Password input may be echoed" not in combined
+    assert json.loads(result.stdout)["data"]["tenant_url"] == "https://your-tenant.benchling.com"
+    saved = json.loads(EnvironmentConfigStore().environments_path.read_text())
+    assert saved["environments"]["dev"]["tenant_url"] == "https://your-tenant.benchling.com"
+
+
+def test_login_without_a_tty_names_the_missing_flags(monkeypatch) -> None:
+    monkeypatch.setattr(cli, "_prompts_available", lambda **kwargs: False)
+    monkeypatch.setattr(
+        "benchling_toolkit.cli.getpass.getpass",
+        lambda prompt="": (_ for _ in ()).throw(AssertionError("getpass")),
+    )
+    result = CliRunner().invoke(cli.app, ["auth", "login", "--env", "dev"])
+    assert result.exit_code == 2
+    message = json.loads(result.stdout)["error"]["message"]
+    assert message.count("Pass") == 1
+    assert "--tenant-url" in message
+    assert "--client-id" in message
+    assert "--secret-stdin" in message
+    assert "GetPassWarning" not in result.stderr
+    assert "Password input may be echoed" not in result.stderr
+
+    secret_only = CliRunner().invoke(
+        cli.app,
+        [
+            "auth",
+            "login",
+            "--env",
+            "dev",
+            "--tenant-url",
+            "https://your-tenant.benchling.com",
+            "--client-id",
+            "dev-client",
+        ],
+    )
+    secret_message = json.loads(secret_only.stdout)["error"]["message"]
+    assert secret_message.endswith("Pass --secret-stdin.")
+    assert "--tenant-url" not in secret_message
+
+    both = CliRunner().invoke(
+        cli.app,
+        [
+            "auth",
+            "login",
+            "--env",
+            "dev",
+            "--client-id",
+            "dev-client",
+        ],
+    )
+    both_message = json.loads(both.stdout)["error"]["message"]
+    assert "Pass --tenant-url and --secret-stdin." in both_message
+    assert "--client-id" not in both_message
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("https://your-tenant.benchling.com/api/v3", "https://your-tenant.benchling.com"),
+        ("your-tenant.benchling.com/", "https://your-tenant.benchling.com"),
+        ("https://your-tenant.benchling.com/api/v2/", "https://your-tenant.benchling.com"),
+    ],
+)
+def test_tenant_url_normalization(url: str, expected: str) -> None:
+    environment = build_environment("dev", url, "dev-client")
+    assert environment.base_url == expected
+
+
+def test_http_tenant_url_is_rejected_separately_from_the_client_id() -> None:
+    with pytest.raises(ValidationError, match=r"https://, not http://") as caught:
+        build_environment("dev", "http://your-tenant.benchling.com/api/v2", "dev-client")
+    assert "your-tenant.benchling.com" not in str(caught.value)
+    assert caught.value.details["field"] == "tenant_url"
+    with pytest.raises(ValidationError, match="Client ID is required") as client:
+        build_environment("dev", "https://your-tenant.benchling.com", "  ")
+    assert client.value.details["field"] == "client_id"
+
+
+def test_invalid_environment_name_states_the_rule() -> None:
+    result = CliRunner().invoke(cli.app, ["--env", "Dev_1", "auth", "status"])
+    assert result.exit_code == 2
+    message = json.loads(result.stdout)["error"]["message"]
+    assert "Invalid environment name" in message
+    assert "lowercase letters and digits" in message
+    assert json.loads(result.stdout)["error"]["details"]["env"] is None
+
+
+def test_tty_reader_accepts_a_terminal_python_refuses_to_open_for_update() -> None:
+    import pty
+
+    master, slave = pty.openpty()
+    try:
+        name = os.ttyname(slave)
+        with pytest.raises(io.UnsupportedOperation, match="not seekable"):
+            open(name, "r+", encoding="utf-8")
+        os.write(master, b"stdin-client\n")
+        assert cli._read_posix_tty(name, "Client ID: ").strip() == "stdin-client"
+    finally:
+        os.close(master)
+        os.close(slave)
+
+
+def test_keychain_diagnosis_names_dbus_and_a_locked_collection(monkeypatch) -> None:
+    monkeypatch.setattr("benchling_toolkit.keychain.provider_installed", lambda: True)
+    monkeypatch.setattr("benchling_toolkit.keychain.secret_service_reachable", lambda: False)
+    keyring.set_keyring(keyring.backends.fail.Keyring())
+    with pytest.raises(AuthenticationError) as dbus_error:
+        Keychain().require()
+    assert dbus_error.value.details["cause"] == "dbus_unreachable"
+    dbus_message = dbus_error.value.message
+    assert "not reachable on D-Bus" in dbus_message
+    assert "dbus-run-session" in dbus_message
+    assert "gnome-keyring-daemon --unlock --components=secrets" in dbus_message
+    assert "HOME, LOGNAME, PATH, SHELL, TERM and USER" in dbus_message
+    assert "plaintext" in dbus_message
+    assert "$(...)" in dbus_message
+
+    class Locked(MemoryKeyring):
+        def get_password(self, service: str, username: str) -> str | None:
+            raise keyring.errors.KeyringLocked("locked")
+
+    keyring.set_keyring(Locked())
+    with pytest.raises(AuthenticationError) as locked_error:
+        Keychain().get("dev")
+    assert locked_error.value.details["cause"] == "locked"
+    assert "collection is locked" in locked_error.value.message
+    assert "gnome-keyring-daemon --unlock --components=secrets" in locked_error.value.message
+    assert "DBUS_SESSION_BUS_ADDRESS" in locked_error.value.message
+    assert SECRET not in locked_error.value.message
+
+
+def test_secret_service_probe_and_logging_flags(monkeypatch) -> None:
+    from benchling_toolkit import keychain as keychain_module
+
+    monkeypatch.delenv("DBUS_SESSION_BUS_ADDRESS", raising=False)
+    assert keychain_module.secret_service_reachable() is False
+    monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/tmp/benchling-no-such-bus")
+    assert keychain_module.secret_service_reachable() is False
+
+    class Conn:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    conn = Conn()
+    owned = keychain_module._secret_service_owned
+    monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/tmp/bus")
+    monkeypatch.setattr(keychain_module, "_open_session_bus", lambda: conn)
+    monkeypatch.setattr(keychain_module, "_secret_service_owned", lambda connection: True)
+    assert keychain_module.secret_service_reachable() is True
+    assert conn.closed is True
+
+    class FakeProxy:
+        def __init__(self, bus: object, connection: object) -> None:
+            self.connection = connection
+
+        def NameHasOwner(self, name: str) -> tuple[int]:
+            assert name == "org.freedesktop.secrets"
+            return (0,)
+
+    monkeypatch.setattr(keychain_module, "_secret_service_owned", owned)
+    import jeepney.io.blocking as blocking
+
+    monkeypatch.setattr(blocking, "Proxy", FakeProxy)
+    assert keychain_module._secret_service_owned(object()) is False
+
+    def broken_open() -> object:
+        raise OSError("bus")
+
+    monkeypatch.setattr(keychain_module, "_open_session_bus", broken_open)
+    assert keychain_module.secret_service_reachable() is False
+
+    def broken_owned(connection: object) -> bool:
+        raise OSError("owner")
+
+    monkeypatch.setattr(keychain_module, "_open_session_bus", lambda: conn)
+    monkeypatch.setattr(keychain_module, "_secret_service_owned", broken_owned)
+    assert keychain_module.secret_service_reachable() is False
+
+    keychain_module._close_bus(object())
+
+    class BadClose:
+        def close(self) -> None:
+            raise OSError("close")
+
+    keychain_module._close_bus(BadClose())
+
+    monkeypatch.setattr(keychain_module, "provider_installed", lambda: True)
+    monkeypatch.setattr(keychain_module, "secret_service_reachable", lambda: True)
+    assert keychain_module.classify_keychain_failure(object(), RuntimeError("down")) == "locked"
+    unknown = keychain_module._keychain_error(None, None)
+    assert unknown.details == {"backend": "unknown", "cause": "no_backend"}
+
+
+def test_prompt_helpers_and_url_error_wording(monkeypatch) -> None:
+    from pydantic import ValidationError as ModelValidationError
+
+    from benchling_toolkit.models import (
+        Environment,
+        _tenant_url_message,
+        explain_environment_error,
+        prepare_tenant_url,
+    )
+    from benchling_toolkit.services import _doctor_hint
+
+    class BrokenStdin:
+        def isatty(self) -> bool:
+            raise OSError("stdin")
+
+    monkeypatch.setattr(cli.sys, "stdin", BrokenStdin())
+    assert cli._stdin_is_tty() is False
+
+    monkeypatch.setattr(cli.os, "name", "nt")
+
+    class Console:
+        def __enter__(self) -> Console:
+            return self
+
+        def __exit__(self, *args: object) -> bool:
+            return False
+
+    monkeypatch.setattr("builtins.open", lambda *args, **kwargs: Console())
+    assert cli._controlling_tty_available() is True
+    monkeypatch.setattr(
+        "builtins.open", lambda *args, **kwargs: (_ for _ in ()).throw(OSError("con"))
+    )
+    assert cli._controlling_tty_available() is False
+
+    monkeypatch.setattr(cli.os, "name", "posix")
+    monkeypatch.setattr(cli.os, "open", lambda *args, **kwargs: 7)
+    monkeypatch.setattr(cli.os, "close", lambda fd: None)
+    assert cli._controlling_tty_available() is True
+    assert cli._prompts_available(secret_on_stdin=True) is True
+    monkeypatch.setattr(cli, "_stdin_is_tty", lambda: False)
+    monkeypatch.setattr(cli, "_controlling_tty_available", lambda: False)
+    assert cli._prompts_available(secret_on_stdin=False) is False
+
+    monkeypatch.setattr(cli.getpass, "getpass", lambda prompt="": "")
+    with pytest.raises(ValidationError, match="Client secret is required"):
+        cli._read_secret(False)
+
+    assert prepare_tenant_url(None) is None
+    with pytest.raises(ValueError, match="Tenant URL is required"):
+        prepare_tenant_url("  ")
+    with pytest.raises(ValueError, match="Tenant URL must use https://"):
+        prepare_tenant_url("ftp://your-tenant.benchling.com")
+    assert _tenant_url_message("must use https") == "Tenant URL must use https://."
+    assert _tenant_url_message("field required") == "Tenant URL is required."
+    assert "Expected https://host" in _tenant_url_message("unrecognized")
+
+    with pytest.raises(ModelValidationError) as invalid_id:
+        Environment.model_validate(
+            {
+                "name": "dev",
+                "tenant_url": "https://your-tenant.benchling.com",
+                "auth_method": "client_credentials",
+                "client_id": ["not-a-string"],
+            }
+        )
+    explained = explain_environment_error(invalid_id.value, env="dev")
+    assert explained.details["field"] == "client_id"
+    with pytest.raises(ModelValidationError) as invalid_name:
+        Environment.model_validate(
+            {
+                "name": "",
+                "tenant_url": "https://your-tenant.benchling.com",
+                "auth_method": "client_credentials",
+                "client_id": "dev-client",
+            }
+        )
+    generic = explain_environment_error(invalid_name.value, env="dev")
+    assert generic.details["field"] == "tenant_url"
+    assert "your-tenant.benchling.com" not in generic.message
+
+    class HttpUrl:
+        scheme = "http"
+        username = None
+        password = None
+        path = ""
+        query = None
+        fragment = None
+
+    with pytest.raises(ValueError, match="HTTPS"):
+        Environment.strip_url_path(HttpUrl())  # type: ignore[arg-type]
+
+    assert _doctor_hint(RuntimeError("unexpected"), "dev").startswith(
+        "Run benchling --env dev doctor"
+    )
+    summary = cli._doctor_failure_message({"checks": [{"ok": True}]})
+    assert summary == "Doctor checks failed"
+    echoed = cli._doctor_failure_message(
+        {"checks": [{"ok": False, "error": "Check the client ID and secret", "hint": "client ID"}]}
+    )
+    assert echoed == "Check the client ID and secret"
