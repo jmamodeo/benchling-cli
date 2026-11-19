@@ -812,3 +812,117 @@ async def test_plan_changes_updates_results_from_a_csv(writer, fake, tmp_path) -
     assert rejected["ok"] is False
     assert rejected["error"]["code"] == "validation_error"
     assert "not in the header" in rejected["error"]["message"]
+
+
+def _property_schemas(schema):
+    """Yield every named property schema, including nested change-spec fields."""
+    if not isinstance(schema, dict):
+        return
+    properties = schema.get("properties")
+    if isinstance(properties, dict):
+        for name, prop in properties.items():
+            if isinstance(prop, dict):
+                yield name, prop
+                yield from _property_schemas(prop)
+    for key in ("anyOf", "oneOf", "allOf"):
+        for item in schema.get(key) or []:
+            yield from _property_schemas(item)
+    items = schema.get("items")
+    if isinstance(items, dict):
+        yield from _property_schemas(items)
+    additional = schema.get("additionalProperties")
+    if isinstance(additional, dict):
+        yield from _property_schemas(additional)
+
+
+async def test_every_tool_parameter_has_a_description(client) -> None:
+    tools = (await client.list_tools()).tools
+    assert tools
+    for tool in tools:
+        properties = tool.input_schema.get("properties", {})
+        for name, prop in properties.items():
+            description = prop.get("description")
+            assert isinstance(description, str) and description.strip(), (tool.name, name)
+    plan = next(tool for tool in tools if tool.name == "plan_changes")
+    specification = plan.input_schema["properties"]["specification"]
+    assert "anyOf" in specification
+    assert specification.get("additionalProperties") is not True
+    encoded = json.dumps(specification)
+    assert "$ref" not in encoded
+    for token in (
+        "insert",
+        "delete",
+        "move",
+        "replace_text",
+        "set_cells",
+        "append_rows",
+        "schema_fields",
+        "assay_results",
+        "csv_path",
+        "id_column",
+        "column_map",
+    ):
+        assert token in encoded
+    described = list(_property_schemas(specification))
+    assert described
+    for name, prop in described:
+        description = prop.get("description")
+        assert isinstance(description, str) and description.strip(), name
+    family = plan.input_schema["$defs"]["PlanFamily"]
+    assert set(family["enum"]) == {"document", "table", "fields", "results"}
+
+
+async def test_invalid_plan_specification_is_an_envelope(client, fake) -> None:
+    cases = (
+        ("nope", "must be an object"),
+        ({"operation": "explode"}, "supported shape"),
+        ({"operation": "delete", "from_part_id": 7}, "from_part_id"),
+        (
+            {"operation": "update", "id_column": "id", "column_map": {"Ct": "Ct"}},
+            "csv_path",
+        ),
+    )
+    for specification, expected in cases:
+        payload = await call(
+            client,
+            "plan_changes",
+            env="sandbox",
+            entry=ENTRY_ID,
+            family="document",
+            specification=specification,
+        )
+        assert payload["ok"] is False
+        assert payload["error"]["code"] == "validation_error"
+        assert expected in payload["error"]["message"]
+        assert payload["meta"]["env"] == "sandbox"
+    assert fake.calls == []
+    assert fake.writes() == []
+
+
+async def test_plan_changes_accepts_inline_records_and_schema_fields(client, fake) -> None:
+    uploaded = await call(
+        client,
+        "plan_changes",
+        env="sandbox",
+        entry=ENTRY_ID,
+        family="results",
+        specification={
+            "table_id": "strtbl_example",
+            "assay_results": [{"schemaId": "assaysch_abc123", "fields": {"ct": {"value": 12}}}],
+        },
+    )
+    assert uploaded["ok"] is True
+    record = uploaded["data"]["request"]["assay_results"][0]
+    assert set(record) == {"schemaId", "fields"}
+    assert uploaded["data"]["family"] == "results"
+    fields = await call(
+        client,
+        "plan_changes",
+        env="sandbox",
+        entry=ENTRY_ID,
+        family="fields",
+        specification={"schema_fields": {"notes": {"value": "free text"}}},
+    )
+    assert fields["ok"] is True
+    assert fields["data"]["family"] == "fields"
+    assert fake.writes() == []

@@ -5,8 +5,11 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator, Callable, Coroutine
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
+from pydantic import Field, WithJsonSchema
+
+from .change_spec import CHANGE_SPECIFICATION_SCHEMA, parse_change_specification
 from .errors import (
     AuthenticationError,
     BenchlingAgentError,
@@ -19,6 +22,31 @@ from .keychain import Keychain, _in_mcp_serve
 from .models import Envelope, PlanFamily
 from .runtime import Runtime, RuntimePool
 from .services import part_content
+
+_Env = Annotated[
+    str,
+    Field(description="Configured environment name. Call list_environments to see the names."),
+]
+_EntryRef = Annotated[
+    str,
+    Field(description="Entry ID, display ID, or same-tenant entry URL."),
+]
+_PageCursor = Annotated[
+    str | None,
+    Field(description="next_token from the previous page. Omit it to read the first page."),
+]
+_ChangeSpecification = Annotated[
+    Any,
+    Field(
+        description=(
+            "Typed change for family. Document and table changes set operation. "
+            "Field changes set schema_fields. Result uploads set table_id and "
+            "assay_results. Result updates set operation to update and pass "
+            "csv_path, id_column, and column_map."
+        )
+    ),
+    WithJsonSchema(CHANGE_SPECIFICATION_SCHEMA),
+]
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
@@ -171,7 +199,7 @@ def _register_environment_tools(
             return Envelope.failure(exc)
 
     @mcp.tool(annotations=_annotations(True))
-    async def get_capabilities(env: str) -> Envelope[Any]:
+    async def get_capabilities(env: _Env) -> Envelope[Any]:
         """Check authentication, API availability, and supported edit types."""
         return await safe(env, lambda rt: rt.service.doctor())
 
@@ -181,21 +209,47 @@ def _register_entry_tools(mcp: MCPServer, pool: RuntimePool) -> None:
     safe = _make_safe(pool)
 
     @mcp.tool(annotations=_annotations(True))
-    async def resolve_entry(env: str, reference: str) -> Envelope[Any]:
+    async def resolve_entry(env: _Env, reference: _EntryRef) -> Envelope[Any]:
         """Resolve an entry ID, display ID, or same-tenant URL to its canonical ID."""
         return await safe(env, lambda rt: rt.service.resolve_entry(reference))
 
     @mcp.tool(annotations=_annotations(True))
     async def get_entry(
-        env: str,
-        reference: str,
-        full: bool = False,
-        part_offset: int = 0,
-        part_limit: int = 100,
-        result_offset: int = 0,
-        result_limit: int = 100,
-        table_row_offset: int = 0,
-        table_row_limit: int = 250,
+        env: _Env,
+        reference: _EntryRef,
+        full: Annotated[
+            bool,
+            Field(
+                description=(
+                    "When true, return a paged snapshot of parts, tables, and results. "
+                    "When false, return entry metadata only."
+                )
+            ),
+        ] = False,
+        part_offset: Annotated[
+            int,
+            Field(description="Number of document parts to skip. Zero starts at the first part."),
+        ] = 0,
+        part_limit: Annotated[
+            int,
+            Field(description="Maximum number of document parts to return. Must be at least 1."),
+        ] = 100,
+        result_offset: Annotated[
+            int,
+            Field(description="Number of result records to skip. Zero starts at the first record."),
+        ] = 0,
+        result_limit: Annotated[
+            int,
+            Field(description="Maximum number of result records to return. Must be at least 1."),
+        ] = 100,
+        table_row_offset: Annotated[
+            int,
+            Field(description="Number of rows to skip in each unstructured table on the page."),
+        ] = 0,
+        table_row_limit: Annotated[
+            int,
+            Field(description="Maximum number of rows to return from each unstructured table."),
+        ] = 250,
     ) -> Envelope[Any]:
         """Fetch entry metadata or a paged complete snapshot of available structured data."""
 
@@ -247,21 +301,62 @@ def _register_entry_tools(mcp: MCPServer, pool: RuntimePool) -> None:
         return await safe(env, call)
 
     @mcp.tool(annotations=_annotations(True))
-    async def inspect_entry(env: str, reference: str) -> Envelope[Any]:
+    async def inspect_entry(env: _Env, reference: _EntryRef) -> Envelope[Any]:
         """Inspect an entry's sections, part IDs, schemas, and table summaries."""
         return await safe(env, lambda rt: rt.service.inspect_entry(reference))
 
     @mcp.tool(annotations=_annotations(True))
     async def list_entries(
-        env: str,
-        project: str | None = None,
-        folder: str | None = None,
-        schema_id: str | None = None,
-        name: str | None = None,
-        modified_after: str | None = None,
-        modified_before: str | None = None,
-        limit: int = 50,
-        cursor: str | None = None,
+        env: _Env,
+        project: Annotated[
+            str | None,
+            Field(description="Project ID. Omit to list entries from every readable project."),
+        ] = None,
+        folder: Annotated[
+            str | None,
+            Field(
+                description=(
+                    "Folder ID. When set, the whole query uses V2 because V3 entry listing "
+                    "ignores folder."
+                )
+            ),
+        ] = None,
+        schema_id: Annotated[
+            str | None,
+            Field(description="Entry schema ID. Omit to include every schema."),
+        ] = None,
+        name: Annotated[
+            str | None,
+            Field(
+                description=(
+                    "Exact entry name. The match is not a substring search. A comma in the "
+                    "name uses the V2 name parameter."
+                )
+            ),
+        ] = None,
+        modified_after: Annotated[
+            str | None,
+            Field(
+                description=(
+                    "Inclusive lower bound. A bare YYYY-MM-DD is the start of that UTC day. "
+                    "A timestamp must include a time zone."
+                )
+            ),
+        ] = None,
+        modified_before: Annotated[
+            str | None,
+            Field(
+                description=(
+                    "Inclusive upper bound. A bare YYYY-MM-DD is the end of that UTC day. "
+                    "A timestamp must include a time zone."
+                )
+            ),
+        ] = None,
+        limit: Annotated[
+            int,
+            Field(description="Page size. Defaults to 50 and must be from 1 to 100."),
+        ] = 50,
+        cursor: _PageCursor = None,
     ) -> Envelope[Any]:
         """List one page of entries. Folder uses V2; every filter is applied by the server."""
         return await safe(
@@ -280,13 +375,30 @@ def _register_entry_tools(mcp: MCPServer, pool: RuntimePool) -> None:
 
     @mcp.tool(annotations=_annotations(True))
     async def get_section(
-        env: str,
-        reference: str,
-        section: str,
-        part_offset: int = 0,
-        part_limit: int = 100,
-        table_row_offset: int = 0,
-        table_row_limit: int = 250,
+        env: _Env,
+        reference: _EntryRef,
+        section: Annotated[
+            str,
+            Field(description="Stable document part ID, or a section title that is unique."),
+        ],
+        part_offset: Annotated[
+            int,
+            Field(description="Number of parts in the section to skip. Zero starts at the first."),
+        ] = 0,
+        part_limit: Annotated[
+            int,
+            Field(
+                description="Maximum number of parts in the section to return. Must be at least 1."
+            ),
+        ] = 100,
+        table_row_offset: Annotated[
+            int,
+            Field(description="Number of rows to skip in each table in the section."),
+        ] = 0,
+        table_row_limit: Annotated[
+            int,
+            Field(description="Maximum number of rows to return from each table in the section."),
+        ] = 250,
     ) -> Envelope[Any]:
         """Retrieve a section by stable part ID or a unique section title."""
 
@@ -323,11 +435,17 @@ def _register_entry_tools(mcp: MCPServer, pool: RuntimePool) -> None:
 
     @mcp.tool(annotations=_annotations(True))
     async def get_part(
-        env: str,
-        reference: str,
-        part_id: str,
-        row_offset: int = 0,
-        row_limit: int = 250,
+        env: _Env,
+        reference: _EntryRef,
+        part_id: Annotated[str, Field(description="Stable document part ID.")],
+        row_offset: Annotated[
+            int,
+            Field(description="Number of table rows to skip when the part is a table."),
+        ] = 0,
+        row_limit: Annotated[
+            int,
+            Field(description="Maximum number of table rows to return when the part is a table."),
+        ] = 250,
     ) -> Envelope[Any]:
         """Retrieve one stable document part and its available detail."""
 
@@ -343,7 +461,18 @@ def _register_entry_tools(mcp: MCPServer, pool: RuntimePool) -> None:
 
     @mcp.tool(annotations=_annotations(True))
     async def get_table(
-        env: str, part_id: str, row_offset: int = 0, row_limit: int = 250
+        env: _Env,
+        part_id: Annotated[
+            str,
+            Field(description="Document part ID of an unstructured table."),
+        ],
+        row_offset: Annotated[
+            int, Field(description="Number of table rows to skip. Zero starts at the first row.")
+        ] = 0,
+        row_limit: Annotated[
+            int,
+            Field(description="Maximum number of table rows to return. Must be at least 1."),
+        ] = 250,
     ) -> Envelope[Any]:
         """Retrieve a page of an unstructured table by document-part ID."""
 
@@ -362,7 +491,19 @@ def _register_result_tools(mcp: MCPServer, pool: RuntimePool) -> None:
 
     @mcp.tool(annotations=_annotations(True))
     async def get_schema(
-        env: str, schema_id: str, field_offset: int = 0, field_limit: int = 250
+        env: _Env,
+        schema_id: Annotated[
+            str,
+            Field(description="Entry, result, or run schema ID."),
+        ],
+        field_offset: Annotated[
+            int,
+            Field(description="Number of field definitions to skip. Zero starts at the first."),
+        ] = 0,
+        field_limit: Annotated[
+            int,
+            Field(description="Maximum number of field definitions to return. Must be at least 1."),
+        ] = 250,
     ) -> Envelope[Any]:
         """Retrieve an entry, result, or run schema and a page of field definitions.
 
@@ -390,10 +531,16 @@ def _register_result_tools(mcp: MCPServer, pool: RuntimePool) -> None:
 
     @mcp.tool(annotations=_annotations(True))
     async def list_schemas(
-        env: str,
-        kind: str | None = None,
-        limit: int = 50,
-        cursor: str | None = None,
+        env: _Env,
+        kind: Annotated[
+            str | None,
+            Field(description="entry, result, or run. Omit to list all three, in that order."),
+        ] = None,
+        limit: Annotated[
+            int,
+            Field(description="Page size. Defaults to 50 and must be from 1 to 100."),
+        ] = 50,
+        cursor: _PageCursor = None,
     ) -> Envelope[Any]:
         """List one page of entry, result, and run schemas. Follow next_token to see the rest."""
         return await safe(
@@ -402,17 +549,28 @@ def _register_result_tools(mcp: MCPServer, pool: RuntimePool) -> None:
         )
 
     @mcp.tool(annotations=_annotations(True))
-    async def get_entry_fields(env: str, reference: str) -> Envelope[Any]:
+    async def get_entry_fields(env: _Env, reference: _EntryRef) -> Envelope[Any]:
         """Retrieve schema-backed entry field values."""
         return await safe(env, lambda rt: rt.service.get_entry_fields(reference))
 
     @mcp.tool(annotations=_annotations(True))
     async def list_results(
-        env: str,
-        entry: str | None = None,
-        schema_id: str | None = None,
-        page_size: int = 100,
-        cursor: str | None = None,
+        env: _Env,
+        entry: Annotated[
+            str | None,
+            Field(
+                description="Entry ID, display ID, or URL. Omit to list results from every entry."
+            ),
+        ] = None,
+        schema_id: Annotated[
+            str | None,
+            Field(description="Result schema ID. Omit to include every result schema."),
+        ] = None,
+        page_size: Annotated[
+            int,
+            Field(description="Number of result records to return in this page."),
+        ] = 100,
+        cursor: _PageCursor = None,
     ) -> Envelope[Any]:
         """Retrieve one explicit page of result records."""
         return await safe(
@@ -423,13 +581,25 @@ def _register_result_tools(mcp: MCPServer, pool: RuntimePool) -> None:
         )
 
     @mcp.tool(annotations=_annotations(True))
-    async def get_result(env: str, result_id: str) -> Envelope[Any]:
+    async def get_result(
+        env: _Env,
+        result_id: Annotated[str, Field(description="Canonical result ID.")],
+    ) -> Envelope[Any]:
         """Retrieve one result record by canonical ID."""
         return await safe(env, lambda rt: rt.service.get_result(result_id))
 
     @mcp.tool(annotations=_annotations(True))
     async def list_result_tables(
-        env: str, reference: str, offset: int = 0, limit: int = 100
+        env: _Env,
+        reference: _EntryRef,
+        offset: Annotated[
+            int,
+            Field(description="Number of result tables to skip. Zero starts at the first."),
+        ] = 0,
+        limit: Annotated[
+            int,
+            Field(description="Maximum number of result tables to return. Must be from 1 to 100."),
+        ] = 100,
     ) -> Envelope[Any]:
         """Discover explicit V2 result-table targets and their assigned schemas."""
 
@@ -454,10 +624,16 @@ def _register_result_tools(mcp: MCPServer, pool: RuntimePool) -> None:
 
     @mcp.tool(annotations=_annotations(True))
     async def list_results_table_rows(
-        env: str,
-        part_id: str,
-        limit: int = 50,
-        cursor: str | None = None,
+        env: _Env,
+        part_id: Annotated[
+            str,
+            Field(description="Document part ID of a results table."),
+        ],
+        limit: Annotated[
+            int,
+            Field(description="Page size. Defaults to 50 and must be from 1 to 100."),
+        ] = 50,
+        cursor: _PageCursor = None,
     ) -> Envelope[Any]:
         """Read one page of rows from a results table.
 
@@ -476,14 +652,44 @@ def _register_export_tool(mcp: MCPServer, pool: RuntimePool) -> None:
 
     @mcp.tool(annotations=_annotations(False))
     async def export(
-        env: str,
-        kind: str,
-        path: str,
-        format: str,
-        overwrite: bool = False,
-        part_id: str | None = None,
-        entry: str | None = None,
-        schema_id: str | None = None,
+        env: _Env,
+        kind: Annotated[
+            str,
+            Field(description="What to export: table, results-table, or assay-results."),
+        ],
+        path: Annotated[
+            str,
+            Field(
+                description="Local file path to write. An existing file is kept unless overwrite is true."
+            ),
+        ],
+        format: Annotated[str, Field(description="File format: json or csv.")],
+        overwrite: Annotated[
+            bool,
+            Field(description="When true, replace path if it already exists. Defaults to false."),
+        ] = False,
+        part_id: Annotated[
+            str | None,
+            Field(
+                description=(
+                    "Table id. A v3 document part id (docpart_) comes from inspect_entry. "
+                    "A v2 structured table id (strtbl_) needs entry set and kind results-table."
+                )
+            ),
+        ] = None,
+        entry: Annotated[
+            str | None,
+            Field(
+                description=(
+                    "Entry ID, display ID, or URL. Assay-results filter. Also required with "
+                    "a strtbl_ id from list_result_tables."
+                )
+            ),
+        ] = None,
+        schema_id: Annotated[
+            str | None,
+            Field(description="Result schema ID. Used only for assay-results."),
+        ] = None,
     ) -> Envelope[Any]:
         """Write a table, results table, or assay results to a local file.
 
@@ -520,20 +726,37 @@ def _register_change_tools(
 
     @mcp.tool(annotations=_annotations(False))
     async def plan_changes(
-        env: str, entry: str, family: PlanFamily, specification: dict[str, Any]
+        env: _Env,
+        entry: _EntryRef,
+        family: Annotated[
+            PlanFamily,
+            Field(description="Change family: document, table, fields, or results."),
+        ],
+        specification: _ChangeSpecification,
     ) -> Envelope[Any]:
         """Create an immutable local preview for one entry and mutation family.
 
-        Result updates pass operation "update", csv_path, id_column, and
-        column_map. column_map sends each CSV header to a field display name,
-        system name, or field-definition id. The preview resolves those columns
-        to field-definition ids. Bad mappings and rows are reported and nothing
-        is written until apply_changes.
+        The specification is checked against the typed change schema before any
+        remote read. An invalid specification is a validation_error envelope and
+        nothing is written. Result updates pass operation "update", csv_path,
+        id_column, and column_map. Inline result uploads pass table_id and
+        assay_results. Apply the preview later with apply_changes.
         """
-        return await safe(env, lambda rt: rt.planner.plan(entry, family, specification))
+
+        async def call(rt: Runtime) -> Any:
+            request = parse_change_specification(specification)
+            return await rt.planner.plan(entry, family, request)
+
+        return await safe(env, call)
 
     @mcp.tool(annotations=_annotations(False, destructive=True))
-    async def apply_changes(env: str, plan_id: str) -> Envelope[Any]:
+    async def apply_changes(
+        env: _Env,
+        plan_id: Annotated[
+            str,
+            Field(description="ID of a plan created by plan_changes in this environment."),
+        ],
+    ) -> Envelope[Any]:
         """Explicitly apply a previously previewed plan when writes are enabled for env."""
 
         async def call(rt: Runtime) -> dict[str, Any]:
@@ -547,7 +770,13 @@ def _register_change_tools(
         return await safe(env, call)
 
     @mcp.tool(annotations=_annotations(True))
-    async def get_change_status(env: str, plan_id: str) -> Envelope[Any]:
+    async def get_change_status(
+        env: _Env,
+        plan_id: Annotated[
+            str,
+            Field(description="ID of a plan created by plan_changes in this environment."),
+        ],
+    ) -> Envelope[Any]:
         """Read an immutable plan and its local execution journal."""
         return await safe(env, lambda rt: rt.planner.status(plan_id))
 
