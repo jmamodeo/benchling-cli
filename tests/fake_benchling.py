@@ -210,6 +210,28 @@ def field_definitions() -> list[dict[str, Any]]:
     ]
 
 
+def _result_entry_id(item: dict[str, Any]) -> str | None:
+    """V2 ``entryId`` or the V3 ``entry`` ref."""
+    entry_id = item.get("entryId")
+    if isinstance(entry_id, str):
+        return entry_id
+    entry = item.get("entry")
+    if isinstance(entry, dict) and isinstance(entry.get("id"), str):
+        return entry["id"]
+    return None
+
+
+def _result_schema_id(item: dict[str, Any]) -> str | None:
+    """V2 ``schemaId`` or the V3 ``schema`` ref."""
+    schema_id = item.get("schemaId")
+    if isinstance(schema_id, str):
+        return schema_id
+    schema = item.get("schema")
+    if isinstance(schema, dict) and isinstance(schema.get("id"), str):
+        return schema["id"]
+    return None
+
+
 class FakeBenchling:
     def __init__(self) -> None:
         self.calls: list[Call] = []
@@ -982,9 +1004,9 @@ class FakeBenchling:
     def _list_results(self, call: Call) -> tuple[int, dict[str, Any]]:
         items = self.results
         if "entry.eq" in call.params:
-            items = [r for r in items if r["entryId"] == call.params["entry.eq"]]
+            items = [r for r in items if _result_entry_id(r) == call.params["entry.eq"]]
         if "schema.eq" in call.params:
-            items = [r for r in items if r["schemaId"] == call.params["schema.eq"]]
+            items = [r for r in items if _result_schema_id(r) == call.params["schema.eq"]]
         return self._page(deepcopy(items), call, self.results_page_size)
 
     def _get_result(self, call: Call, result_id: str) -> tuple[int, dict[str, Any]]:

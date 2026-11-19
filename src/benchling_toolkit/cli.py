@@ -593,7 +593,11 @@ def results_get(ctx: typer.Context, result_id: str) -> None:
 
 @results_app.command("tables")
 def results_tables(ctx: typer.Context, reference: str) -> None:
-    """Discover explicit V2 result-table IDs and assigned schemas on one entry."""
+    """Discover explicit V2 result-table IDs and assigned schemas on one entry.
+
+    Each table_id is a v2_structured_table id (strtbl_…). Export it with
+    ``export --kind results-table --part TABLE_ID --entry ENTRY``.
+    """
     state: State = ctx.obj
     _execute(state.env, lambda runtime: runtime.service.list_result_tables(reference))
 
@@ -629,10 +633,21 @@ def export_data(
         False, "--overwrite", help="Replace the file if it already exists."
     ),
     part_id: str | None = typer.Option(
-        None, "--part", help="Document part ID for table or results-table."
+        None,
+        "--part",
+        help=(
+            "Table id. A v3_document_part id (docpart_…) comes from `entry inspect`. "
+            "A v2_structured_table id (strtbl_…) comes from `results tables ENTRY` "
+            "and needs `--entry ENTRY` with `--kind results-table`."
+        ),
     ),
     entry: str | None = typer.Option(
-        None, "--entry", help="Entry ID, display ID, or URL. Assay results only."
+        None,
+        "--entry",
+        help=(
+            "Entry ID, display ID, or URL. Assay-results filter. "
+            "Also required with a strtbl_ id from `results tables`."
+        ),
     ),
     schema_id: str | None = typer.Option(
         None, "--schema", help="Result schema ID. Assay results only."

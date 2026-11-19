@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+from typing import Any
 
 import pytest
 from conftest import runtime_for
@@ -16,7 +17,7 @@ from typer.testing import CliRunner
 
 from benchling_toolkit import cli
 from benchling_toolkit.errors import NotFoundError, UpstreamError, ValidationError
-from benchling_toolkit.export import _assay_columns, _cell_value, export_dataset
+from benchling_toolkit.export import _assay_columns, _assay_row, _cell_value, export_dataset
 from benchling_toolkit.mcp_server import build_mcp_server
 
 SUMMARY_KEYS = {
@@ -349,6 +350,502 @@ async def test_assay_export_sends_resolved_filters(runtime, fake, tmp_path) -> N
     assert json.loads(empty.read_text(encoding="utf-8"))["rows"] == []
 
 
+def _link(typename: str, linked_id: str) -> dict[str, Any]:
+    return {"__typename": typename, "value": {"__typename": "Container", "id": linked_id}}
+
+
+def _text(value: str) -> dict[str, Any]:
+    return {"__typename": "TextValue", "value": value}
+
+
+def _schema_field(field_id: str, value: Any, *, linked: str | None = None) -> dict[str, Any]:
+    item: dict[str, Any] = {
+        "__typename": "SchemaFieldValue",
+        "id": f"sfv_{field_id}",
+        "fieldDefinition": {"__typename": "SchemaFieldDefinitionRef", "id": field_id},
+        "value": value,
+    }
+    if linked is not None:
+        item["linkedEntityId"] = linked
+    return item
+
+
+_RESULT_FIELDS = [
+    ("assayfield_tube", "Tube", "tube", "AnyEntityLinkFieldDefinition"),
+    ("assayfield_contents", "Contents", "contents", "TextFieldDefinition"),
+    ("assayfield_registry", "Registry ID", "registry_id", "TextFieldDefinition"),
+    ("assayfield_entry", "Entry", "entry", "EntryLinkFieldDefinition"),
+    ("assayfield_quantity", "Quantity", "quantity", "DecimalFieldDefinition"),
+    ("assayfield_unit", "Quantity Unit", "quantity_unit", "TextFieldDefinition"),
+]
+
+
+def _install_result_fields(fake) -> None:
+    fake.field_defs["assaysch_abc123"] = [
+        {
+            "id": field_id,
+            "name": name,
+            "systemName": system_name,
+            "__typename": typename,
+            "derivationType": "DIRECT",
+        }
+        for field_id, name, system_name, typename in _RESULT_FIELDS
+    ]
+
+
+def _v3_result(result_id: str, fields: list[dict[str, Any]]) -> dict[str, Any]:
+    """A V3 Result: scalar metadata plus schemaFields, and no top-level fields map."""
+    return {
+        "id": result_id,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "modifiedAt": "2026-01-02T00:00:00Z",
+        "archived": False,
+        "archiveReason": None,
+        "__typename": "Result",
+        "schema": {"__typename": "ResultSchemaRef", "id": "assaysch_abc123"},
+        "entry": {"__typename": "Entry", "id": ENTRY_ID},
+        "project": {"__typename": "Project", "id": "src_abc123"},
+        "schemaFields": fields,
+    }
+
+
+async def test_assay_export_flattens_v3_schema_fields(runtime, fake, tmp_path) -> None:
+    """schemaFields is an array of field-definition refs, not top-level keys."""
+    _install_result_fields(fake)
+    fake.results = [
+        _v3_result(
+            "result_1",
+            [
+                _schema_field("assayfield_tube", _link("ObjectLinkValue", "con_abc123")),
+                _schema_field("assayfield_contents", _text("lysis buffer")),
+                _schema_field("assayfield_registry", _text("REG-1")),
+                _schema_field("assayfield_entry", None, linked=ENTRY_ID),
+                _schema_field(
+                    "assayfield_quantity", {"__typename": "DecimalValue", "value": "2.5"}
+                ),
+                _schema_field("assayfield_unit", _text("mL")),
+            ],
+        ),
+        _v3_result(
+            "result_2",
+            [
+                _schema_field(
+                    "assayfield_tube",
+                    {
+                        "__typename": "ObjectLinkListValue",
+                        "value": [
+                            {"__typename": "Container", "id": "con_abc123"},
+                            {"__typename": "Container", "id": "con_def456"},
+                        ],
+                    },
+                ),
+                _schema_field("assayfield_contents", _text("water")),
+                _schema_field("assayfield_registry", None),
+                _schema_field(
+                    "assayfield_entry",
+                    _link("ObjectLinkValue", ENTRY_ID),
+                ),
+                _schema_field("assayfield_quantity", {"__typename": "DecimalValue", "value": "0"}),
+                _schema_field("assayfield_unit", {"__typename": "BooleanValue", "value": False}),
+            ],
+        ),
+    ]
+    path = tmp_path / "assay.csv"
+    summary = await _export(
+        runtime,
+        path,
+        kind="assay-results",
+        file_format="csv",
+        entry=ENTRY_ID,
+        schema_id="assaysch_abc123",
+    )
+    assert summary["columns"] == [
+        "id",
+        "createdAt",
+        "modifiedAt",
+        "Tube",
+        "Contents",
+        "Registry ID",
+        "Entry",
+        "Quantity",
+        "Quantity Unit",
+        "archived",
+        "archiveReason",
+        "__typename",
+    ]
+    assert summary["row_count"] == 2
+    assert "lysis buffer" not in json.dumps(summary)
+    assert "con_abc123" not in json.dumps(summary)
+    rows = list(csv.reader(path.read_text(encoding="utf-8").splitlines()))
+    assert rows[1] == [
+        "result_1",
+        "2026-01-01T00:00:00Z",
+        "2026-01-02T00:00:00Z",
+        "con_abc123",
+        "lysis buffer",
+        "REG-1",
+        ENTRY_ID,
+        "2.5",
+        "mL",
+        "false",
+        "",
+        "Result",
+    ]
+    assert rows[2][3] == '["con_abc123","con_def456"]'
+    assert rows[2][5] == ""
+    assert rows[2][6] == ENTRY_ID
+    assert rows[2][8] == "false"
+    assert "entry" not in summary["columns"]
+    assert "schema" not in summary["columns"]
+    assert "schemaFields" not in summary["columns"]
+    definition_calls = [call for call in fake.calls if "/field-definitions/items" in call.path]
+    assert [call.params.get("nextToken") for call in definition_calls] == [None, "5"]
+    assert fake.writes() == []
+
+    json_path = tmp_path / "assay.json"
+    json_summary = await _export(
+        runtime,
+        json_path,
+        kind="assay-results",
+        file_format="json",
+        schema_id="assaysch_abc123",
+    )
+    document = json.loads(json_path.read_text(encoding="utf-8"))
+    assert document["rows"][0]["Tube"] == "con_abc123"
+    assert document["rows"][0]["Quantity"] == "2.5"
+    assert document["columns"] == json_summary["columns"]
+    assert "lysis buffer" not in json.dumps(json_summary)
+
+
+async def test_assay_export_keeps_values_when_the_schema_cannot_be_read(
+    runtime, fake, tmp_path
+) -> None:
+    fake.results = [
+        {
+            "id": "result_1",
+            "createdAt": "2026-01-01T00:00:00Z",
+            "schemaId": "assaysch_none",
+            "schemaFields": [
+                {
+                    "fieldDefinition": {"id": "assayfield_orphan", "systemName": "orphan"},
+                    "value": _text("kept-value"),
+                }
+            ],
+        }
+    ]
+    path = tmp_path / "orphan.csv"
+    summary = await _export(
+        runtime,
+        path,
+        kind="assay-results",
+        file_format="csv",
+        schema_id="assaysch_none",
+    )
+    assert summary["columns"] == ["id", "schemaId", "createdAt", "orphan"]
+    assert "kept-value" not in json.dumps(summary)
+    assert "kept-value" in path.read_text(encoding="utf-8")
+    assert summary["row_count"] == 1
+
+
+async def test_listed_results_table_uses_the_only_results_part(runtime, fake, tmp_path) -> None:
+    fake.result_table_schema = None
+    fake.add_results_table("docpart_only")
+    fake.parts.append(_results_part("docpart_only", name="Only plate", schema_id=None))
+    summary = await _export(
+        runtime,
+        tmp_path / "only.csv",
+        kind="results-table",
+        file_format="csv",
+        part_id="strtbl_example",
+        entry=ENTRY_ID,
+    )
+    assert summary["row_count"] == 3
+    assert summary["source"]["part_id"] == "docpart_only"
+    assert summary["source"]["table_id"] == "strtbl_example"
+    assert not any(call.path.endswith("/result/items") for call in fake.calls)
+
+
+async def test_assay_export_uses_a_display_name_on_the_field_definition(
+    runtime, fake, tmp_path
+) -> None:
+    fake.results = [
+        {
+            "id": "result_1",
+            "__typename": "Result",
+            "createdAt": "2026-01-01T00:00:00Z",
+            "archived": False,
+            "schemaFields": [
+                {
+                    "fieldDefinition": {
+                        "id": "assayfield_tube",
+                        "name": "Tube",
+                        "systemName": "tube",
+                    },
+                    "value": _text("tube-a"),
+                }
+            ],
+        }
+    ]
+    summary = await _export(
+        runtime, tmp_path / "named.csv", kind="assay-results", file_format="csv"
+    )
+    assert summary["columns"] == ["id", "createdAt", "Tube", "__typename", "archived"]
+    assert "tube" not in summary["columns"]
+    assert (
+        list(csv.reader((tmp_path / "named.csv").read_text(encoding="utf-8").splitlines()))[1][2]
+        == "tube-a"
+    )
+    assert not any("/field-definitions/items" in call.path for call in fake.calls)
+
+
+def _results_part(
+    part_id: str, *, name: str, schema_id: str | None, api_id: str | None = None
+) -> dict[str, Any]:
+    part: dict[str, Any] = {
+        "id": part_id,
+        "__typename": "DocumentPartResultsTable",
+        "name": name,
+    }
+    if schema_id is not None:
+        part["resultSchema"] = {"__typename": "ResultSchemaRef", "id": schema_id}
+    if api_id is not None:
+        part["apiId"] = api_id
+    return part
+
+
+async def test_listed_results_table_resolves_to_the_document_part(runtime, fake, tmp_path) -> None:
+    fake.add_results_table("docpart_rt1")
+    fake.results_row_page_size = 1
+    fake.parts.append(_results_part("docpart_rt1", name="Plate", schema_id="assaysch_abc123"))
+    path = tmp_path / "listed.csv"
+    summary = await _export(
+        runtime,
+        path,
+        kind="results-table",
+        file_format="csv",
+        part_id="strtbl_example",
+        entry=ENTRY_ID,
+    )
+    assert summary["row_count"] == 3
+    assert summary["columns"] == ["Ct"]
+    assert summary["source"]["part_id"] == "docpart_rt1"
+    assert summary["source"]["table_id"] == "strtbl_example"
+    assert summary["source"]["id_namespace"] == "v3_document_part"
+    assert summary["source"]["listed_id_namespace"] == "v2_structured_table"
+    assert summary["source"]["entry_id"] == ENTRY_ID
+    assert path.read_text(encoding="utf-8").splitlines()[1] == "12"
+    assert not any(
+        call.path.endswith("/document-part-results-table/strtbl_example") for call in fake.calls
+    )
+    assert any(
+        call.path.endswith("/document-part-results-table/docpart_rt1") for call in fake.calls
+    )
+    assert [call.params.get("nextToken") for call in _row_calls(fake)] == [None, "1", "2"]
+    assert fake.writes() == []
+
+
+async def test_listed_results_table_prefers_a_handle_and_a_shared_name(
+    runtime, fake, tmp_path
+) -> None:
+    fake.add_results_table("docpart_handle")
+    fake.parts.append(
+        _results_part(
+            "docpart_handle",
+            name="Other",
+            schema_id="assaysch_two",
+            api_id="strtbl_example",
+        )
+    )
+    fake.parts.append(
+        _results_part("docpart_other", name="Assay results", schema_id="assaysch_abc123")
+    )
+    summary = await _export(
+        runtime,
+        tmp_path / "handle.csv",
+        kind="results-table",
+        file_format="csv",
+        part_id="strtbl_example",
+        entry="EXP-1",
+    )
+    assert summary["source"]["part_id"] == "docpart_handle"
+    assert any(
+        call.path.endswith("/document-part-results-table/docpart_handle") for call in fake.calls
+    )
+    assert not any("docpart_other" in call.path for call in fake.calls)
+
+    fake.calls.clear()
+    fake.results_parts.clear()
+    fake.parts = [
+        part for part in fake.parts if part.get("id") not in {"docpart_handle", "docpart_other"}
+    ]
+    fake.add_results_table("docpart_named")
+    fake.parts.append(
+        _results_part("docpart_named", name="Assay results", schema_id="assaysch_abc123")
+    )
+    fake.parts.append(
+        _results_part("docpart_extra", name="Other plate", schema_id="assaysch_abc123")
+    )
+    named = await _export(
+        runtime,
+        tmp_path / "named.csv",
+        kind="results-table",
+        file_format="csv",
+        part_id="strtbl_example",
+        entry=ENTRY_ID,
+    )
+    assert named["source"]["part_id"] == "docpart_named"
+
+
+async def test_listed_results_table_falls_back_to_assay_results(runtime, fake, tmp_path) -> None:
+    _install_result_fields(fake)
+    fake.results = [
+        _v3_result(
+            "result_1",
+            [
+                _schema_field("assayfield_tube", _link("ObjectLinkValue", "con_abc123")),
+                _schema_field("assayfield_contents", _text("lysis buffer")),
+                _schema_field("assayfield_registry", _text("REG-1")),
+                _schema_field("assayfield_entry", None, linked=ENTRY_ID),
+                _schema_field(
+                    "assayfield_quantity", {"__typename": "DecimalValue", "value": "2.5"}
+                ),
+                _schema_field("assayfield_unit", _text("mL")),
+            ],
+        )
+    ]
+    fake.parts.append(_results_part("docpart_a", name="Plate A", schema_id="assaysch_abc123"))
+    fake.parts.append(_results_part("docpart_b", name="Plate B", schema_id="assaysch_abc123"))
+    path = tmp_path / "fallback.csv"
+    summary = await _export(
+        runtime,
+        path,
+        kind="results-table",
+        file_format="csv",
+        part_id="strtbl_example",
+        entry=ENTRY_ID,
+    )
+    assert summary["source"]["part_id"] == "strtbl_example"
+    assert summary["source"]["id_namespace"] == "v2_structured_table"
+    assert summary["source"]["export_via"] == "assay_results"
+    assert summary["source"]["entry_id"] == ENTRY_ID
+    assert summary["source"]["schema_id"] == "assaysch_abc123"
+    assert "Tube" in summary["columns"]
+    assert "con_abc123" not in json.dumps(summary)
+    assert path.read_text(encoding="utf-8").splitlines()[1].split(",")[3] == "con_abc123"
+    result_calls = [call for call in fake.calls if call.path.endswith("/result/items")]
+    assert result_calls[0].params["entry.eq"] == ENTRY_ID
+    assert result_calls[0].params["schema.eq"] == "assaysch_abc123"
+    assert not any("document-part-results-table/strtbl_example" in call.path for call in fake.calls)
+    assert not any(
+        call.path.endswith("/document-part-results-table/docpart_a") for call in fake.calls
+    )
+    assert fake.writes() == []
+
+
+async def test_listed_table_id_without_a_resolution_is_a_validation_error(
+    runtime, fake, tmp_path
+) -> None:
+    missing = tmp_path / "missing.csv"
+    with pytest.raises(ValidationError, match="v3_document_part") as caught:
+        await _export(
+            runtime,
+            missing,
+            kind="results-table",
+            file_format="csv",
+            part_id="strtbl_example",
+        )
+    assert caught.value.details["id_namespace"] == "v2_structured_table"
+    assert caught.value.details["expected_id_namespace"] == "v3_document_part"
+    assert "results tables" in str(caught.value)
+    assert fake.calls == []
+    assert not missing.exists()
+
+    with pytest.raises(ValidationError, match="v3_document_part") as table_kind:
+        await _export(
+            runtime,
+            tmp_path / "table.csv",
+            kind="table",
+            file_format="csv",
+            part_id="strtbl_example",
+            entry=ENTRY_ID,
+        )
+    assert table_kind.value.details["expected_id_namespace"] == "v3_document_part"
+    assert "results-table" in str(table_kind.value)
+    assert not any(
+        "document-part-unstructured-table/strtbl_example" in call.path for call in fake.calls
+    )
+    assert not (tmp_path / "table.csv").exists()
+
+    with pytest.raises(ValidationError, match="not found") as absent:
+        await _export(
+            runtime,
+            tmp_path / "absent.csv",
+            kind="results-table",
+            file_format="csv",
+            part_id="strtbl_missing",
+            entry=ENTRY_ID,
+        )
+    assert absent.value.details["id_namespace"] == "v2_structured_table"
+    assert absent.value.details["entry_id"] == ENTRY_ID
+    assert not any(
+        "strtbl_missing" in call.path and "document-part" in call.path for call in fake.calls
+    )
+
+    fake.result_table_schema = None
+    with pytest.raises(ValidationError, match="no result schema"):
+        await _export(
+            runtime,
+            tmp_path / "noschema.csv",
+            kind="results-table",
+            file_format="csv",
+            part_id="strtbl_example",
+            entry=ENTRY_ID,
+        )
+    assert not any(call.path.endswith("/result/items") for call in fake.calls)
+
+
+async def test_listed_unstructured_table_uses_a_part_that_carries_the_handle(
+    runtime, fake, tmp_path
+) -> None:
+    table = next(part for part in fake.parts if part["id"] == TABLE_PART)
+    table["apiId"] = "strtbl_example"
+    summary = await _export(
+        runtime,
+        tmp_path / "handled.csv",
+        kind="table",
+        file_format="csv",
+        part_id="strtbl_example",
+        entry=ENTRY_ID,
+    )
+    assert summary["row_count"] == 3
+    assert summary["source"]["part_id"] == TABLE_PART
+    assert summary["source"]["table_id"] == "strtbl_example"
+    assert summary["source"]["id_namespace"] == "v3_document_part"
+    assert any(
+        call.path.endswith(f"/document-part-unstructured-table/{TABLE_PART}") for call in fake.calls
+    )
+    assert not any(
+        "strtbl_example" in call.path and "document-part" in call.path for call in fake.calls
+    )
+    assert fake.writes() == []
+
+
+async def test_listed_table_export_still_refuses_to_overwrite(runtime, fake, tmp_path) -> None:
+    path = tmp_path / "kept.csv"
+    path.write_text("keep-me\n", encoding="utf-8")
+    with pytest.raises(ValidationError, match="overwrite"):
+        await _export(
+            runtime,
+            path,
+            kind="results-table",
+            file_format="csv",
+            part_id="strtbl_example",
+            entry=ENTRY_ID,
+        )
+    assert path.read_text(encoding="utf-8") == "keep-me\n"
+    assert fake.calls == []
+
+
 async def test_assay_export_stops_on_a_repeated_token(runtime, fake, tmp_path) -> None:
     fake.repeat_next_token = True
     path = tmp_path / "loop.json"
@@ -485,6 +982,48 @@ def test_cell_and_field_helpers_cover_empty_values() -> None:
     assert _cell_value({}) is None
     assert _cell_value({"inputValue": {"value": ""}}) == ""
     assert _assay_columns([{"fields": {1: {"value": "nope"}, "ct": {"value": 1}}}]) == ["ct"]
+    records = [
+        {
+            "id": "result_1",
+            "schemaId": "assaysch_abc123",
+            "schemaFields": [
+                "skip",
+                {"fieldDefinition": "assayfield_tube", "value": {"textValue": "from-text"}},
+                {"fieldDefinition": {"displayName": "Shown"}, "value": {"displayValue": "shown"}},
+                {
+                    "fieldDefinition": {"id": "assayfield_missing", "systemName": "tube"},
+                    "value": {"type": "entity", "id": "seq_abc123"},
+                },
+                {"fieldDefinition": {"id": "assayfield_bare"}, "value": _text("bare-value")},
+                {"fieldDefinition": {"id": "assayfield_tube"}, "value": "second-tube"},
+                {"fieldDefinition": {"name": "Empty"}},
+            ],
+            "fields": {"": {"value": "skip"}, "extra": {"value": "kept-extra"}},
+        },
+        {"schema": {"id": ""}, "schemaFields": {"Contents": {"value": "map-value"}}},
+    ]
+    columns = _assay_columns(records, {"assayfield_tube": "Tube"})
+    assert columns == [
+        "id",
+        "schemaId",
+        "Tube",
+        "Shown",
+        "tube",
+        "assayfield_bare",
+        "Empty",
+        "extra",
+        "Contents",
+    ]
+    row = _assay_row(records[0], columns, {"assayfield_tube": "Tube"})
+    assert row["Tube"] == "from-text"
+    assert row["Shown"] == "shown"
+    assert row["tube"] == "seq_abc123"
+    assert row["assayfield_bare"] == "bare-value"
+    assert row["Empty"] is None
+    assert row["extra"] == "kept-extra"
+    mapped = _assay_row(records[1], columns, {})
+    assert mapped["Contents"] == "map-value"
+    assert mapped["Tube"] is None
 
 
 @pytest.fixture
@@ -569,6 +1108,38 @@ def test_cli_export_uses_the_envelope_and_exit_codes(invoke, fake, tmp_path) -> 
     )
     assert code == 2
     assert validation["error"]["code"] == "validation_error"
+
+
+def test_cli_export_rejects_a_listed_table_id_without_entry(invoke, fake, tmp_path) -> None:
+    path = tmp_path / "listed.csv"
+    code, payload, _ = invoke(
+        "export",
+        "--kind",
+        "results-table",
+        "--part",
+        "strtbl_example",
+        "--format",
+        "csv",
+        "--output",
+        str(path),
+    )
+    assert code == 2
+    assert payload["error"]["code"] == "validation_error"
+    assert payload["error"]["details"]["id_namespace"] == "v2_structured_table"
+    assert payload["error"]["details"]["expected_id_namespace"] == "v3_document_part"
+    assert "results tables" in payload["error"]["message"]
+    assert "entry inspect" in payload["error"]["message"]
+    assert not path.exists()
+    assert fake.calls == []
+
+
+def test_cli_export_help_names_the_part_id_namespaces() -> None:
+    result = CliRunner().invoke(cli.app, ["export", "--help"])
+    assert result.exit_code == 0
+    assert "v3_document_part" in result.stdout
+    assert "v2_structured_table" in result.stdout
+    assert "entry inspect" in result.stdout
+    assert "results tables" in result.stdout
 
 
 class _Session:

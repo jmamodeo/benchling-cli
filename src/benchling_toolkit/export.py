@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from . import listing
-from .errors import UpstreamError, ValidationError
+from .errors import NotFoundError, UpstreamError, ValidationError
 from .redact import redact_text
 from .services import BenchlingService
 
@@ -25,6 +25,10 @@ _KINDS = {"table", "results-table", "assay-results"}
 _FORMATS = {"json", "csv"}
 _IDENTITY = ("id", "entryId", "schemaId", "projectId", "createdAt", "modifiedAt")
 _COLUMN_KEYS = ("name", "systemName", "columnId")
+_V2_STRUCTURED_TABLE_PREFIX = "strtbl_"
+_V2_STRUCTURED_TABLE_NAMESPACE = "v2_structured_table"
+_V3_DOCUMENT_PART_NAMESPACE = "v3_document_part"
+_NESTED_RESULT_KEYS = {"fields", "schemaFields"}
 
 
 async def export_dataset(
@@ -57,6 +61,8 @@ async def export_dataset(
         columns, rows, source = await _load_assay_results(service, entry_ref, schema_ref)
     elif part is None:
         raise ValidationError("table and results-table exports require part_id")
+    elif part.startswith(_V2_STRUCTURED_TABLE_PREFIX):
+        columns, rows, source = await _load_listed_table(service, selected, part, entry_ref)
     elif selected == "results-table":
         columns, rows, source = await _load_results_table(service, part)
     else:
@@ -113,7 +119,8 @@ def _check_selector(
     kind: str, part_id: str | None, entry: str | None, schema_id: str | None
 ) -> None:
     if kind in {"table", "results-table"}:
-        if entry is not None or schema_id is not None:
+        listed = isinstance(part_id, str) and part_id.startswith(_V2_STRUCTURED_TABLE_PREFIX)
+        if schema_id is not None or (entry is not None and not listed):
             raise ValidationError("entry and schema apply only to assay-results")
         return
     if part_id is not None:
@@ -178,17 +185,103 @@ async def _load_results_table(
     return columns, [_table_row(row, columns) for row in collected], source
 
 
+def _listed_table_error(
+    part_id: str, *, kind: str, entry_id: str | None, on_entry: bool
+) -> ValidationError:
+    """validation_error that names the id namespace ``--part`` was given and the one it needs."""
+    if kind == "table":
+        message = (
+            f"{part_id} is a {_V2_STRUCTURED_TABLE_NAMESPACE} id from `results tables`. "
+            "`--kind table` expects a "
+            f"{_V3_DOCUMENT_PART_NAMESPACE} id (docpart_…) from `entry inspect`. "
+            "Export this results table with `--kind results-table --entry`."
+        )
+    elif entry_id is None:
+        message = (
+            f"{part_id} is a {_V2_STRUCTURED_TABLE_NAMESPACE} id from `results tables`. "
+            "Pass --entry for that entry, or pass a "
+            f"{_V3_DOCUMENT_PART_NAMESPACE} id (docpart_…) from `entry inspect`."
+        )
+    elif not on_entry:
+        message = (
+            f"{part_id} is a {_V2_STRUCTURED_TABLE_NAMESPACE} id and was not found on this entry. "
+            "`results tables` lists those ids. A results-table export also accepts a "
+            f"{_V3_DOCUMENT_PART_NAMESPACE} id (docpart_…) from `entry inspect`."
+        )
+    else:
+        message = (
+            f"{part_id} could not be resolved to a {_V3_DOCUMENT_PART_NAMESPACE} id, "
+            "and the results table has no result schema to read."
+        )
+    details: dict[str, Any] = {
+        "part_id": part_id,
+        "id_namespace": _V2_STRUCTURED_TABLE_NAMESPACE,
+        "expected_id_namespace": _V3_DOCUMENT_PART_NAMESPACE,
+    }
+    if entry_id is not None:
+        details["entry_id"] = entry_id
+    return ValidationError(message, details=details)
+
+
+async def _load_listed_table(
+    service: BenchlingService, kind: str, part_id: str, entry: str | None
+) -> tuple[list[str], list[dict[str, Any]], dict[str, Any]]:
+    """Export a ``strtbl_`` id from ``results tables``.
+
+    ``--kind table`` only continues when an unstructured document part carries that
+    handle. ``--kind results-table`` uses the entry's ``DocumentPartResultsTable``
+    when one part matches, and otherwise reads assay results for the entry and the
+    table's result schema. Benchling is only read.
+    """
+    if entry is None:
+        raise _listed_table_error(part_id, kind=kind, entry_id=None, on_entry=False)
+    resolved = await service.resolve_entry(entry)
+    entry_id = str(resolved["entry_id"])
+    if kind == "table":
+        part = await service.document_part_for_listed_table(
+            entry_id, {"table_id": part_id}, unstructured=True
+        )
+        if part is None:
+            raise _listed_table_error(part_id, kind=kind, entry_id=entry_id, on_entry=True)
+        columns, rows, source = await _load_table(service, part)
+        source["table_id"] = part_id
+        source["id_namespace"] = _V3_DOCUMENT_PART_NAMESPACE
+        source["listed_id_namespace"] = _V2_STRUCTURED_TABLE_NAMESPACE
+        return columns, rows, source
+    try:
+        note = await service.get_result_table(entry_id, part_id)
+    except NotFoundError as exc:
+        raise _listed_table_error(part_id, kind=kind, entry_id=entry_id, on_entry=False) from exc
+    part = await service.document_part_for_listed_table(entry_id, note, unstructured=False)
+    if part is not None:
+        columns, rows, source = await _load_results_table(service, part)
+        source["table_id"] = part_id
+        source["id_namespace"] = _V3_DOCUMENT_PART_NAMESPACE
+        source["listed_id_namespace"] = _V2_STRUCTURED_TABLE_NAMESPACE
+        _add_text(source, "entry_id", entry_id)
+        return columns, rows, source
+    schema_id = note.get("schema_id")
+    if not isinstance(schema_id, str) or not schema_id:
+        raise _listed_table_error(part_id, kind=kind, entry_id=entry_id, on_entry=True)
+    columns, rows, source = await _load_assay_results(service, entry_id, schema_id)
+    source["part_id"] = part_id
+    source["id_namespace"] = _V2_STRUCTURED_TABLE_NAMESPACE
+    source["export_via"] = "assay_results"
+    return columns, rows, source
+
+
 async def _load_assay_results(
     service: BenchlingService, entry: str | None, schema_id: str | None
 ) -> tuple[list[str], list[dict[str, Any]], dict[str, Any]]:
     """Read every assay-result page for the optional entry and schema filters."""
     collected = await service.list_all_results(entry=entry, schema_id=schema_id)
     records = collected["items"]
-    columns = _assay_columns(records)
+    names = await _schema_field_names(service, records, collected.get("schema_id"))
+    columns = _assay_columns(records, names)
     source: dict[str, Any] = {}
     _add_text(source, "entry_id", collected.get("entry_id"))
     _add_text(source, "schema_id", collected.get("schema_id"))
-    return columns, [_assay_row(record, columns) for record in records], source
+    return columns, [_assay_row(record, columns, names) for record in records], source
 
 
 def _add_text(source: dict[str, Any], key: str, value: object) -> None:
@@ -247,51 +340,200 @@ def _cell_value(cell: dict[str, Any]) -> Any:
     return None
 
 
-def _assay_columns(records: list[dict[str, Any]]) -> list[str]:
+def _assay_columns(records: list[dict[str, Any]], names: dict[str, str] | None = None) -> list[str]:
+    """Metadata scalars, then one column per schema field.
+
+    V3 ``GET /result/items`` puts measurements in ``schemaFields``, an array of
+    ``SchemaFieldValue`` (``fieldDefinition`` plus ``value``), not a top-level
+    ``fields`` map. A V2 ``fields`` object is still accepted. Display names come
+    from the field definition or from ``names`` (field-definition id to ``name``).
+    """
+    labels = names or {}
     present = {key for record in records for key in record}
     columns = [key for key in _IDENTITY if key in present]
     seen = set(columns)
     for record in records:
-        fields = record.get("fields")
-        if not isinstance(fields, dict):
-            continue
-        for name in fields:
-            if not isinstance(name, str) or not name or name in seen:
+        for name in _field_pairs(record, labels):
+            if name in seen:
                 continue
             seen.add(name)
             columns.append(name)
     for record in records:
         for key, value in record.items():
-            if key in seen or key == "fields" or isinstance(value, dict | list):
+            if key in seen or key in _NESTED_RESULT_KEYS or isinstance(value, dict | list):
                 continue
             seen.add(key)
             columns.append(key)
     return columns
 
 
-def _assay_row(record: dict[str, Any], columns: list[str]) -> dict[str, Any]:
-    return {column: _assay_value(record, column) for column in columns}
+def _assay_row(
+    record: dict[str, Any], columns: list[str], names: dict[str, str] | None = None
+) -> dict[str, Any]:
+    values: dict[str, Any] = {}
+    for name, value in _field_pairs(record, names or {}).items():
+        values.setdefault(name, value)
+    row: dict[str, Any] = {}
+    for column in columns:
+        if column not in _IDENTITY and column in values:
+            row[column] = values[column]
+        else:
+            row[column] = record.get(column)
+    return row
 
 
-def _assay_value(record: dict[str, Any], column: str) -> Any:
+def _field_pairs(record: dict[str, Any], names: dict[str, str]) -> dict[str, Any]:
+    """Schema-field columns in response order. Later duplicates do not replace earlier ones."""
+    pairs: dict[str, Any] = {}
+    raw = record.get("schemaFields")
+    if isinstance(raw, list):
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            name = _schema_field_name(item, names)
+            if name and name not in pairs:
+                pairs[name] = _schema_field_cell(item)
+    elif isinstance(raw, dict):
+        for key, value in raw.items():
+            if isinstance(key, str) and key and key not in pairs:
+                pairs[key] = _unwrap_field(value)
     fields = record.get("fields")
-    if isinstance(fields, dict) and column in fields and column not in _IDENTITY:
-        return _unwrap_field(fields[column])
-    return record.get(column)
+    if isinstance(fields, dict):
+        for key, value in fields.items():
+            if isinstance(key, str) and key and key not in pairs:
+                pairs[key] = _unwrap_field(value)
+    return pairs
+
+
+def _schema_field_name(item: dict[str, Any], names: dict[str, str]) -> str | None:
+    """Prefer the field's display name, then its system name, then its id."""
+    definition = item.get("fieldDefinition")
+    if isinstance(definition, str) and definition.strip():
+        key = definition.strip()
+        return names.get(key) or key
+    if not isinstance(definition, dict):
+        return None
+    for key in ("name", "displayName"):
+        candidate = definition.get(key)
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+    field_id = definition.get("id")
+    if isinstance(field_id, str) and field_id.strip():
+        mapped = names.get(field_id.strip())
+        if mapped:
+            return mapped
+    system_name = definition.get("systemName")
+    if isinstance(system_name, str) and system_name.strip():
+        return system_name.strip()
+    if isinstance(field_id, str) and field_id.strip():
+        return field_id.strip()
+    return None
+
+
+def _schema_field_cell(item: dict[str, Any]) -> Any:
+    """Flatten a ``SchemaFieldValue``. A null value may still carry ``linkedEntityId``."""
+    if "value" in item:
+        flattened = _unwrap_field(item["value"])
+        if flattened is not None:
+            return flattened
+    linked = item.get("linkedEntityId")
+    if isinstance(linked, str) and linked:
+        return linked
+    if "value" in item:
+        return _unwrap_field(item["value"])
+    return None
 
 
 def _unwrap_field(value: Any) -> Any:
-    """Use a field's value, including each item of a multi-value field."""
+    """Use a field's scalar value. Links and entity refs become their ids."""
     if isinstance(value, list):
         return [_unwrap_field(item) for item in value]
     if isinstance(value, dict):
         if "value" in value:
-            return value["value"]
+            return _unwrap_field(value["value"])
         if "textValue" in value:
             return value["textValue"]
         if "displayValue" in value:
             return value["displayValue"]
+        linked = value.get("id")
+        if isinstance(linked, str) and linked and ("__typename" in value or "type" in value):
+            return linked
     return value
+
+
+def _record_schema_id(record: dict[str, Any]) -> str | None:
+    schema_id = record.get("schemaId")
+    if isinstance(schema_id, str) and schema_id:
+        return schema_id
+    schema = record.get("schema")
+    if isinstance(schema, dict):
+        nested = schema.get("id")
+        if isinstance(nested, str) and nested:
+            return nested
+    return None
+
+
+def _record_needs_field_names(record: dict[str, Any]) -> bool:
+    """True when a schemaFields entry has no display name of its own."""
+    raw = record.get("schemaFields")
+    if not isinstance(raw, list):
+        return False
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        definition = item.get("fieldDefinition")
+        if isinstance(definition, str) and definition.strip():
+            return True
+        if not isinstance(definition, dict):
+            continue
+        name = definition.get("name")
+        if isinstance(name, str) and name.strip():
+            continue
+        display = definition.get("displayName")
+        if isinstance(display, str) and display.strip():
+            continue
+        if isinstance(definition.get("id"), str) and definition["id"].strip():
+            return True
+    return False
+
+
+async def _schema_field_names(
+    service: BenchlingService, records: list[dict[str, Any]], schema_id: object
+) -> dict[str, str]:
+    """Map field-definition ids to display names for records that need them.
+
+    A missing schema is skipped. Other read failures propagate, so a schema outage
+    is not written out as raw field ids.
+    """
+    if not any(_record_needs_field_names(record) for record in records):
+        return {}
+    schema_ids: list[str] = []
+    if isinstance(schema_id, str) and schema_id:
+        schema_ids.append(schema_id)
+    for record in records:
+        record_schema = _record_schema_id(record)
+        if record_schema and record_schema not in schema_ids:
+            schema_ids.append(record_schema)
+    names: dict[str, str] = {}
+    for sid in schema_ids:
+        try:
+            detail = await service.get_schema(sid)
+        except NotFoundError:
+            continue
+        for definition in detail.get("field_definitions") or []:
+            if not isinstance(definition, dict):
+                continue
+            display = definition.get("name")
+            field_id = definition.get("id")
+            if (
+                isinstance(field_id, str)
+                and field_id
+                and isinstance(display, str)
+                and display.strip()
+                and field_id not in names
+            ):
+                names[field_id] = display.strip()
+    return names
 
 
 def _render(

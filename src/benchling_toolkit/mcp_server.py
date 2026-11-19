@@ -488,9 +488,12 @@ def _register_export_tool(mcp: MCPServer, pool: RuntimePool) -> None:
         """Write a table, results table, or assay results to a local file.
 
         kind is table, results-table, or assay-results. format is json or csv.
-        The response is a summary only: row count, columns, file path, and a
-        SHA-256 checksum. Rows are not returned. Pages are read internally.
-        An existing file is left unchanged unless overwrite is true.
+        part_id for table and results-table is a v3_document_part id (docpart_…)
+        from inspect_entry. A v2_structured_table id (strtbl_…) from
+        list_result_tables needs entry set to that same entry and kind
+        results-table. The response is a summary only: row count, columns, file
+        path, and a SHA-256 checksum. Rows are not returned. Pages are read
+        internally. An existing file is left unchanged unless overwrite is true.
         Benchling is only read.
         """
         return await safe(

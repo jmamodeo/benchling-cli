@@ -179,6 +179,48 @@ def is_results_table(part: dict[str, Any]) -> bool:
     return part_type(part).split(".")[-1] == "DocumentPartResultsTable"
 
 
+_TABLE_HANDLE_KEYS = ("apiId", "tableHandleId", "structuredTableId", "legacyId", "v2Id")
+
+
+def table_handle_ids(part: dict[str, Any]) -> set[str]:
+    """Ids that can refer to the same table on a V2 note and a V3 document part."""
+    found: set[str] = set()
+    part_id = part.get("id")
+    if isinstance(part_id, str) and part_id:
+        found.add(part_id)
+    content = part_content(part)
+    for source in (part, content):
+        for key in _TABLE_HANDLE_KEYS:
+            value = source.get(key)
+            if isinstance(value, str) and value:
+                found.add(value)
+    return found
+
+
+def part_display_name(part: dict[str, Any]) -> str | None:
+    """The part's display name, from flattened or legacy content."""
+    content = part_content(part)
+    for source in (content, part):
+        name = source.get("name")
+        if isinstance(name, str) and name:
+            return name
+    return None
+
+
+def part_result_schema_id(part: dict[str, Any]) -> str | None:
+    """The result schema id on a results-table part, when the part carries one."""
+    content = part_content(part)
+    for source in (content, part):
+        schema = source.get("resultSchema")
+        if isinstance(schema, dict):
+            schema_id = schema.get("id")
+            if isinstance(schema_id, str) and schema_id:
+                return schema_id
+        elif isinstance(schema, str) and schema:
+            return schema
+    return None
+
+
 def is_unavailable_part(part: dict[str, Any]) -> bool:
     """True when Benchling withheld the part's concrete type at this API stability."""
     return part_type(part).split(".")[-1] == "DocumentPartUnavailable"
@@ -852,6 +894,62 @@ class BenchlingService:
             "schema_id": note.get("assayResultSchemaId"),
             "columns": note.get("columns") or [],
         }
+
+    async def document_part_for_listed_table(
+        self,
+        entry_id: str,
+        note: dict[str, Any],
+        *,
+        unstructured: bool,
+    ) -> str | None:
+        """Return the V3 document-part id for a V2 ``strtbl_`` note, when one part matches.
+
+        A handle (``apiId``, ``tableHandleId``, or the part id) wins. A results table
+        otherwise matches its result schema, and its name when several parts share
+        that schema. The only results part is used when the note has no schema.
+        An unstructured table matches only by handle. ``strtbl_`` is not itself a
+        document-part id.
+        """
+        table_id = note.get("table_id")
+        if not isinstance(table_id, str) or not table_id:
+            return None
+        parts = [
+            item
+            async for item in self.api.paginate(
+                f"/entry/{entry_id}/parts/items", params={"pageSize": 100}
+            )
+        ]
+        predicate = is_unstructured_table if unstructured else is_results_table
+        typed = [part for part in parts if predicate(part) and isinstance(part.get("id"), str)]
+        direct = [part for part in typed if table_id in table_handle_ids(part)]
+        if len(direct) == 1:
+            return str(direct[0]["id"])
+        if unstructured or len(direct) > 1:
+            return None
+        schema_id = note.get("schema_id")
+        name = note.get("name") if isinstance(note.get("name"), str) and note.get("name") else None
+        schema_matches = [
+            part
+            for part in typed
+            if isinstance(schema_id, str) and schema_id and part_result_schema_id(part) == schema_id
+        ]
+        if len(schema_matches) == 1:
+            return str(schema_matches[0]["id"])
+        if name:
+            named = [part for part in schema_matches if part_display_name(part) == name]
+            if len(named) == 1:
+                return str(named[0]["id"])
+        if (
+            len(typed) == 1
+            and not schema_matches
+            and (
+                not isinstance(schema_id, str)
+                or not schema_id
+                or part_result_schema_id(typed[0]) in {None, schema_id}
+            )
+        ):
+            return str(typed[0]["id"])
+        return None
 
     async def get_project(self, project_id: str) -> dict[str, Any]:
         """Fetch a V2 project; raises UpstreamError if the response lacks an object ID."""

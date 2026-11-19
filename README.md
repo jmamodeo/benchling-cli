@@ -271,6 +271,7 @@ benchling --env dev results tables etr_abc123
 benchling --env dev results rows docpart_example --limit 50
 benchling --env dev export --kind table --part docpart_table1 --format csv --output measurements.csv
 benchling --env dev export --kind results-table --part docpart_rt1 --format json --output results-table.json
+benchling --env dev export --kind results-table --part strtbl_example --entry etr_abc123 --format csv --output listed-table.csv
 benchling --env dev export --kind assay-results --entry etr_abc123 --schema assaysch_example --format csv --output assay.csv
 ```
 
@@ -288,6 +289,10 @@ Every `entry list` filter is applied by Benchling. `routing.client_side` is alwa
 `results rows PART_ID` reads one page of a results table. It is read-only. The page size defaults to 50 and stops at 100. Pass `next_token` back with `--cursor`. The call is `GET /document-part-results-table/{id}/rows/items` with `pageSize` and `nextToken`. The part is read first, and its `rows` URL must be that path on this tenant. Cells use the same shape as `entry get --full`. `row_count` is the count on the part. `entry get --full` still reads every row of the part.
 
 `benchling export` writes an unstructured table (`--kind table`), a results table (`--kind results-table`), or assay results (`--kind assay-results`) to a JSON or CSV file. `--format` is `json` or `csv`. `table` and `results-table` require `--part`. `assay-results` accepts `--entry` and `--schema`, the same filters as `results list`. The command reads every page itself: unstructured-table and results-table rows at `pageSize` 100, and assay results from `GET /result/items` at `pageSize` 100. The printed envelope is a summary only: `row_count`, `columns`, `path`, and `checksum` (SHA-256 of the file bytes). The rows stay in the file, so a large table does not enter an agent's context. A cell is the evaluation when Benchling returned one, otherwise the input. Duplicate column names get a `__2` suffix. An existing file is left unchanged unless `--overwrite` is set. Nothing is written to Benchling. The MCP tool `export` uses the same summary.
+
+`--part` takes a `v3_document_part` id (`docpart_…`) from `entry inspect` (the `tables` part ids). `results tables ENTRY` returns a different id: `table_id` is a `v2_structured_table` id (`strtbl_…`, `id_namespace` `v2_structured_table`). Pass that id with `--kind results-table --entry ENTRY` (the same entry). The export reads the entry's document parts and uses the matching results-table part. When no part matches, it reads assay results for that entry and the table's result schema. `--kind table` does not accept a `strtbl_…` id. That is a validation error naming `v3_document_part`. A `strtbl_…` id with no `--entry` is the same kind of error.
+
+Assay-result columns are the result's scalar metadata plus one column per schema field. V3 stores those values in `schemaFields` (an array of field-definition ref plus value), not in a top-level `fields` object. The column name is the field's display name. A link or entity reference is written as its id. A multi-value field is a JSON array in CSV.
 
 ### Preview and apply changes
 
