@@ -8,10 +8,15 @@ All notable changes to this project are documented here. The format is based on
 
 ### Added
 
+- `benchling export` and the MCP tool `export` write an unstructured table, a results table, or assay results to a JSON or CSV file. The response is a summary only: row count, column names, file path, and the SHA-256 checksum of the file. Pages are read internally. An existing file is left unchanged unless overwrite is set. Benchling is only read.
 - `benchling results rows PART_ID` and the MCP tool `list_results_table_rows` read one page of a results table from `GET /document-part-results-table/{id}/rows/items`. The page size defaults to 50 and stops at 100. The response uses the standard JSON envelope and includes `next_token`.
 
 ### Fixed
 
+- `export --kind assay-results` writes one column per result-schema field. V3 results keep those values in `schemaFields`, and the column name is the field's display name. Links and entity references are written as ids.
+- An unset assay field stays empty. `linkedEntityId` is written only for a link field when it names a different entity. CSV writes `""` and JSON writes `null`.
+- `export --kind results-table` and `--kind table` flatten link and entity cells to ids, the same values assay-result export writes.
+- `export --part` accepts a `strtbl_…` id from `results tables` when `--entry` is that entry and `--kind` is `results-table`. The id is resolved to the entry's V3 results-table part, or the rows are read as assay results for that entry and schema. A `strtbl_…` id without `--entry`, or with `--kind table`, is a validation error that names the `v3_document_part` id from `entry inspect`.
 - `entry list --name` accepts a name that contains a comma. `name.anyOf` and `names.anyOf` are comma-separated and document no escape, so that name is sent as the V2 `name` parameter together with the other filters.
 - A modified timestamp with no time zone is a validation error. `YYYY-MM-DD` is still the start or end of that UTC day.
 - Entry and schema lists return `modified_at` as a UTC timestamp with a `Z` suffix. V2 `+00:00` values and other offsets are converted.

@@ -71,12 +71,14 @@ def writer(pool):
 
 async def test_tools_are_annotated_by_whether_they_can_write(client) -> None:
     tools = {tool.name: tool for tool in (await client.list_tools()).tools}
-    assert READ_TOOLS | {"plan_changes", "apply_changes"} == set(tools)
+    assert READ_TOOLS | {"export", "plan_changes", "apply_changes"} == set(tools)
     for name in READ_TOOLS:
         assert tools[name].annotations.read_only_hint is True, name
     assert tools["apply_changes"].annotations.destructive_hint is True
     assert tools["plan_changes"].annotations.read_only_hint is False
     assert tools["plan_changes"].annotations.destructive_hint is False
+    assert tools["export"].annotations.read_only_hint is False
+    assert tools["export"].annotations.destructive_hint is False
     schema = tools["get_capabilities"].output_schema
     assert schema["properties"]["schema_version"]["const"] == "1.0"
     assert "ok" in schema["required"]

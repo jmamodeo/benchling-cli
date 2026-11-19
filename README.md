@@ -269,6 +269,10 @@ benchling --env dev entry list --folder lib_example --name "Example entry"
 benchling --env dev results list --entry etr_abc123
 benchling --env dev results tables etr_abc123
 benchling --env dev results rows docpart_example --limit 50
+benchling --env dev export --kind table --part docpart_table1 --format csv --output measurements.csv
+benchling --env dev export --kind results-table --part docpart_rt1 --format json --output results-table.json
+benchling --env dev export --kind results-table --part strtbl_example --entry etr_abc123 --format csv --output listed-table.csv
+benchling --env dev export --kind assay-results --entry etr_abc123 --schema assaysch_example --format csv --output assay.csv
 ```
 
 Entry references may be canonical IDs, display IDs, or URLs for the selected tenant. Duplicate section titles must be addressed by part ID.
@@ -283,6 +287,14 @@ Every `entry list` filter is applied by Benchling. `routing.client_side` is alwa
 - `modified_at` on entry and schema lists is a UTC timestamp with a `Z` suffix. V2 values that use `+00:00`, and values with another offset, are converted.
 
 `results rows PART_ID` reads one page of a results table. It is read-only. The page size defaults to 50 and stops at 100. Pass `next_token` back with `--cursor`. The call is `GET /document-part-results-table/{id}/rows/items` with `pageSize` and `nextToken`. The part is read first, and its `rows` URL must be that path on this tenant. Cells use the same shape as `entry get --full`. `row_count` is the count on the part. `entry get --full` still reads every row of the part.
+
+`benchling export` writes an unstructured table (`--kind table`), a results table (`--kind results-table`), or assay results (`--kind assay-results`) to a JSON or CSV file. `--format` is `json` or `csv`. `table` and `results-table` require `--part`. `assay-results` accepts `--entry` and `--schema`, the same filters as `results list`. The command reads every page itself: unstructured-table and results-table rows at `pageSize` 100, and assay results from `GET /result/items` at `pageSize` 100. The printed envelope is a summary only: `row_count`, `columns`, `path`, and `checksum` (SHA-256 of the file bytes). The rows stay in the file, so a large table does not enter an agent's context. A cell is the evaluation when Benchling returned one, otherwise the input. Duplicate column names get a `__2` suffix. An existing file is left unchanged unless `--overwrite` is set. Nothing is written to Benchling. The MCP tool `export` uses the same summary.
+
+`--part` takes a `v3_document_part` id (`docpart_…`) from `entry inspect` (the `tables` part ids). `results tables ENTRY` returns a different id: `table_id` is a `v2_structured_table` id (`strtbl_…`, `id_namespace` `v2_structured_table`). Pass that id with `--kind results-table --entry ENTRY` (the same entry). The export reads the entry's document parts and uses the matching results-table part. When no part matches, it reads assay results for that entry and the table's result schema. `--kind table` does not accept a `strtbl_…` id. That is a validation error naming `v3_document_part`. A `strtbl_…` id with no `--entry` is the same kind of error.
+
+Assay-result columns are the result's scalar metadata plus one column per schema field. V3 stores those values in `schemaFields` (an array of field-definition ref plus value), not in a top-level `fields` object. The column name is the field's display name. A link or entity reference is written as its id. A multi-value field is a JSON array in CSV. An unset field is empty: CSV writes `""` and JSON writes `null`. `linkedEntityId` is used only when the field is a link and the id is a different entity. An unset field's `linkedEntityId` is often the result's own id, and that id is not written as the value.
+
+A results-table or unstructured-table cell is flattened the same way. A link or entity reference becomes its id in both JSON and CSV, so a results table and the assay results for the same record show the same value.
 
 ### Preview and apply changes
 
@@ -344,7 +356,7 @@ On Linux the standard MCP SDK starts the stdio server with only `HOME`, `LOGNAME
 
 Startup failures, including a missing keychain, are a JSON envelope on stderr and a non-zero exit. Stdout is reserved for the MCP protocol. The stderr text names the MCP SDK's default environment and the `env` block. Request logging is off unless you pass `--verbose`.
 
-Every tool except `list_environments` takes a required `env` argument, and each call is authenticated with that environment's credentials. The server is read-only by default. To permit `apply_changes` in specific environments, add `--allow-writes ENV` after `serve` (repeatable, e.g. `--allow-writes dev --allow-writes test`); reads remain available in all environments. `list_entries` and `list_schemas` are reads, so they work without `--allow-writes`. A plan can only be applied or checked in the environment that created it. `plan_changes` remains available because it performs remote reads and writes only an immutable local preview. Large entry, section, table, result, and schema responses expose offset/limit or cursor pagination and never silently truncate data. `list_entries`, `list_schemas`, and `list_results_table_rows` use `limit` (default 50, maximum 100) and return `next_token` for the following page. `list_results_table_rows` is a read, so it works without `--allow-writes`.
+Every tool except `list_environments` takes a required `env` argument, and each call is authenticated with that environment's credentials. The server is read-only by default. To permit `apply_changes` in specific environments, add `--allow-writes ENV` after `serve` (repeatable, e.g. `--allow-writes dev --allow-writes test`); reads remain available in all environments. `list_entries` and `list_schemas` are reads, so they work without `--allow-writes`. A plan can only be applied or checked in the environment that created it. `plan_changes` remains available because it performs remote reads and writes only an immutable local preview. Large entry, section, table, result, and schema responses expose offset/limit or cursor pagination and never silently truncate data. `list_entries`, `list_schemas`, and `list_results_table_rows` use `limit` (default 50, maximum 100) and return `next_token` for the following page. `list_results_table_rows` is a read, so it works without `--allow-writes`. `export` reads every page internally and writes a local JSON or CSV file. Its response is the same summary as the CLI (row count, columns, path, SHA-256) and does not include the rows. It does not write to Benchling, and it does not need `--allow-writes`. An existing file is left unchanged unless `overwrite` is true.
 
 The CLI and MCP tools share the same versioned envelope. Static schemas for the envelope and change specifications live under [`schemas/`](schemas/); MCP also publishes the generated input and output schema for each typed tool during tool discovery.
 
@@ -373,6 +385,7 @@ flowchart TD
 | `cli.py` | Typer command-line interface |
 | `mcp_server.py` | MCP tools, read-only default, write allow-list |
 | `services.py` | Typed read services and entry snapshots |
+| `export.py` | Local JSON or CSV export; the response is a summary, not the rows |
 | `listing.py` | Paged entry, schema, and dropdown discovery |
 | `plans/planner.py` | `ChangePlanner`: plan, apply (under a per-plan file lock), status, journal |
 | `plans/document.py`, `plans/table.py`, `plans/fields.py`, `plans/results.py` | One planning/apply mixin per change family |
@@ -394,6 +407,7 @@ flowchart TD
 - **Single use.** A plan with any prior attempt cannot be applied again, and a per-plan file lock stops a CLI and an MCP process from applying the same plan concurrently on one machine.
 - **Writes are never retried.** A write that times out or fails with a server error leaves the journal in `unknown`/`partial` state for a person to reconcile; reads are retried with bounded backoff.
 - **Read-only MCP by default.** `apply_changes` is refused unless the server was started with `--allow-writes ENV` for that environment. `plan_changes` stays available because it only reads Benchling and writes a local preview.
+- **Export writes a local file only.** `export` reads Benchling and writes JSON or CSV on this machine. The response is a summary. An existing file is not replaced unless overwrite is set.
 - **Explicit environment on every call.** There is no default environment, so a command or tool call cannot reach a tenant by omission.
 - **Secrets stay in the OS keychain.** The tenant URL and client ID are stored in `environments.json` with mode 0600. Access tokens stay in process memory. Error envelopes and journals are scrubbed, and TLS verification uses the OS trust store with no insecure fallback. There is no plaintext secret file.
 
@@ -434,7 +448,7 @@ uv run mypy
 uv run pytest --cov
 ```
 
-The suite has 310 test functions (488 collected cases, parametrization included) and reaches 98% branch coverage. CI enforces a `fail_under` floor of 96% in `pyproject.toml`, and also builds the sdist and wheel, runs `twine check`, and smoke-tests the built wheel.
+The suite has 342 test functions (534 collected cases, parametrization included) and reaches 98% branch coverage. CI enforces a `fail_under` floor of 96% in `pyproject.toml`, and also builds the sdist and wheel, runs `twine check`, and smoke-tests the built wheel.
 
 ### Opt-in sandbox exercise
 
