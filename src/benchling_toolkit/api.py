@@ -80,7 +80,7 @@ class BenchlingAPI:
                 if method != "GET" or attempt + 1 >= attempts:
                     error_cls = PartialCompletionError if method != "GET" else UpstreamError
                     raise error_cls(
-                        "Benchling request did not produce a confirmed response",
+                        "Benchling request did not produce a confirmed response. Check the tenant URL.",
                         details={"method": method, "path": path, "reason": redact_text(str(exc))},
                         retryable=method == "GET",
                     ) from exc

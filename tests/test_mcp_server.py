@@ -565,3 +565,119 @@ def test_serve_runs_stdio_transport_with_validated_writable_envs(
     monkeypatch.setattr(MCPServer, "run", lambda self, transport: seen.append(transport))
     run_mcp_server(writable_envs={"sandbox"})
     assert seen == ["stdio"]
+
+
+def test_closed_loop_on_shutdown_is_not_a_startup_failure(benchling_env, monkeypatch) -> None:
+    from mcp.server.mcpserver import MCPServer
+
+    from benchling_toolkit.mcp_server import _close_pool, _closed_event_loop
+
+    monkeypatch.setattr(
+        MCPServer,
+        "run",
+        lambda self, transport: (_ for _ in ()).throw(RuntimeError("Event loop is closed")),
+    )
+    run_mcp_server()
+
+    def close_raises(coro: object) -> None:
+        close = getattr(coro, "close", None)
+        if close is not None:
+            close()
+        raise RuntimeError("Event loop is closed")
+
+    monkeypatch.setattr(MCPServer, "run", lambda self, transport: None)
+    monkeypatch.setattr("benchling_toolkit.mcp_server.asyncio.run", close_raises)
+    run_mcp_server()
+
+    grouped = BaseExceptionGroup("shutdown", [RuntimeError("Event loop is closed")])
+    assert _closed_event_loop(grouped) is True
+    assert _closed_event_loop(RuntimeError("boom")) is False
+    pool = RuntimePool()
+    _close_pool(pool)
+
+
+def test_stdin_close_after_a_tool_call_exits_quietly(tmp_path: object) -> None:
+    import os
+    import subprocess
+    import sys
+
+    script = """
+import keyring
+from memory_keyring import MemoryKeyring
+
+keyring.set_keyring(MemoryKeyring())
+from benchling_toolkit.environment import EnvironmentConfigStore
+from benchling_toolkit.keychain import Keychain
+from benchling_toolkit.models import AuthMethod, Environment
+from benchling_toolkit.services import BenchlingService
+
+async def fake_resolve(self, reference):
+    try:
+        await self.api.http.get("http://127.0.0.1:9", timeout=0.2)
+    except Exception:
+        pass
+    return {"entry_id": "etr_abc123"}
+
+BenchlingService.resolve_entry = fake_resolve
+EnvironmentConfigStore().upsert(
+    Environment(
+        name="sandbox",
+        tenant_url="https://your-tenant.benchling.com",
+        auth_method=AuthMethod.CLIENT_CREDENTIALS,
+        client_id="client",
+    )
+)
+Keychain().set("sandbox", "sandbox-client-secret")
+from benchling_toolkit.cli import app
+app(["mcp", "serve"])
+"""
+    # The child is the server. The parent sends the session and closes stdin.
+    env = os.environ.copy()
+    env["PYTHONPATH"] = "tests" + os.pathsep + env.get("PYTHONPATH", "")
+    env["BENCHLING_TOOLKIT_HOME"] = str(tmp_path)
+    proc = subprocess.Popen(
+        [sys.executable, "-c", script],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
+    )
+    assert proc.stdin is not None and proc.stdout is not None and proc.stderr is not None
+    initialize = json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {"name": "test", "version": "0"},
+            },
+        }
+    )
+    proc.stdin.write((initialize + "\n").encode())
+    proc.stdin.flush()
+    assert proc.stdout.readline()
+    proc.stdin.write(
+        (json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}) + "\n").encode()
+    )
+    call = json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "resolve_entry",
+                "arguments": {"env": "sandbox", "reference": "etr_abc123"},
+            },
+        }
+    )
+    proc.stdin.write((call + "\n").encode())
+    proc.stdin.flush()
+    assert b"etr_abc123" in proc.stdout.readline()
+    proc.stdin.close()
+    stderr = proc.stderr.read()
+    code = proc.wait(timeout=8)
+    assert code == 0
+    assert b"MCP server failed to start" not in stderr
+    assert b"Event loop is closed" not in stderr

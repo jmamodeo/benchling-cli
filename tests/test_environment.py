@@ -231,7 +231,14 @@ def test_token_error_cannot_echo_secret():
     )
     with pytest.raises(AuthenticationError) as caught:
         auth.headers(environment)
-    assert caught.value.details == {"status": 401}
+    assert caught.value.message == (
+        "Benchling at https://your-tenant.benchling.com rejected the client ID or secret."
+    )
+    assert caught.value.details == {
+        "env": "dev",
+        "tenant_url": "https://your-tenant.benchling.com",
+        "status": 401,
+    }
     assert SECRET not in json.dumps(caught.value.details)
 
 

@@ -18,7 +18,7 @@ from benchling_toolkit import cli
 from benchling_toolkit.credentials import build_environment, login, logout
 from benchling_toolkit.environment import EnvironmentConfigStore
 from benchling_toolkit.errors import AuthenticationError, ValidationError
-from benchling_toolkit.keychain import Keychain
+from benchling_toolkit.keychain import Keychain, keychain_message
 from benchling_toolkit.models import Envelope
 from benchling_toolkit.redact import redact, register_secret
 
@@ -113,7 +113,12 @@ def test_failed_token_request_saves_nothing_and_hides_the_response(monkeypatch, 
     assert SECRET not in caplog.text
     error = json.loads(result.stdout)["error"]
     assert error["code"] == "authentication_error"
-    assert "Check the client ID and secret" in error["message"]
+    assert error["message"] == (
+        "Benchling at https://your-tenant.benchling.com rejected the client ID or secret."
+    )
+    assert error["details"]["env"] == "dev"
+    assert error["details"]["tenant_url"] == "https://your-tenant.benchling.com"
+    assert error["details"]["status"] == 401
     assert not EnvironmentConfigStore().environments_path.exists()
     assert Keychain().get("dev") is None
     assert seen == []
@@ -199,12 +204,12 @@ def test_missing_keyring_fails_before_prompting_and_names_a_fix(monkeypatch) -> 
     error = json.loads(result.stdout)["error"]
     message = error["message"]
     assert error["details"]["cause"] == "no_backend"
-    assert "gnome-keyring" in message
-    assert "plaintext" in message
-    assert "dbus-run-session" in message
-    assert "gnome-keyring-daemon --unlock --components=secrets" in message
-    assert "DBUS_SESSION_BUS_ADDRESS" in message
-    assert "Do not capture" in message
+    assert message == (
+        "No usable OS keychain is available because no Secret Service backend is installed.\n"
+        "sudo apt-get install -y gnome-keyring dbus\n"
+        "See the README section Headless Linux."
+    )
+    assert "HOME, LOGNAME" not in message
     assert not EnvironmentConfigStore().environments_path.exists()
 
 
@@ -285,7 +290,9 @@ def test_status_check_failure_is_an_authentication_error_without_the_secret(monk
     payload = json.loads(result.stdout)
     assert payload["error"]["details"]["failed_envs"] == ["dev"]
     assert payload["error"]["details"]["environments"]["dev"]["token_check"]["ok"] is False
-    assert "Check the client ID and secret" in payload["error"]["message"]
+    assert payload["error"]["message"] == (
+        "Benchling at https://your-tenant.benchling.com rejected the client ID or secret."
+    )
     assert SECRET not in result.stdout
 
 
@@ -322,7 +329,8 @@ def test_keychain_rejects_unusable_backends_and_hides_backend_errors(monkeypatch
     with pytest.raises(AuthenticationError) as plaintext:
         Keychain().require()
     assert plaintext.value.details["cause"] == "no_backend"
-    assert "plaintext" in plaintext.value.message
+    assert "Secret Service backend is installed" in plaintext.value.message
+    assert SECRET not in plaintext.value.message
 
     keyring.set_keyring(NullKeyring())
     with pytest.raises(AuthenticationError):
@@ -401,7 +409,10 @@ def test_terminal_prompts_and_empty_secret(monkeypatch) -> None:
         cli._read_terminal("Tenant URL")
 
     monkeypatch.setattr(cli.sys, "stdin", type("In", (), {"read": lambda self: ""})())
-    with pytest.raises(ValidationError, match="Client secret is required"):
+    with pytest.raises(ValidationError, match="No client secret was received on stdin"):
+        cli._read_secret(True)
+    monkeypatch.setattr(cli.sys, "stdin", type("In", (), {"read": lambda self: "\n"})())
+    with pytest.raises(ValidationError, match="No client secret was received on stdin"):
         cli._read_secret(True)
     monkeypatch.setattr("benchling_toolkit.cli.getpass.getpass", lambda prompt="": "")
     with pytest.raises(ValidationError, match="Client secret is required"):
@@ -837,6 +848,7 @@ def test_tty_reader_accepts_a_terminal_python_refuses_to_open_for_update() -> No
 
 
 def test_keychain_diagnosis_names_dbus_and_a_locked_collection(monkeypatch) -> None:
+    monkeypatch.delenv("DBUS_SESSION_BUS_ADDRESS", raising=False)
     monkeypatch.setattr("benchling_toolkit.keychain.provider_installed", lambda: True)
     monkeypatch.setattr("benchling_toolkit.keychain.secret_service_reachable", lambda: False)
     keyring.set_keyring(keyring.backends.fail.Keyring())
@@ -844,12 +856,23 @@ def test_keychain_diagnosis_names_dbus_and_a_locked_collection(monkeypatch) -> N
         Keychain().require()
     assert dbus_error.value.details["cause"] == "dbus_unreachable"
     dbus_message = dbus_error.value.message
+    assert dbus_message.count("\n") == 2
     assert "not reachable on D-Bus" in dbus_message
+    assert "DBUS_SESSION_BUS_ADDRESS is unset." in dbus_message
+    assert "is set, but" not in dbus_message
     assert "dbus-run-session" in dbus_message
+    assert "auth login" in dbus_message.split("dbus-run-session", 1)[1]
     assert "gnome-keyring-daemon --unlock --components=secrets" in dbus_message
-    assert "HOME, LOGNAME, PATH, SHELL, TERM and USER" in dbus_message
-    assert "plaintext" in dbus_message
-    assert "$(...)" in dbus_message
+    assert "See the README section Headless Linux." in dbus_message
+    assert "HOME, LOGNAME" not in dbus_message
+    monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/tmp/bus")
+    set_message = keychain_message("dbus_unreachable")
+    assert (
+        "DBUS_SESSION_BUS_ADDRESS is set, but this bus has no org.freedesktop.secrets name."
+        in set_message
+    )
+    assert "is unset" not in set_message
+    assert set_message.count("\n") == 2
 
     class Locked(MemoryKeyring):
         def get_password(self, service: str, username: str) -> str | None:
@@ -859,10 +882,14 @@ def test_keychain_diagnosis_names_dbus_and_a_locked_collection(monkeypatch) -> N
     with pytest.raises(AuthenticationError) as locked_error:
         Keychain().get("dev")
     assert locked_error.value.details["cause"] == "locked"
-    assert "collection is locked" in locked_error.value.message
-    assert "gnome-keyring-daemon --unlock --components=secrets" in locked_error.value.message
-    assert "DBUS_SESSION_BUS_ADDRESS" in locked_error.value.message
-    assert SECRET not in locked_error.value.message
+    locked_message = locked_error.value.message
+    assert locked_message.count("\n") == 2
+    assert "collection is locked" in locked_message
+    assert "dbus-run-session" in locked_message
+    assert "auth login" in locked_message
+    assert "See the README section Headless Linux." in locked_message
+    assert "HOME, LOGNAME" not in locked_message
+    assert SECRET not in locked_message
 
 
 def test_secret_service_probe_and_logging_flags(monkeypatch) -> None:

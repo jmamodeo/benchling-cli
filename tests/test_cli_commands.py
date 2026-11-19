@@ -392,9 +392,11 @@ def test_mcp_keychain_startup_error_is_json_on_stderr(monkeypatch) -> None:
     assert result.stdout == ""
     payload = json.loads(result.stderr)
     message = payload["error"]["message"]
+    assert message.count("\n") == 3
     assert "HOME, LOGNAME, PATH, SHELL, TERM and USER" in message
     assert "DBUS_SESSION_BUS_ADDRESS" in message
     assert "env block" in message
+    assert "Cron needs that same long-lived bus exported." in message
     assert "dev-client-secret" not in result.stderr
 
 
