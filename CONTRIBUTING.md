@@ -27,6 +27,23 @@ uv run python scripts/update_coverage_badge.py
 
 Add or update tests for behavior you change. Tests must stay offline and use mocked HTTP.
 
+## OpenAPI drift check
+
+`contracts/openapi-manifest.json` records the SHA-256 of each vendored public spec, the URL that file came from, and the `routes_used` paths this toolkit calls.
+
+`.github/workflows/openapi-drift.yml` runs every Monday at 12:00 UTC and when someone starts it with `workflow_dispatch`. The job downloads the public V3 spec from the V3 contract URL in the manifest and compares the SHA-256. The public spec needs no tenant and no credentials. The scheduled check covers the `benchling-v3` contract. The V2 snapshot stays in the manifest for offline request validation.
+
+When the hash differs, the job fails. The log names each `routes_used` path whose operation or referenced definition changed. When the public file differs only outside those paths, the log says so and still fails.
+
+Run the same check locally. Omit `--spec-file` to download the public spec:
+
+```console
+uv run python scripts/check_openapi_drift.py
+uv run python scripts/check_openapi_drift.py --spec-file path/to/openapi.yaml
+```
+
+Unit tests for the script use fixture specs and do not download anything.
+
 ## Pull requests
 
 - Branch from `main` and keep each PR focused.

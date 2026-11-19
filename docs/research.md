@@ -26,6 +26,8 @@ Primary sources:
 
 The checksums recorded in `contracts/openapi-manifest.json` identify the exact public specifications reviewed. The YAML snapshots next to that manifest are those files. Tests validate the client's request bodies against them and do not need network access. List query parameters are also checked against `contracts/list-parameters.json`.
 
+`scripts/check_openapi_drift.py` downloads the public V3 file from the URL in that manifest every Monday and on demand. A different SHA-256 fails the job and lists each `routes_used` path whose operation or referenced definition changed. The check uses the public spec only.
+
 A parameter check on 2026-11-19 against those snapshots confirmed:
 
 - V3 `GET /entry/items` documents `project.eq`, `schema.eq`, `name.anyOf`, and `modifiedAt.gt` / `gte` / `lt` / `lte`. It does not document `folderId`. Live tenants ignore `folderId` on that route.
