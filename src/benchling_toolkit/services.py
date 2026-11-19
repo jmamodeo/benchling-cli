@@ -895,6 +895,27 @@ class BenchlingService:
             "next_token": payload.get("nextToken") or None,
         }
 
+    async def list_all_results(
+        self,
+        *,
+        entry: str | None = None,
+        schema_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Return every assay-result page for these filters.
+
+        Pages are followed internally at pageSize 100 until nextToken is absent.
+        ``entry`` is resolved once. ``schema_id`` is sent as ``schema.eq`` when given.
+        """
+        params: dict[str, Any] = {"pageSize": listing.LIST_LIMIT_MAX}
+        resolved: str | None = None
+        if entry is not None:
+            resolved = str((await self.resolve_entry(entry))["entry_id"])
+            params["entry.eq"] = resolved
+        if schema_id is not None:
+            params["schema.eq"] = schema_id
+        items = [item async for item in self.api.paginate("/result/items", params=params)]
+        return {"items": items, "entry_id": resolved, "schema_id": schema_id}
+
     async def get_result(self, result_id: str) -> dict[str, Any]:
         """Fetch a single result by ID."""
         return await self.api.request("GET", f"/result/{result_id}")

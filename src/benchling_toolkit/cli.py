@@ -24,6 +24,7 @@ from .errors import (
     UpstreamError,
     ValidationError,
 )
+from .export import export_dataset
 from .keychain import Keychain, bind_login_fix
 from .models import Envelope, Environment, PlanFamily
 from .redact import redact_text
@@ -614,6 +615,47 @@ def results_rows(
         state.env,
         lambda runtime: runtime.service.list_results_table_rows(
             part_id, limit=limit, cursor=cursor
+        ),
+    )
+
+
+@app.command("export")
+def export_data(
+    ctx: typer.Context,
+    kind: str = typer.Option(..., "--kind", help="table, results-table, or assay-results."),
+    output: str = typer.Option(..., "--output", "-o", help="File path to write."),
+    file_format: str = typer.Option(..., "--format", help="json or csv."),
+    overwrite: bool = typer.Option(
+        False, "--overwrite", help="Replace the file if it already exists."
+    ),
+    part_id: str | None = typer.Option(
+        None, "--part", help="Document part ID for table or results-table."
+    ),
+    entry: str | None = typer.Option(
+        None, "--entry", help="Entry ID, display ID, or URL. Assay results only."
+    ),
+    schema_id: str | None = typer.Option(
+        None, "--schema", help="Result schema ID. Assay results only."
+    ),
+) -> None:
+    """Write a table or assay results to a file and print a summary only.
+
+    Pages are read internally. The response is the row count, columns, path,
+    and SHA-256 checksum, not the rows. An existing file is kept unless
+    --overwrite is set. Benchling is only read.
+    """
+    state: State = ctx.obj
+    _execute(
+        state.env,
+        lambda runtime: export_dataset(
+            runtime.service,
+            kind=kind,
+            path=output,
+            file_format=file_format,
+            overwrite=overwrite,
+            part_id=part_id,
+            entry=entry,
+            schema_id=schema_id,
         ),
     )
 
