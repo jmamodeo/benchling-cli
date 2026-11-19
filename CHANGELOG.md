@@ -6,8 +6,13 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- `docs/setup.md` explains how to create a Benchling app, grant it project access, log in with `benchling auth login --env NAME` (OS keychain, including headless login), and keep separate read and write environments.
+
 ### Changed
 
+- The README install section shows `uv tool install benchling-toolkit` and `uvx --from benchling-toolkit benchling mcp serve`, and states that those commands work once the package is published to PyPI. Until then, the checkout forms are `uv tool install .` and `uvx --from . benchling mcp serve`.
 - MCP `plan_changes` takes a typed `specification` for document, table, field, inline result, and CSV result-update changes. A value that does not match is a `validation_error` in the standard envelope, and nothing is planned. Every MCP tool parameter has a description. The CLI still accepts the same JSON specs.
 
 ### Added
