@@ -20,8 +20,11 @@ An electronic lab notebook is a scientific record, so letting an AI agent write 
 
 ## Demo
 
-This is the real output of the CLI and MCP server running against the offline fake Benchling API that the test suite uses; no credentials or network are involved. Reproduce it with `uv run python scripts/demo.py`. Long fields are trimmed for readability and plan IDs differ on every run.
+![Scripted playback of the offline fixture demo: a read, a preview, one apply, a stale plan, a replay, and a read-only MCP server](docs/demo.gif)
 
+The picture and the [asciinema cast](docs/demo.cast) are a scripted playback of one run of `uv run python scripts/demo.py`. `scripts/render_demo.py` builds both files from that script's stdout. The script runs the real CLI and MCP server against the offline fake API in `tests/fake_benchling.py`, through an in-process HTTP mock. No credentials are used and no network call is made. The cast is an asciinema v2 file assembled from that transcript. It is not a capture from the asciinema recorder, and it is not a live tenant. Plan IDs differ on every run. The transcript below is the same run as the picture.
+
+<!-- demo-transcript:start -->
 ```console
 # 1. Read an entry (envelope trimmed for readability)
 
@@ -41,7 +44,7 @@ $ benchling --env demo changes plan --entry etr_abc123 --family table --spec set
 {
   "ok": true,
   "data": {
-    "id": "61f30b3982634235b8811a15e3ef3004",
+    "id": "9268199dd92c49a3b0df5be26ebb3dc8",
     "family": "table",
     "env": "demo",
     "preconditions": {
@@ -62,7 +65,7 @@ remote writes so far: 0
 
 # 3. Apply the first plan
 
-$ benchling --env demo changes apply 61f30b3982634235b8811a15e3ef3004
+$ benchling --env demo changes apply 9268199dd92c49a3b0df5be26ebb3dc8
 {
   "ok": true,
   "data": {
@@ -89,7 +92,7 @@ $ benchling --env demo changes apply 61f30b3982634235b8811a15e3ef3004
 
 # 4. The second plan was previewed against the old entry version: apply is refused
 
-$ benchling --env demo changes apply 346151df5d53417cb39d840ecb0c53f8
+$ benchling --env demo changes apply f76d9ec52ca7410a91955867a495b3f5
 {
   "ok": false,
   "error": {
@@ -106,7 +109,7 @@ $ benchling --env demo changes apply 346151df5d53417cb39d840ecb0c53f8
 
 # 5. A plan cannot be applied twice
 
-$ benchling --env demo changes apply 61f30b3982634235b8811a15e3ef3004
+$ benchling --env demo changes apply 9268199dd92c49a3b0df5be26ebb3dc8
 {
   "ok": false,
   "error": {
@@ -114,7 +117,7 @@ $ benchling --env demo changes apply 61f30b3982634235b8811a15e3ef3004
     "message": "Plan has already been applied or attempted",
     "retryable": false,
     "details": {
-      "plan_id": "61f30b3982634235b8811a15e3ef3004",
+      "plan_id": "9268199dd92c49a3b0df5be26ebb3dc8",
       "status": "succeeded"
     }
   }
@@ -133,6 +136,7 @@ apply_changes(env="demo", plan_id=...) ->
   "details": {}
 }
 ```
+<!-- demo-transcript:end -->
 
 ## Install
 
@@ -387,6 +391,8 @@ The CLI and MCP tools share the same versioned envelope. Static schemas for the 
 
 ## Architecture
 
+[ARCHITECTURE.md](ARCHITECTURE.md) is the plan, apply, and journal sequence. The [threat model](docs/threat-model.md) covers credentials, stale or replayed plans, write scoping, and agent misuse, including the limits of those controls.
+
 ```mermaid
 flowchart TD
     Agent["AI agent (MCP client)"] -->|stdio| MCP["MCP server"]
@@ -415,6 +421,7 @@ flowchart TD
 | `listing.py` | Paged entry, schema, and dropdown discovery |
 | `plans/planner.py` | `ChangePlanner`: plan, apply (under a per-plan file lock), status, journal |
 | `plans/document.py`, `plans/table.py`, `plans/fields.py`, `plans/results.py` | One planning/apply mixin per change family |
+| `plans/result_update.py` | CSV updates of existing results: re-check `modifiedAt`, then `PATCH /result/{id}` |
 | `plans/repository.py` | Plan and journal persistence, checksums, JSON diff |
 | `api.py` | HTTP client for Benchling REST V2/V3: retries for reads, never for writes |
 | `auth.py` | OAuth client-credentials tokens, kept in memory |
@@ -429,7 +436,7 @@ flowchart TD
 - **Preview, then apply.** `changes plan` only reads Benchling and writes an immutable local plan; nothing changes remotely until `changes apply`. A document move that would leave the entry starting with anything other than a section fails in preview, before a plan is saved. Benchling rejects that shape with HTTP 400 `Entry must start with a section`.
 - **Journals record the HTTP status.** Each apply step stores the raw status Benchling returned (`http_status`) next to the response body. A local failure that never reached the API has no status.
 - **Plans are checksummed and scoped.** A plan stores a SHA-256 of its content, verified on load, and is bound to the environment and tenant that created it. The checksum catches accidental corruption; it is not a signature and does not defend against someone who can already write to your state directory.
-- **Version preconditions.** Document edits and table writes send the entry version observed at preview time, and Benchling answers HTTP 409 if it is stale. Table plans re-check that entry version just before writing. A concurrent edit becomes a conflict instead of an overwrite. Entry field updates have no atomic server-side precondition, so the affected values are compared immediately before writing; this is best effort.
+- **Version preconditions.** Document edits and table writes send the entry version observed at preview time, and Benchling answers HTTP 409 if it is stale. Table plans re-check that entry version just before writing. A concurrent edit becomes a conflict instead of an overwrite. Entry field updates have no atomic server-side precondition, so the affected values are compared immediately before writing; this is best effort. CSV result updates re-check each result's `modifiedAt`, entry, schema, and mapped values before any `PATCH /result/{id}`. That PATCH body has no version field, so the check is local. A mismatch writes nothing.
 - **Single use.** A plan with any prior attempt cannot be applied again, and a per-plan file lock stops a CLI and an MCP process from applying the same plan concurrently on one machine.
 - **Writes are never retried.** A write that times out or fails with a server error leaves the journal in `unknown`/`partial` state for a person to reconcile; reads are retried with bounded backoff.
 - **Read-only MCP by default.** `apply_changes` is refused unless the server was started with `--allow-writes ENV` for that environment. `plan_changes` stays available because it only reads Benchling and writes a local preview.
@@ -439,7 +446,7 @@ flowchart TD
 
 ## Design decisions and tradeoffs
 
-- **Plan/apply instead of one-call edit tools.** An AI agent reviews a concrete diff before anything is written, and replays are impossible. The cost is an extra step and some local state to manage.
+- **Plan/apply instead of one-call edit tools.** An AI agent reviews a concrete diff before anything is written, and a plan that has already been attempted cannot be applied again from this state directory. The cost is an extra step and some local state to manage.
 - **OS keychain, no default environment.** The client secret is stored by the operating system and the target tenant is always explicit. The cost is a keychain dependency and no headless plaintext fallback.
 - **App identity, not user identity.** OAuth client credentials give the toolkit its own permissions and audit identity, separate from any person's. The app must be granted access to each project it touches.
 - **One service layer, two interfaces.** The CLI and MCP server call the same typed services and return the same envelope, so behavior is specified and tested once. The cost is a more verbose, JSON-first CLI.

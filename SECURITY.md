@@ -1,5 +1,9 @@
 # Security Policy
 
+## Design
+
+[docs/threat-model.md](docs/threat-model.md) describes how this version handles credentials, stale or replayed plans, write scope, and agent misuse, and which of those risks the code does not close. [ARCHITECTURE.md](ARCHITECTURE.md) is the plan, apply, and journal sequence.
+
 ## Reporting a vulnerability
 
 Please report vulnerabilities privately using GitHub's
