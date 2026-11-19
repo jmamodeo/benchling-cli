@@ -1,7 +1,11 @@
-"""Interactive CLI smoke tests without secrets in shell history or files.
+"""Interactive CLI smoke tests.
 
-Run with the DEV endpoint/client ID exported; enter the secret at the hidden
-prompt. Then send one JSON object per line: {"args": ["entry", "inspect", "etr_..."]}.
+Log in first, in your own terminal, so the client secret never enters this
+script or an agent. State for the session is isolated below:
+
+    BENCHLING_TOOLKIT_HOME=work/live-test/state benchling auth login --env dev
+
+Then send one JSON object per line: {"args": ["--env", "dev", "entry", "inspect", "etr_..."]}.
 Optional `artifact` saves the generated CLI output under ignored work/live-test.
 Optional `select` limits displayed data keys, leaving the artifact unchanged.
 The session invokes the real CLI for every operation, including plan/apply.
@@ -9,7 +13,6 @@ The session invokes the real CLI for every operation, including plan/apply.
 
 from __future__ import annotations
 
-import getpass
 import json
 import os
 import subprocess
@@ -23,10 +26,13 @@ def main() -> None:
     output_dir = root / "work" / "live-test"
     output_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     env = dict(os.environ)
-    env["BENCHLING_DEV_CLIENT_SECRET"] = getpass.getpass("Client secret (not echoed): ")
     env["BENCHLING_TOOLKIT_HOME"] = str(output_dir / "state")
     executable = root / ".venv" / "bin" / "benchling"
-    print("CLI test session ready. Send JSON command objects; exit with EOF.", flush=True)
+    print(
+        "CLI test session ready. Environments come from "
+        f"{env['BENCHLING_TOOLKIT_HOME']}. Send JSON command objects; exit with EOF.",
+        flush=True,
+    )
     for line in sys.stdin:
         request = json.loads(line)
         args = request["args"]

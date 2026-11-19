@@ -16,6 +16,7 @@ from ..models import (
     ChangeJournal,
     ChangePlan,
 )
+from ..redact import redact
 
 SAFE_ID = re.compile(r"^[0-9a-f]{32}$")
 
@@ -72,8 +73,14 @@ class PlanRepository:
         return ChangeJournal.model_validate_json(path.read_text("utf-8"))
 
     def save_journal(self, journal: ChangeJournal) -> None:
-        """Atomically write the journal, replacing any previous version."""
+        """Atomically write the journal, replacing any previous version.
+
+        Client secrets and access tokens are removed before the file is written.
+        """
         self.config.ensure()
+        scrubbed = ChangeJournal.model_validate(redact(journal.model_dump(mode="json")))
+        journal.events = scrubbed.events
+        journal.result = scrubbed.result
         self._atomic_write(self._journal_path(journal.plan_id), journal.model_dump_json(indent=2))
 
     def _plan_path(self, plan_id: str) -> Path:

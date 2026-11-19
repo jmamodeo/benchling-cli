@@ -13,6 +13,7 @@ from .errors import (
     UpstreamError,
     ValidationError,
 )
+from .keychain import Keychain
 from .models import Envelope, PlanFamily
 from .runtime import Runtime, RuntimePool
 from .services import part_content
@@ -416,12 +417,19 @@ def run_mcp_server(*, writable_envs: set[str] | frozenset[str] = frozenset()) ->
     if writable_envs names an unconfigured one.
     """
     pool = RuntimePool()
-    available = pool.available()
-    if not available:
+    configured = pool.config.configured_names()
+    if not configured:
         raise AuthenticationError(
-            "No environments configured; set BENCHLING_<ENV>_API_ENDPOINT, "
-            "BENCHLING_<ENV>_CLIENT_ID, and BENCHLING_<ENV>_CLIENT_SECRET"
+            "No environments configured; run `benchling auth login --env NAME` in your terminal"
         )
+    keychain = Keychain()
+    keychain.require()
+    if not any(keychain.get(name) for name in configured):
+        raise AuthenticationError(
+            "No client secret is stored for the configured environments; "
+            "run `benchling auth login --env NAME` in your terminal"
+        )
+    available = pool.available()
     unknown = sorted(set(writable_envs) - set(available))
     if unknown:
         raise ValidationError(

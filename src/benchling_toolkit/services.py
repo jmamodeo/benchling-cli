@@ -10,6 +10,16 @@ from urllib.parse import urlparse
 from .api import BenchlingAPI
 from .errors import ConflictError, NotFoundError, UnsupportedError, UpstreamError, ValidationError
 from .models import CompletenessIssue, EntrySnapshot
+from .redact import redact_text
+
+
+def _error_text(exc: Exception) -> str:
+    """User-visible error text with client secrets and tokens removed."""
+    message = getattr(exc, "message", None)
+    if isinstance(message, str):
+        return redact_text(message)
+    return redact_text(str(exc))
+
 
 ENTRY_ID = re.compile(r"^etr_[A-Za-z0-9]+$")
 ENTRY_ID_IN_URL = re.compile(r"/(etr_[A-Za-z0-9]+)(?:[-/]|$)")
@@ -590,7 +600,7 @@ class BenchlingService:
                     {
                         "name": name,
                         "ok": False,
-                        "error": getattr(exc, "message", str(exc)),
+                        "error": _error_text(exc),
                         "code": getattr(exc, "code", type(exc).__name__),
                     }
                 )
@@ -667,7 +677,7 @@ class BenchlingService:
                         CompletenessIssue(
                             scope=f"table:{part_id}",
                             reason="detail_unavailable",
-                            details={"error": getattr(exc, "message", str(exc))},
+                            details={"error": _error_text(exc)},
                         )
                     )
             elif is_structured_table(part) and part_id:
@@ -693,7 +703,7 @@ class BenchlingService:
                 CompletenessIssue(
                     scope="entry_schema",
                     reason="schema_unavailable",
-                    details={"error": getattr(exc, "message", str(exc))},
+                    details={"error": _error_text(exc)},
                 )
             )
             return None
@@ -709,7 +719,7 @@ class BenchlingService:
                 CompletenessIssue(
                     scope="entry_fields",
                     reason="v2_fields_unavailable",
-                    details={"error": getattr(exc, "message", str(exc))},
+                    details={"error": _error_text(exc)},
                 )
             )
             return None
@@ -737,12 +747,12 @@ class BenchlingService:
                     break
             result_retrieval["complete"] = True
         except Exception as exc:
-            result_retrieval["error"] = getattr(exc, "message", str(exc))
+            result_retrieval["error"] = _error_text(exc)
             issues.append(
                 CompletenessIssue(
                     scope="results",
                     reason="linked_results_unavailable",
-                    details={"error": getattr(exc, "message", str(exc))},
+                    details={"error": _error_text(exc)},
                 )
             )
         result_retrieval["finished_at"] = datetime.now(UTC).isoformat()

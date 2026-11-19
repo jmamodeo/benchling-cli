@@ -11,6 +11,7 @@ import re
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import parse_qs
 
 import httpx
 
@@ -179,6 +180,10 @@ class FakeBenchling:
     def __init__(self) -> None:
         self.calls: list[Call] = []
         self.faults: list[Fault] = []
+        self.token_status = 200
+        self.token_body: dict[str, Any] | None = None
+        self.access_token = "token"
+        self.stamp: str | None = None
         self.entry_version = 1
         self.entry_name = "Synthetic experiment"
         self.display_id = "EXP-1"
@@ -243,7 +248,7 @@ class FakeBenchling:
         self.faults.append(Fault(method, contains, status, skip, times))
 
     def writes(self) -> list[Call]:
-        return [call for call in self.calls if call.method != "GET"]
+        return [call for call in self.calls if call.method != "GET" and call.path != "/oauth/token"]
 
     def part_ids(self) -> list[str]:
         return [part["id"] for part in self.parts]
@@ -258,6 +263,8 @@ class FakeBenchling:
 
     # ---- transport ---------------------------------------------------
     def handler(self, request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/oauth/token":
+            return self._oauth(request)
         body = json.loads(request.content) if request.content else None
         call = Call(request.method, request.url.path, dict(request.url.params), body)
         self.calls.append(call)
@@ -269,11 +276,43 @@ class FakeBenchling:
                 fault.times -= 1
                 if fault.status == 0:
                     raise RuntimeError("simulated local failure")
-                return httpx.Response(
-                    fault.status, json={"error": {"message": "injected"}}, request=request
-                )
+                body: dict[str, Any] = {"error": {"message": "injected"}}
+                if self.stamp:
+                    body["note"] = self.stamp
+                return httpx.Response(fault.status, json=body, request=request)
         status, payload = self._route(call)
+        if self.stamp and call.method != "GET":
+            payload = {**payload, "note": self.stamp}
         return httpx.Response(status, json=payload, request=request)
+
+    def _oauth(self, request: httpx.Request) -> httpx.Response:
+        form = parse_qs(request.content.decode() if request.content else "")
+        self.calls.append(
+            Call(
+                request.method,
+                request.url.path,
+                {},
+                {
+                    "grant_type": form.get("grant_type", [""])[0],
+                    "client_id": form.get("client_id", [""])[0],
+                },
+            )
+        )
+        if self.token_status >= 400:
+            return httpx.Response(
+                self.token_status,
+                json=self.token_body or {"error": "invalid_client"},
+                request=request,
+            )
+        return httpx.Response(
+            200,
+            json={
+                "access_token": self.access_token,
+                "token_type": "bearer",
+                "expires_in": 900,
+            },
+            request=request,
+        )
 
     def _route(self, call: Call) -> tuple[int, dict[str, Any]]:
         match = re.fullmatch(r"/api/v(\d)(/.*)", call.path)

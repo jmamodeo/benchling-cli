@@ -9,6 +9,17 @@ All notable changes to this project are documented here. The format is based on
 ### Changed
 
 - Repository links now point at `https://github.com/jmamodeo/benchling-toolkit` after the GitHub repository rename. Older changelog text is unchanged.
+- **Breaking:** `BENCHLING_<ENV>_API_ENDPOINT`, `BENCHLING_<ENV>_CLIENT_ID`, and `BENCHLING_<ENV>_CLIENT_SECRET` are no longer read. There is no fallback or alias. Configure an environment with `benchling auth login --env NAME`.
+
+### Added
+
+- `benchling auth login --env NAME` prompts for the tenant URL and client ID, reads the client secret from a hidden prompt or `--secret-stdin` (never from an argument), and saves only after a client-credentials token request succeeds. The tenant URL and client ID go in `environments.json` (mode 0600). The client secret goes in the OS keychain (service `benchling-toolkit`).
+- `benchling auth logout --env NAME` removes that `environments.json` record and its keychain secret.
+- `benchling auth status` lists saved environments and whether a keychain secret is present, without printing the secret. `--check` requests a token and reports the result without printing or saving it. The previous single-environment `access_token_usable` field is now `access_token_cached` on each environment (in-memory only). `credential_source` is `keyring`.
+
+### Removed
+
+- **Breaking:** environment-variable credentials. A missing OS keychain is an error. Client secrets are not written to a plaintext file.
 
 ## [0.3.0] - 2026-11-19
 

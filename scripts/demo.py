@@ -19,15 +19,20 @@ import tempfile
 from pathlib import Path
 
 import httpx
+import keyring
 from mcp import Client
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tests"))
 
 from fake_benchling import ENTRY_ID, TABLE_PART, TENANT, FakeBenchling  # noqa: E402
+from memory_keyring import MemoryKeyring  # noqa: E402
 
 from benchling_toolkit import cli  # noqa: E402
+from benchling_toolkit.environment import EnvironmentConfigStore  # noqa: E402
+from benchling_toolkit.keychain import Keychain  # noqa: E402
 from benchling_toolkit.mcp_server import build_mcp_server  # noqa: E402
+from benchling_toolkit.models import AuthMethod, Environment  # noqa: E402
 from benchling_toolkit.runtime import Runtime, RuntimePool  # noqa: E402
 
 fake = FakeBenchling()
@@ -96,9 +101,16 @@ def main() -> None:
 def _demo() -> None:
     home = tempfile.mkdtemp(prefix="benchling-demo-")
     os.environ["BENCHLING_TOOLKIT_HOME"] = home
-    os.environ["BENCHLING_DEMO_API_ENDPOINT"] = TENANT
-    os.environ["BENCHLING_DEMO_CLIENT_ID"] = "demo-client-id"
-    os.environ["BENCHLING_DEMO_CLIENT_SECRET"] = "demo-client-secret"
+    keyring.set_keyring(MemoryKeyring())
+    EnvironmentConfigStore().upsert(
+        Environment(
+            name="demo",
+            tenant_url=TENANT,
+            auth_method=AuthMethod.CLIENT_CREDENTIALS,
+            client_id="demo-client-id",
+        )
+    )
+    Keychain().set("demo", "demo-client-secret")
     cli.Runtime = _runtime
 
     os.chdir(home)

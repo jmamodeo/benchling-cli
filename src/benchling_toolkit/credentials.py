@@ -1,0 +1,212 @@
+"""Login, logout, and status for one or more named environments."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any
+
+import httpx
+from pydantic import ValidationError as ModelValidationError
+
+from .auth import AuthManager
+from .environment import ENV_NAME, EnvironmentConfigStore, write_private
+from .errors import AuthenticationError, BenchlingAgentError, ValidationError
+from .keychain import Keychain
+from .models import AuthMethod, Environment
+from .redact import redact_text, register_secret
+from .tls import verified_context
+
+
+def open_token_client() -> httpx.Client:
+    """HTTP client used only for the OAuth token endpoint."""
+    return httpx.Client(timeout=30.0, verify=verified_context())
+
+
+def build_environment(name: str, tenant_url: str, client_id: str) -> Environment:
+    """Validate a tenant URL and client ID without echoing either value."""
+    if not ENV_NAME.match(name):
+        raise ValidationError("Invalid environment name", details={"env": None})
+    client_id = client_id.strip()
+    if not client_id or any(character in client_id for character in "\r\n\x00"):
+        raise ValidationError("Client ID is required", details={"env": name})
+    try:
+        environment = Environment.model_validate(
+            {
+                "name": name,
+                "tenant_url": tenant_url.strip(),
+                "client_id": client_id,
+                "auth_method": AuthMethod.CLIENT_CREDENTIALS,
+            }
+        )
+    except ModelValidationError as exc:
+        raise ValidationError("Invalid endpoint or client ID", details={"env": name}) from exc
+    return environment
+
+
+def login(
+    store: EnvironmentConfigStore,
+    keychain: Keychain,
+    *,
+    name: str,
+    tenant_url: str,
+    client_id: str,
+    secret: str,
+    http: httpx.Client | None = None,
+) -> Environment:
+    """Verify client credentials, then save the environment and its secret.
+
+    Nothing is written if the token request fails. A failure while saving rolls
+    the keychain and environments.json back to their previous contents.
+    """
+    if secret == "" or secret.strip() == "":
+        raise ValidationError("Client secret is required", details={"env": name})
+    register_secret(secret)
+    environment = build_environment(name, tenant_url, client_id)
+    keychain.require()
+    if store.environments_path.exists():
+        store.configured_names()
+    _verify_token(environment, secret, http)
+    previous_secret = keychain.get(name)
+    previous_file = _read_file(store)
+    try:
+        keychain.set(name, secret)
+        store.upsert(environment)
+    except BenchlingAgentError:
+        _rollback(store, keychain, name, previous_secret, previous_file)
+        raise
+    except Exception as exc:
+        _rollback(store, keychain, name, previous_secret, previous_file)
+        raise AuthenticationError(
+            "Could not save the environment after authentication succeeded",
+            details={"env": name, "reason": type(exc).__name__},
+        ) from exc
+    return environment
+
+
+def logout(store: EnvironmentConfigStore, keychain: Keychain, name: str) -> None:
+    """Remove the environment record and its keychain secret."""
+    names = store.configured_names() if store.environments_path.exists() else []
+    if not ENV_NAME.match(name):
+        raise ValidationError(
+            "Invalid environment name",
+            details={"env": None, "available_envs": names},
+        )
+    keychain.require()
+    present = name in names
+    secret = keychain.get(name)
+    if not present and secret is None:
+        raise ValidationError(
+            "Unknown environment; run `benchling auth login --env NAME`",
+            details={"env": name, "available_envs": names},
+        )
+    keychain.delete(name)
+    if not present:
+        return
+    try:
+        store.remove(name)
+    except Exception:
+        if secret is not None:
+            keychain.set(name, secret)
+        raise
+
+
+@dataclass
+class StatusReport:
+    """Local configuration for each environment, plus optional token checks."""
+
+    environments: dict[str, dict[str, Any]] = field(default_factory=dict)
+    failed_envs: list[str] = field(default_factory=list)
+
+
+def collect_status(
+    store: EnvironmentConfigStore,
+    keychain: Keychain,
+    *,
+    name: str | None,
+    check: bool,
+    http: httpx.Client | None = None,
+) -> StatusReport:
+    """Describe saved environments without including secrets or tokens."""
+    names = [name] if name else store.configured_names()
+    if name:
+        store.resolve(name)
+    if not names:
+        return StatusReport()
+    keychain.require()
+    secrets = {item: secret for item in names if (secret := keychain.get(item))}
+    owns_http = http is None
+    client = http or open_token_client()
+    auth = AuthManager(secrets, http=client)
+    try:
+        report = StatusReport()
+        for item in names:
+            environment = store.resolve(item)
+            row = auth.status(environment)
+            if check:
+                row["token_check"] = _token_check(auth, environment, bool(secrets.get(item)))
+                row["access_token_cached"] = auth.status(environment)["access_token_cached"]
+                if row["token_check"]["ok"] is False:
+                    report.failed_envs.append(item)
+            report.environments[item] = row
+        return report
+    finally:
+        auth.close()
+        if owns_http:
+            client.close()
+
+
+def _verify_token(environment: Environment, secret: str, http: httpx.Client | None) -> None:
+    owns_http = http is None
+    client = http or open_token_client()
+    auth = AuthManager({environment.name: secret}, http=client)
+    try:
+        auth.headers(environment)
+    finally:
+        auth.close()
+        if owns_http:
+            client.close()
+
+
+def _token_check(
+    auth: AuthManager, environment: Environment, secret_present: bool
+) -> dict[str, Any]:
+    if not secret_present:
+        return {"ok": False, "message": "Client secret is not in the keychain"}
+    try:
+        auth.headers(environment)
+    except BenchlingAgentError as exc:
+        return {"ok": False, "message": redact_text(exc.message)}
+    return {"ok": True}
+
+
+def _read_file(store: EnvironmentConfigStore) -> str | None:
+    path = store.environments_path
+    if not path.exists():
+        return None
+    return path.read_text(encoding="utf-8")
+
+
+def _rollback(
+    store: EnvironmentConfigStore,
+    keychain: Keychain,
+    name: str,
+    previous_secret: str | None,
+    previous_file: str | None,
+) -> None:
+    try:
+        if previous_secret is None:
+            keychain.delete(name)
+        else:
+            keychain.set(name, previous_secret)
+        path = store.environments_path
+        if previous_file is None:
+            if path.exists():
+                path.unlink()
+        else:
+            write_private(path, previous_file)
+    except Exception as exc:
+        raise AuthenticationError(
+            "Saving the environment failed, and the previous credentials could not be restored. "
+            "Run `benchling auth login --env NAME` again.",
+            details={"env": name, "reason": type(exc).__name__},
+        ) from exc

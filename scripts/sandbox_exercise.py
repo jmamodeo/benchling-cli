@@ -1,4 +1,8 @@
-"""Interactive, opt-in concurrency and table-write exercise for a Benchling sandbox."""
+"""Interactive, opt-in concurrency and table-write exercise for a Benchling sandbox.
+
+The named environment must already exist. Run ``benchling auth login --env NAME``
+in your own terminal first; this script never reads a client secret.
+"""
 
 from __future__ import annotations
 

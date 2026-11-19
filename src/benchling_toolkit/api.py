@@ -20,6 +20,7 @@ from .errors import (
     ValidationError,
 )
 from .models import Environment
+from .redact import redact_text
 from .tls import verified_context
 
 
@@ -81,7 +82,7 @@ class BenchlingAPI:
                     error_cls = PartialCompletionError if method != "GET" else UpstreamError
                     raise error_cls(
                         "Benchling request did not produce a confirmed response",
-                        details={"method": method, "path": path, "reason": str(exc)},
+                        details={"method": method, "path": path, "reason": redact_text(str(exc))},
                         retryable=method == "GET",
                     ) from exc
                 await self._backoff(attempt, None)

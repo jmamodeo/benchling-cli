@@ -3,19 +3,29 @@
 from __future__ import annotations
 
 import asyncio
+import getpass
 import json
+import os
 import sys
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 import typer
 
 from . import __version__
-from .auth import AuthManager
-from .environment import EnvironmentConfigStore, environment_secrets
-from .errors import BenchlingAgentError, ExitCode, UpstreamError, ValidationError
+from .credentials import build_environment, collect_status, login, logout
+from .environment import ENV_NAME, EnvironmentConfigStore
+from .errors import (
+    AuthenticationError,
+    BenchlingAgentError,
+    ExitCode,
+    UpstreamError,
+    ValidationError,
+)
+from .keychain import Keychain
 from .models import Envelope, Environment, PlanFamily
+from .redact import redact_text
 from .runtime import Runtime
 
 app = typer.Typer(
@@ -24,7 +34,7 @@ app = typer.Typer(
     no_args_is_help=True,
     pretty_exceptions_enable=False,
 )
-auth_app = typer.Typer(help="Inspect local authentication state.")
+auth_app = typer.Typer(help="Log in, log out, and inspect saved environments.")
 envs_app = typer.Typer(help="List configured environments.")
 entry_app = typer.Typer(help="Resolve, fetch, and inspect entries.")
 entry_fields_app = typer.Typer(help="Read entry schema fields.")
@@ -65,9 +75,7 @@ def _show_version(value: bool) -> None:
 @app.callback()
 def root(
     ctx: typer.Context,
-    env: str | None = typer.Option(
-        None, "--env", "-e", help="Environment name; selects BENCHLING_<ENV>_* credentials."
-    ),
+    env: str | None = typer.Option(None, "--env", "-e", help="Environment name."),
     version: bool = typer.Option(
         False, "--version", callback=_show_version, is_eager=True, help="Show version and exit."
     ),
@@ -115,22 +123,187 @@ def _execute(env: str | None, call: Callable[[Runtime], Awaitable[Any]]) -> None
         raise typer.Exit(int(ExitCode.UPSTREAM)) from None
 
 
-@auth_app.command("status")
-def auth_status(ctx: typer.Context) -> None:
-    """Show local authentication state for the selected environment without calling the API."""
-    state: State = ctx.obj
+def _prompt(label: str, *, tty: bool) -> str:
+    """Read one non-secret line. --secret-stdin keeps stdin free for the secret."""
+    if tty:
+        line = _read_terminal(label)
+    else:
+        typer.echo(f"{label}: ", nl=False, err=True)
+        line = sys.stdin.readline()
+    if not line.strip():
+        raise ValidationError(f"{label} is required")
+    return line.strip()
+
+
+def _read_terminal(label: str) -> str:
+    """Prompt on the controlling terminal so a piped secret is not consumed."""
+    prompt = f"{label}: "
     try:
-        config = EnvironmentConfigStore()
-        environment = config.resolve(state.env)
-        auth = AuthManager(environment_secrets())
-        try:
-            result = auth.status(environment)
-        finally:
-            auth.close()
-        _emit(Envelope.success(result, env=environment.name, tenant_url=environment.base_url))
+        if os.name == "nt":
+            with (
+                open("CONOUT$", "w", encoding="utf-8") as output,
+                open("CONIN$", encoding="utf-8") as incoming,
+            ):
+                output.write(prompt)
+                output.flush()
+                return incoming.readline()
+        with open("/dev/tty", "r+", encoding="utf-8") as terminal:
+            terminal.write(prompt)
+            terminal.flush()
+            return terminal.readline()
+    except OSError as exc:
+        raise ValidationError(
+            "A terminal is required for the tenant URL and client ID when --secret-stdin is set"
+        ) from exc
+
+
+def _read_secret(secret_stdin: bool) -> str:
+    """Read the client secret from stdin or a hidden prompt. Never from argv."""
+    if secret_stdin:
+        value = sys.stdin.read()
+        if value.endswith("\r\n"):
+            value = value[:-2]
+        elif value.endswith("\n"):
+            value = value[:-1]
+        if value == "":
+            raise ValidationError("Client secret is required")
+        return value
+    try:
+        secret = getpass.getpass("Client secret (not echoed): ")
+    except EOFError as exc:
+        raise ValidationError("Client secret is required") from exc
+    if secret == "":
+        raise ValidationError("Client secret is required")
+    return secret
+
+
+def _auth_failure(exc: BenchlingAgentError) -> NoReturn:
+    _emit(Envelope.failure(exc))
+    raise typer.Exit(int(exc.exit_code)) from None
+
+
+def _require_env_name(name: str | None, store: EnvironmentConfigStore) -> str:
+    names = store.configured_names() if store.environments_path.exists() else []
+    if not name:
+        raise ValidationError(
+            "An environment is required; pass --env NAME",
+            details={"available_envs": names},
+        )
+    if not ENV_NAME.match(name):
+        raise ValidationError(
+            "Invalid environment name",
+            details={"env": None, "available_envs": names},
+        )
+    return name
+
+
+@auth_app.command("login")
+def auth_login(
+    ctx: typer.Context,
+    env: str | None = typer.Option(None, "--env", "-e", help="Environment name to save."),
+    secret_stdin: bool = typer.Option(
+        False,
+        "--secret-stdin",
+        help="Read the client secret from stdin. It is never accepted as an argument.",
+    ),
+) -> None:
+    """Prompt for a tenant URL and client ID, then store a verified client secret.
+
+    The secret is read with a hidden prompt, or from stdin when --secret-stdin is
+    set. Nothing is saved unless a client-credentials token request succeeds.
+    """
+    state: State = ctx.obj
+    store = EnvironmentConfigStore()
+    try:
+        name = _require_env_name(env or state.env, store)
+        Keychain().require()
+        tenant_url = _prompt("Tenant URL", tty=secret_stdin)
+        client_id = _prompt("Client ID", tty=secret_stdin)
+        build_environment(name, tenant_url, client_id)
+        secret = _read_secret(secret_stdin)
+        environment = login(
+            store,
+            Keychain(),
+            name=name,
+            tenant_url=tenant_url,
+            client_id=client_id,
+            secret=secret,
+        )
     except BenchlingAgentError as exc:
-        _emit(Envelope.failure(exc))
-        raise typer.Exit(int(exc.exit_code)) from None
+        _auth_failure(exc)
+    _emit(
+        Envelope.success(
+            {
+                "env": environment.name,
+                "tenant_url": environment.base_url,
+                "client_id": environment.client_id,
+                "credential_source": "keyring",
+                "saved": True,
+            },
+            env=environment.name,
+            tenant_url=environment.base_url,
+        )
+    )
+
+
+@auth_app.command("logout")
+def auth_logout(
+    ctx: typer.Context,
+    env: str | None = typer.Option(None, "--env", "-e", help="Environment name to remove."),
+) -> None:
+    """Remove an environment from environments.json and delete its keychain secret."""
+    state: State = ctx.obj
+    store = EnvironmentConfigStore()
+    try:
+        name = _require_env_name(env or state.env, store)
+        logout(store, Keychain(), name)
+    except BenchlingAgentError as exc:
+        _auth_failure(exc)
+    _emit(Envelope.success({"env": name, "removed": True}, env=name))
+
+
+@auth_app.command("status")
+def auth_status(
+    ctx: typer.Context,
+    env: str | None = typer.Option(
+        None, "--env", "-e", help="Limit the report to one environment."
+    ),
+    check: bool = typer.Option(
+        False,
+        "--check",
+        help="Request an access token and report the result. The token is not printed or saved.",
+    ),
+) -> None:
+    """Show configured environments and whether a keychain secret is present.
+
+    The secret is never printed. Without --env, every saved environment is listed.
+    --check performs a live token request and does not print or save the token.
+    """
+    state: State = ctx.obj
+    selected = env or state.env
+    store = EnvironmentConfigStore()
+    try:
+        report = collect_status(store, Keychain(), name=selected, check=check)
+    except BenchlingAgentError as exc:
+        _auth_failure(exc)
+    meta: dict[str, Any] = {}
+    if selected and selected in report.environments:
+        meta = {
+            "env": selected,
+            "tenant_url": report.environments[selected]["tenant_url"],
+        }
+    payload = {"environments": report.environments}
+    if report.failed_envs:
+        _auth_failure(
+            AuthenticationError(
+                "Token check failed",
+                details={
+                    "environments": payload["environments"],
+                    "failed_envs": report.failed_envs,
+                },
+            )
+        )
+    _emit(Envelope.success(payload, **meta))
 
 
 @envs_app.command("list")
@@ -249,7 +422,7 @@ def _read_spec(path: str) -> dict[str, Any]:
     except (OSError, json.JSONDecodeError) as exc:
         raise ValidationError(
             "Could not read change specification",
-            details={"path": path, "reason": str(exc)},
+            details={"path": path, "reason": redact_text(str(exc))},
         ) from exc
     if not isinstance(parsed, dict):
         raise ValidationError("Change specification must be a JSON object")
