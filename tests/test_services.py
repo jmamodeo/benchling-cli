@@ -308,6 +308,7 @@ async def test_doctor_records_per_endpoint_failures_without_raising(runtime, fak
         "ok": False,
         "error": "Benchling denied access",
         "code": "access_denied",
+        "hint": "Check that this Benchling app is allowed to read the tenant.",
     }
 
 

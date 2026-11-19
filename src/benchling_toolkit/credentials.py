@@ -9,10 +9,10 @@ import httpx
 from pydantic import ValidationError as ModelValidationError
 
 from .auth import AuthManager
-from .environment import ENV_NAME, EnvironmentConfigStore, write_private
+from .environment import ENV_NAME, EnvironmentConfigStore, invalid_environment_name, write_private
 from .errors import AuthenticationError, BenchlingAgentError, ValidationError
 from .keychain import Keychain
-from .models import AuthMethod, Environment
+from .models import AuthMethod, Environment, explain_environment_error
 from .redact import redact_text, register_secret
 from .tls import verified_context
 
@@ -23,12 +23,14 @@ def open_token_client() -> httpx.Client:
 
 
 def build_environment(name: str, tenant_url: str, client_id: str) -> Environment:
-    """Validate a tenant URL and client ID without echoing either value."""
+    """Validate a tenant URL and client ID separately, without echoing either value."""
     if not ENV_NAME.match(name):
-        raise ValidationError("Invalid environment name", details={"env": None})
+        raise invalid_environment_name(name)
     client_id = client_id.strip()
-    if not client_id or any(character in client_id for character in "\r\n\x00"):
-        raise ValidationError("Client ID is required", details={"env": name})
+    if not client_id:
+        raise ValidationError("Client ID is required", details={"env": name, "field": "client_id"})
+    if any(character in client_id for character in "\r\n\x00"):
+        raise ValidationError("Invalid client ID", details={"env": name, "field": "client_id"})
     try:
         environment = Environment.model_validate(
             {
@@ -39,7 +41,7 @@ def build_environment(name: str, tenant_url: str, client_id: str) -> Environment
             }
         )
     except ModelValidationError as exc:
-        raise ValidationError("Invalid endpoint or client ID", details={"env": name}) from exc
+        raise explain_environment_error(exc, env=name) from exc
     return environment
 
 
@@ -87,16 +89,13 @@ def logout(store: EnvironmentConfigStore, keychain: Keychain, name: str) -> None
     """Remove the environment record and its keychain secret."""
     names = store.configured_names() if store.environments_path.exists() else []
     if not ENV_NAME.match(name):
-        raise ValidationError(
-            "Invalid environment name",
-            details={"env": None, "available_envs": names},
-        )
+        raise invalid_environment_name(name, available=names)
     keychain.require()
     present = name in names
     secret = keychain.get(name)
     if not present and secret is None:
         raise ValidationError(
-            "Unknown environment; run `benchling auth login --env NAME`",
+            f"Environment {name!r} is not configured.",
             details={"env": name, "available_envs": names},
         )
     keychain.delete(name)
@@ -171,7 +170,13 @@ def _token_check(
     auth: AuthManager, environment: Environment, secret_present: bool
 ) -> dict[str, Any]:
     if not secret_present:
-        return {"ok": False, "message": "Client secret is not in the keychain"}
+        return {
+            "ok": False,
+            "message": (
+                "Client secret is not in the keychain; "
+                f"run benchling auth login --env {environment.name}"
+            ),
+        }
     try:
         auth.headers(environment)
     except BenchlingAgentError as exc:

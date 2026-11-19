@@ -100,6 +100,11 @@ class AuthManager:
                 details={"env": environment.name, "reason": redact_text(str(exc))},
                 retryable=True,
             ) from exc
+        if response.status_code == 401:
+            raise AuthenticationError(
+                "Benchling rejected the client ID or client secret. Check the client ID and secret.",
+                details={"status": response.status_code},
+            )
         if response.status_code >= 400:
             raise AuthenticationError(
                 "Benchling rejected authentication",

@@ -4,7 +4,7 @@ import json
 import os
 
 import pytest
-from conftest import plain_stdout, runtime_for
+from conftest import configure_env, plain_stdout, runtime_for
 from fake_benchling import ENTRY_ID, TABLE_PART, TEXT_PART
 from typer.testing import CliRunner
 
@@ -52,8 +52,22 @@ def test_unknown_environment_is_rejected_before_any_request(invoke, fake) -> Non
 def test_doctor_reports_capabilities(invoke) -> None:
     code, payload, _ = invoke("doctor")
     assert code == 0
+    assert payload["ok"] is True
     assert payload["data"]["ok"] is True
     assert [c["name"] for c in payload["data"]["checks"]] == ["v3_entries", "v2_entries"]
+
+
+def test_doctor_fails_the_envelope_when_checks_fail(invoke, fake) -> None:
+    fake.fail("GET", "/api/v3/entry/items", 401)
+    fake.fail("GET", "/api/v2/entries", 403)
+    code, payload, _ = invoke("doctor")
+    assert code == 3
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "authentication_error"
+    checks = payload["error"]["details"]["checks"]
+    assert all(check["hint"] for check in checks)
+    assert "client ID and secret" in checks[0]["hint"]
+    assert "allowed to read" in checks[1]["hint"]
 
 
 def test_entry_get_full_and_summary(invoke) -> None:
@@ -307,20 +321,20 @@ def test_apply_rejects_malformed_plan_id(invoke) -> None:
     assert payload["error"]["code"] == "validation_error"
 
 
-def test_envs_list_shows_configured_environment_without_secrets(invoke) -> None:
-    code, payload, result = invoke("envs", "list", env=None)
+def test_auth_status_lists_environments_without_secrets_or_a_trailing_slash(invoke) -> None:
+    code, payload, result = invoke("auth", "status", env=None)
     assert code == 0
-    assert payload["data"]["environments"]["sandbox"]["tenant_url"].startswith(
-        "https://your-tenant-dev.benchling.com"
-    )
+    row = payload["data"]["environments"]["sandbox"]
+    assert row["tenant_url"] == "https://your-tenant-dev.benchling.com"
+    assert "early_access" not in row
     assert "sandbox-client-secret" not in result.stdout
 
 
-def test_envs_list_is_an_empty_envelope_when_nothing_is_configured(monkeypatch) -> None:
+def test_auth_status_is_an_empty_envelope_when_nothing_is_configured(monkeypatch) -> None:
     for name in list(os.environ):
         if name.startswith("BENCHLING_") and name != "BENCHLING_TOOLKIT_HOME":
             monkeypatch.delenv(name)
-    result = CliRunner().invoke(cli.app, ["envs", "list"])
+    result = CliRunner().invoke(cli.app, ["auth", "status"])
     assert result.exit_code == 0
     assert json.loads(result.stdout) == {
         "schema_version": "1.0",
@@ -329,6 +343,116 @@ def test_envs_list_is_an_empty_envelope_when_nothing_is_configured(monkeypatch) 
         "error": None,
         "meta": {},
     }
+
+
+def test_envs_list_is_removed() -> None:
+    result = CliRunner().invoke(cli.app, ["envs", "list"])
+    assert result.exit_code != 0
+    assert "No such command" in result.stdout + result.stderr
+
+
+def test_doctor_names_login_when_the_secret_is_missing(invoke) -> None:
+    from benchling_toolkit.keychain import Keychain
+
+    Keychain().delete("sandbox")
+    code, payload, _ = invoke("doctor")
+    assert code == 3
+    assert payload["ok"] is False
+    assert (
+        payload["error"]["message"]
+        == "App client credentials are missing. Client secret is not in the keychain; "
+        "run benchling auth login --env sandbox"
+    )
+    assert payload["error"]["details"]["checks"][0]["hint"].endswith(
+        "run benchling auth login --env sandbox"
+    )
+
+
+def test_mcp_logging_is_quiet_unless_verbose(benchling_env) -> None:
+    from benchling_toolkit.mcp_server import build_mcp_server
+    from benchling_toolkit.runtime import RuntimePool
+
+    quiet = build_mcp_server(RuntimePool())
+    assert quiet.settings.log_level == "WARNING"
+    loud = build_mcp_server(RuntimePool(), verbose=True)
+    assert loud.settings.log_level == "DEBUG"
+    help_text = plain_stdout(["mcp", "serve", "--help"])
+    assert "--verbose" in help_text
+
+
+def test_mcp_keychain_startup_error_is_json_on_stderr(monkeypatch) -> None:
+    import keyring
+
+    configure_env("dev", "https://your-tenant.benchling.com", secret="dev-client-secret")
+    keyring.set_keyring(keyring.backends.fail.Keyring())
+    monkeypatch.setattr("benchling_toolkit.keychain.provider_installed", lambda: True)
+    monkeypatch.setattr("benchling_toolkit.keychain.secret_service_reachable", lambda: False)
+    result = CliRunner().invoke(cli.app, ["mcp", "serve"])
+    assert result.exit_code == 3
+    assert result.stdout == ""
+    payload = json.loads(result.stderr)
+    message = payload["error"]["message"]
+    assert "HOME, LOGNAME, PATH, SHELL, TERM and USER" in message
+    assert "DBUS_SESSION_BUS_ADDRESS" in message
+    assert "env block" in message
+    assert "dev-client-secret" not in result.stderr
+
+
+def test_doctor_reports_an_unexpected_local_failure(monkeypatch) -> None:
+    configure_env("dev", "https://your-tenant.benchling.com", secret="dev-client-secret")
+
+    async def boom(self: object) -> dict[str, object]:
+        raise RuntimeError("doctor-boom")
+
+    monkeypatch.setattr("benchling_toolkit.services.BenchlingService.doctor", boom)
+    result = CliRunner().invoke(cli.app, ["--env", "dev", "doctor"])
+    assert result.exit_code == 7
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is False
+    assert payload["error"]["details"]["type"] == "RuntimeError"
+
+
+def test_saved_tenant_url_must_be_text() -> None:
+    from benchling_toolkit.environment import EnvironmentConfigStore
+
+    store = EnvironmentConfigStore()
+    store.ensure()
+    store.environments_path.write_text(
+        json.dumps(
+            {"version": 1, "environments": {"dev": {"tenant_url": 1, "client_id": "dev-client"}}}
+        ),
+        encoding="utf-8",
+    )
+    result = CliRunner().invoke(cli.app, ["--env", "dev", "auth", "status"])
+    assert result.exit_code == 2
+    message = json.loads(result.stdout)["error"]["message"]
+    assert "Invalid tenant URL" in message
+    assert "1" not in message
+
+
+def test_mcp_serve_forwards_verbose(monkeypatch) -> None:
+    seen: dict[str, object] = {}
+
+    def record(**kwargs: object) -> None:
+        seen.update(kwargs)
+
+    monkeypatch.setattr("benchling_toolkit.mcp_server.run_mcp_server", record)
+    result = CliRunner().invoke(cli.app, ["mcp", "serve", "--verbose"])
+    assert result.exit_code == 0
+    assert seen["verbose"] is True
+
+
+def test_mcp_unexpected_startup_error_stays_on_stderr(monkeypatch) -> None:
+    def boom(**kwargs: object) -> None:
+        raise RuntimeError("boom-start")
+
+    monkeypatch.setattr("benchling_toolkit.mcp_server.run_mcp_server", boom)
+    result = CliRunner().invoke(cli.app, ["mcp", "serve"])
+    assert result.stdout == ""
+    assert result.exit_code == 7
+    payload = json.loads(result.stderr)
+    assert payload["ok"] is False
+    assert payload["error"]["details"]["reason"] == "boom-start"
 
 
 def test_mcp_serve_reports_startup_errors_as_json_on_stderr(invoke, monkeypatch) -> None:

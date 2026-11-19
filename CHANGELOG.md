@@ -6,10 +6,27 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- `benchling auth login` accepts `--tenant-url` and `--client-id`. Together with `--secret-stdin`, login runs with no terminal and does not call `getpass`, so there is no echo warning. A missing value with no terminal is one error that names the flags.
+- Keychain failures name the cause (no Secret Service backend, D-Bus session not reachable, or a locked collection) and the headless Linux commands (`dbus-run-session` and `gnome-keyring-daemon --unlock --components=secrets`). README has a Headless Linux section. There is still no plaintext fallback.
+- `benchling mcp serve --verbose` turns request logging on. It is off by default.
+
 ### Changed
 
 - Repository links now point at `https://github.com/jmamodeo/benchling-toolkit` after the GitHub repository rename. Older changelog text is unchanged.
 - **Breaking:** `BENCHLING_<ENV>_API_ENDPOINT`, `BENCHLING_<ENV>_CLIENT_ID`, and `BENCHLING_<ENV>_CLIENT_SECRET` are no longer read. There is no fallback or alias. Configure an environment with `benchling auth login --env NAME`.
+- Tenant URLs accept a bare host and a trailing `/api/v2` or `/api/v3`. A trailing slash is not shown. `http://` is rejected on its own. The tenant URL and the client ID are validated separately.
+- A 401 from the token endpoint says to check the client ID and secret.
+- `benchling doctor` exits 3 with `ok: false` when a check fails. Each failed check has a hint. `auth status --check` puts the specific cause in the top-level message.
+- An invalid environment name explains the lowercase-letters-and-digits rule. Logging out an environment that is not configured says so.
+- MCP startup errors, including a missing keychain, are a JSON envelope on stderr and a non-zero exit. The keychain text states that the MCP SDK launches stdio servers with only `HOME`, `LOGNAME`, `PATH`, `SHELL`, `TERM` and `USER`, so `DBUS_SESSION_BUS_ADDRESS` has to be set in the client `env` block.
+- `--secret-stdin` reads the controlling terminal with `os.open` and `FileIO`. Opening `/dev/tty` in text mode `r+` is rejected on Linux and macOS, which made that flag fail even when a terminal existed.
+
+### Removed
+
+- **Breaking:** `benchling envs list`. `benchling auth status` is the only list of environments. There is no alias.
+- The `early_access` field on saved environment metadata. V3 requests still send `EARLY-ACCESS: true`.
 
 ### Added
 

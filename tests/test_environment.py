@@ -317,9 +317,9 @@ async def test_mcp_routes_each_call_to_its_env():
         async with Client(build_mcp_server(pool, writable_envs={"dev"})) as client:
             listed = await client.call_tool("list_environments", {})
             assert listed.structured_content["data"]["environments"] == {
-                "dev": {"tenant_url": "https://your-tenant.benchling.com/", "writes_allowed": True},
+                "dev": {"tenant_url": "https://your-tenant.benchling.com", "writes_allowed": True},
                 "test": {
-                    "tenant_url": "https://other-tenant.benchling.com/",
+                    "tenant_url": "https://other-tenant.benchling.com",
                     "writes_allowed": False,
                 },
             }

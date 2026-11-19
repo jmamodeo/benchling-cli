@@ -21,6 +21,31 @@ def _error_text(exc: Exception) -> str:
     return redact_text(str(exc))
 
 
+def _doctor_hint(exc: Exception, env: str) -> str:
+    """One remediation line for a failed doctor check."""
+    code = getattr(exc, "code", "")
+    message = _error_text(exc).lower()
+    login = f"benchling auth login --env {env}"
+    if (
+        "not in the keychain" in message
+        or "credentials are missing" in message
+        or "no usable os keychain" in message
+        or "no client secret" in message
+    ):
+        return f"Client secret is not in the keychain; run {login}"
+    if (
+        code == "authentication_error"
+        or "authentication failed" in message
+        or "client id" in message
+    ):
+        return f"Check the client ID and secret, then run {login}"
+    if code == "access_denied":
+        return "Check that this Benchling app is allowed to read the tenant."
+    if code in {"upstream_error", "not_found"}:
+        return "Check the tenant URL and that this machine can reach it over HTTPS."
+    return f"Run benchling --env {env} doctor again after fixing this check."
+
+
 ENTRY_ID = re.compile(r"^etr_[A-Za-z0-9]+$")
 ENTRY_ID_IN_URL = re.compile(r"/(etr_[A-Za-z0-9]+)(?:[-/]|$)")
 KNOWN_PART_TYPES = {
@@ -588,6 +613,7 @@ class BenchlingService:
     async def doctor(self) -> dict[str, Any]:
         """Probe V3 and V2 entry endpoints; failures are reported per check rather than raised."""
         checks: list[dict[str, Any]] = []
+        env_name = self.api.environment.name
         for name, version, path, params in (
             ("v3_entries", 3, "/entry/items", {"pageSize": 1}),
             ("v2_entries", 2, "/entries", {"pageSize": 1}),
@@ -602,6 +628,7 @@ class BenchlingService:
                         "ok": False,
                         "error": _error_text(exc),
                         "code": getattr(exc, "code", type(exc).__name__),
+                        "hint": _doctor_hint(exc, env_name),
                     }
                 )
         by_name = {check["name"]: check["ok"] for check in checks}
@@ -611,7 +638,6 @@ class BenchlingService:
             "env": self.api.environment.name,
             "tenant_url": self.api.environment.base_url,
             "auth_method": self.api.environment.auth_method.value,
-            "early_access_header": self.api.environment.early_access,
             "checks": checks,
             "capabilities": {
                 "document_parts": v3_ok,

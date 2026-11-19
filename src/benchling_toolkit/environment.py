@@ -16,10 +16,20 @@ from pydantic import ValidationError as ModelValidationError
 
 from .config import ConfigStore
 from .errors import ValidationError
-from .models import AuthMethod, Environment
+from .models import AuthMethod, Environment, explain_environment_error
 
 ENV_NAME = re.compile(r"^[a-z][a-z0-9]{0,31}$")
+ENV_NAME_RULE = "use lowercase letters and digits, starting with a letter, at most 32 characters"
 FILE_VERSION = 1
+
+
+def invalid_environment_name(name: str, *, available: list[str] | None = None) -> ValidationError:
+    """Explain the environment-name rule. The submitted name is not treated as a secret."""
+    shown = f" {name!r}" if name and len(name) <= 64 and name.isprintable() else ""
+    return ValidationError(
+        f"Invalid environment name{shown}: {ENV_NAME_RULE}.",
+        details={"env": None, "available_envs": list(available or [])},
+    )
 
 
 def write_private(path: Path, text: str) -> None:
@@ -78,14 +88,13 @@ class EnvironmentConfigStore(ConfigStore):
                 "An environment is required; pass --env NAME",
                 details={"available_envs": names},
             )
+        if not ENV_NAME.match(name):
+            raise invalid_environment_name(name, available=names)
         records = self._records()
-        if not ENV_NAME.match(name) or name not in records:
+        if name not in records:
             raise ValidationError(
-                "Unknown environment; run `benchling auth login --env NAME`",
-                details={
-                    "env": name if ENV_NAME.match(name) else None,
-                    "available_envs": names,
-                },
+                f"Unknown environment {name!r}; run `benchling auth login --env {name}`",
+                details={"env": name, "available_envs": names},
             )
         return self._environment(name, records[name])
 
@@ -102,7 +111,7 @@ class EnvironmentConfigStore(ConfigStore):
             raise ValidationError("Client ID is required", details={"env": environment.name})
         records = self._records() if self.environments_path.exists() else {}
         records[environment.name] = {
-            "tenant_url": str(environment.tenant_url),
+            "tenant_url": environment.base_url,
             "client_id": environment.client_id,
         }
         self._write(records)
@@ -145,20 +154,32 @@ class EnvironmentConfigStore(ConfigStore):
         return environments
 
     def _environment(self, name: str, record: dict[str, Any]) -> Environment:
+        client_id = record.get("client_id")
+        if (
+            not isinstance(client_id, str)
+            or not client_id.strip()
+            or any(character in client_id for character in "\r\n\x00")
+        ):
+            raise ValidationError("Invalid client ID", details={"env": name, "field": "client_id"})
+        tenant_url = record.get("tenant_url")
+        if not isinstance(tenant_url, str) or not tenant_url.strip():
+            raise ValidationError(
+                "Invalid tenant URL. Expected https://host, a bare host, or a host ending in "
+                "/api/v2 or /api/v3.",
+                details={"env": name, "field": "tenant_url"},
+            )
         try:
             environment = Environment.model_validate(
                 {
                     "name": name,
-                    "tenant_url": record.get("tenant_url"),
-                    "client_id": record.get("client_id"),
+                    "tenant_url": tenant_url,
+                    "client_id": client_id,
                     "auth_method": AuthMethod.CLIENT_CREDENTIALS,
                 }
             )
         except ModelValidationError as exc:
             # Pydantic errors include input values; never expose them.
-            raise ValidationError("Invalid endpoint or client ID", details={"env": name}) from exc
-        if not environment.client_id:
-            raise ValidationError("Invalid endpoint or client ID", details={"env": name})
+            raise explain_environment_error(exc, env=name) from exc
         return environment
 
     def _write(self, records: dict[str, Any]) -> None:
