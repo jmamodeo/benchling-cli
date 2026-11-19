@@ -3,7 +3,7 @@
 ## Reporting a vulnerability
 
 Please report vulnerabilities privately using GitHub's
-[private vulnerability reporting](https://github.com/jmamodeo/benchling-cli/security/advisories/new)
+[private vulnerability reporting](https://github.com/jmamodeo/benchling-toolkit/security/advisories/new)
 (Security Advisories). Do not open public issues for security problems. Expect an initial response within a few days.
 
 ## Handling credentials

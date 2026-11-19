@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+
+- Repository links now point at `https://github.com/jmamodeo/benchling-toolkit` after the GitHub repository rename. Older changelog text is unchanged.
+
 ## [0.3.0] - 2026-11-19
 
 ### Changed
@@ -84,9 +88,9 @@ All notable changes to this project are documented here. The format is based on
 - Versioned JSON envelope, stable exit codes, and published JSON schemas.
 - Operating-system trust-store TLS verification.
 
-[Unreleased]: https://github.com/jmamodeo/benchling-cli/compare/v0.3.0...HEAD
-[0.3.0]: https://github.com/jmamodeo/benchling-cli/compare/v0.2.0...v0.3.0
-[0.2.0]: https://github.com/jmamodeo/benchling-cli/compare/v0.1.2...v0.2.0
-[0.1.2]: https://github.com/jmamodeo/benchling-cli/compare/v0.1.1...v0.1.2
-[0.1.1]: https://github.com/jmamodeo/benchling-cli/compare/v0.1.0...v0.1.1
-[0.1.0]: https://github.com/jmamodeo/benchling-cli/releases/tag/v0.1.0
+[Unreleased]: https://github.com/jmamodeo/benchling-toolkit/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/jmamodeo/benchling-toolkit/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/jmamodeo/benchling-toolkit/compare/v0.1.2...v0.2.0
+[0.1.2]: https://github.com/jmamodeo/benchling-toolkit/compare/v0.1.1...v0.1.2
+[0.1.1]: https://github.com/jmamodeo/benchling-toolkit/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/jmamodeo/benchling-toolkit/releases/tag/v0.1.0

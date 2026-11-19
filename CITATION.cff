@@ -13,7 +13,8 @@ abstract: >-
 authors:
   - family-names: Amodeo
     given-names: John
-repository-code: "https://github.com/jmamodeo/benchling-cli"
+url: "https://github.com/jmamodeo/benchling-toolkit"
+repository-code: "https://github.com/jmamodeo/benchling-toolkit"
 license: MIT
 keywords:
   - benchling
