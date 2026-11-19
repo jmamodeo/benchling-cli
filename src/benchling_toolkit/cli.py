@@ -689,17 +689,83 @@ def _read_spec(path: str) -> dict[str, Any]:
     return parsed
 
 
+def _parse_column_maps(column_map: list[str]) -> dict[str, str]:
+    """Turn repeated ``CSV_COLUMN=FIELD`` options into the planner's column map."""
+    mapped: dict[str, str] = {}
+    for item in column_map:
+        column, separator, field = item.partition("=")
+        if not separator or not column.strip() or not field.strip():
+            raise ValidationError(
+                "Each --map must be CSV_COLUMN=FIELD",
+                details={"map": item},
+            )
+        key = column.strip()
+        if key in mapped:
+            raise ValidationError(
+                "A CSV column was mapped more than once",
+                details={"column": key},
+            )
+        mapped[key] = field.strip()
+    return mapped
+
+
+def _plan_request(
+    family: PlanFamily,
+    spec: str | None,
+    csv_path: str | None,
+    id_column: str | None,
+    column_map: list[str],
+) -> dict[str, Any]:
+    """Choose the JSON spec or the CSV result-update flags."""
+    if csv_path is not None and spec is not None:
+        raise ValidationError("Pass either --spec or --csv, not both")
+    if csv_path is not None:
+        if family != PlanFamily.RESULTS:
+            raise ValidationError("CSV result updates require the results family")
+        return {
+            "operation": "update",
+            "csv_path": csv_path,
+            "id_column": id_column,
+            "column_map": _parse_column_maps(column_map),
+        }
+    if column_map or id_column is not None:
+        raise ValidationError("--id-column and --map require --csv")
+    if spec is None:
+        raise ValidationError("A change plan needs --spec, or --csv with --id-column and --map")
+    return _read_spec(spec)
+
+
 @changes_app.command("plan")
 def changes_plan(
     ctx: typer.Context,
     entry: str = typer.Option(..., help="Entry ID, display ID, or URL."),
     family: PlanFamily = typer.Option(..., case_sensitive=False),
-    spec: str = typer.Option(..., help="JSON file path, or '-' for stdin."),
+    spec: str | None = typer.Option(None, "--spec", help="JSON file path, or '-' for stdin."),
+    csv_path: str | None = typer.Option(
+        None,
+        "--csv",
+        help="CSV file of result updates. Use with --id-column and --map instead of --spec.",
+    ),
+    id_column: str | None = typer.Option(
+        None,
+        "--id-column",
+        help="CSV column that holds the result id. Required with --csv.",
+    ),
+    column_map: list[str] = typer.Option(
+        [],
+        "--map",
+        help="CSV column mapped to a field, as CSV_COLUMN=FIELD. Repeat for each field.",
+    ),
 ) -> None:
-    """Create a change plan from a JSON spec; nothing is written until it is applied."""
+    """Create a change plan; nothing is written until it is applied.
+
+    ``--spec`` is a JSON change specification. Result updates can instead read a
+    CSV file: ``--id-column`` names the result id, and each ``--map`` names a
+    field by display name, system name, or field-definition id.
+    """
     state: State = ctx.obj
     try:
-        request = _read_spec(spec)
+        request = _plan_request(family, spec, csv_path, id_column, column_map)
     except BenchlingAgentError as exc:
         _emit(Envelope.failure(exc))
         raise typer.Exit(int(exc.exit_code)) from None

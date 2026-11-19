@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = json.loads((ROOT / "contracts" / "openapi-manifest.json").read_text())
 
 _V3_ENTRY = re.compile(r"/api/v3/entry/[^/]+$")
+_V3_RESULT = re.compile(r"/api/v3/result/[^/]+$")
 _V2_BULK = re.compile(r"/api/v2/assay-results:bulk-create$")
 
 
@@ -67,6 +68,8 @@ def _schema_errors(spec_name: str, schema_name: str, instance: Any) -> list[str]
 def _request_schema(call: Any) -> tuple[str, str] | None:
     if call.method == "PATCH" and _V3_ENTRY.search(call.path):
         return "benchling-v3", "UpdateEntryInput"
+    if call.method == "PATCH" and _V3_RESULT.search(call.path):
+        return "benchling-v3", "UpdateResultInput"
     if call.method == "POST" and _V2_BULK.search(call.path):
         return None
     raise AssertionError(f"no request schema for {call.method} {call.path}")
@@ -106,7 +109,9 @@ def test_retired_document_coordinates_fail_the_current_schema() -> None:
     assert any("coordinates" in message for message in errors)
 
 
-async def test_every_client_request_body_matches_the_openapi_schema(runtime, fake) -> None:
+async def test_every_client_request_body_matches_the_openapi_schema(
+    runtime, fake, tmp_path
+) -> None:
     text = {"contentType": "text", "text": "introduced"}
     await _apply(
         runtime,
@@ -154,6 +159,27 @@ async def test_every_client_request_body_matches_the_openapi_schema(runtime, fak
             ],
         },
     )
+    fake.results = [
+        {
+            "id": "result_1",
+            "modifiedAt": "2026-01-02T00:00:00Z",
+            "entry": {"id": ENTRY_ID},
+            "schema": {"id": "assaysch_abc123"},
+            "schemaFields": [],
+        }
+    ]
+    csv_path = tmp_path / "update.csv"
+    csv_path.write_text("id,Ct\nresult_1,15\n", encoding="utf-8")
+    await _apply(
+        runtime,
+        "results",
+        {
+            "operation": "update",
+            "csv_path": str(csv_path),
+            "id_column": "id",
+            "column_map": {"Ct": "Ct"},
+        },
+    )
 
     writes = [call for call in fake.calls if call.method != "GET" and call.path != "/oauth/token"]
     assert writes
@@ -180,7 +206,8 @@ async def test_every_client_request_body_matches_the_openapi_schema(runtime, fak
         "insert_table_rows",
     }
     field_bodies = [call.body["schemaFields"] for call in writes if "schemaFields" in call.body]
-    assert field_bodies == [{"tsf_temp": {"value": 21}}]
+    assert {"tsf_temp": {"value": 21}} in field_bodies
+    assert {"assayfield_ct": {"value": 15}} in field_bodies
 
 
 async def _apply(runtime, family: str, request: dict[str, Any]) -> None:

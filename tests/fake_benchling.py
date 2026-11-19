@@ -407,6 +407,7 @@ class FakeBenchling:
         self.entry_patches: list[dict[str, Any]] = []
         self.bulk_payloads: list[dict[str, Any]] = []
         self.bulk_response: dict[str, Any] = {"taskId": "task_abc123"}
+        self.result_updates: list[dict[str, Any]] = []
 
     # ---- helpers -----------------------------------------------------
     def fail(
@@ -1015,6 +1016,39 @@ class FakeBenchling:
                 return 200, deepcopy(item)
         return 404, {"error": {"message": "result not found"}}
 
+    def _patch_result(self, call: Call, result_id: str) -> tuple[int, dict[str, Any]]:
+        body = call.body if isinstance(call.body, dict) else {}
+        for item in self.results:
+            if item["id"] != result_id:
+                continue
+            fields = body.get("schemaFields")
+            if isinstance(fields, dict):
+                existing = item.get("schemaFields")
+                by_id: dict[str, dict[str, Any]] = {}
+                if isinstance(existing, list):
+                    for entry in existing:
+                        if not isinstance(entry, dict):
+                            continue
+                        definition = entry.get("fieldDefinition")
+                        field_id = definition.get("id") if isinstance(definition, dict) else None
+                        if isinstance(field_id, str):
+                            by_id[field_id] = entry
+                for field_id, payload in fields.items():
+                    value = payload.get("value") if isinstance(payload, dict) else payload
+                    by_id[str(field_id)] = {
+                        "__typename": "SchemaFieldValue",
+                        "fieldDefinition": {
+                            "id": str(field_id),
+                            "__typename": "SchemaFieldDefinitionRef",
+                        },
+                        "value": value,
+                    }
+                item["schemaFields"] = list(by_id.values())
+            item["modifiedAt"] = "2026-11-19T00:00:00Z"
+            self.result_updates.append({"id": result_id, "body": deepcopy(body)})
+            return 200, deepcopy(item)
+        return 404, {"error": {"message": "result not found"}}
+
 
 ROUTES: list[tuple[str, str]] = [
     (r"/entry/items", "GET v3|list_entries_v3"),
@@ -1034,6 +1068,7 @@ ROUTES: list[tuple[str, str]] = [
     (r"/dropdown/(\w+)/options/items", "GET v3|dropdown_options"),
     (r"/dropdown/(\w+)", "GET v3|dropdown"),
     (r"/result/items", "GET v3|list_results"),
+    (r"/result/(\w+)", "PATCH v3|patch_result"),
     (r"/result/(\w+)", "GET v3|get_result"),
     (r"/entries/(\w+)", "GET v2|get_entry_v2"),
     (r"/folders/(\w+)", "GET v2|get_folder"),

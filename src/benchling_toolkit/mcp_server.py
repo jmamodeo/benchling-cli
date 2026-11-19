@@ -522,7 +522,14 @@ def _register_change_tools(
     async def plan_changes(
         env: str, entry: str, family: PlanFamily, specification: dict[str, Any]
     ) -> Envelope[Any]:
-        """Create an immutable local preview for one entry and mutation family."""
+        """Create an immutable local preview for one entry and mutation family.
+
+        Result updates pass operation "update", csv_path, id_column, and
+        column_map. column_map sends each CSV header to a field display name,
+        system name, or field-definition id. The preview resolves those columns
+        to field-definition ids. Bad mappings and rows are reported and nothing
+        is written until apply_changes.
+        """
         return await safe(env, lambda rt: rt.planner.plan(entry, family, specification))
 
     @mcp.tool(annotations=_annotations(False, destructive=True))

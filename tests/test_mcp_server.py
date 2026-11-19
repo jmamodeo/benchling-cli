@@ -757,3 +757,58 @@ app(["mcp", "serve"])
     assert code == 0
     assert b"MCP server failed to start" not in stderr
     assert b"Event loop is closed" not in stderr
+
+
+async def test_plan_changes_updates_results_from_a_csv(writer, fake, tmp_path) -> None:
+    fake.results = [
+        {
+            "id": "result_1",
+            "modifiedAt": "2026-01-02T00:00:00Z",
+            "entry": {"id": ENTRY_ID},
+            "schema": {"id": "assaysch_abc123"},
+            "schemaFields": [
+                {
+                    "fieldDefinition": {"id": "assayfield_ct"},
+                    "value": {"__typename": "IntegerValue", "value": 12},
+                }
+            ],
+        }
+    ]
+    path = tmp_path / "assay.csv"
+    path.write_text("id,Ct\nresult_1,15\n", encoding="utf-8")
+    planned = await call(
+        writer,
+        "plan_changes",
+        env="sandbox",
+        entry=ENTRY_ID,
+        family="results",
+        specification={
+            "operation": "update",
+            "csv_path": str(path),
+            "id_column": "id",
+            "column_map": {"Ct": "Ct"},
+        },
+    )
+    assert planned["ok"] is True
+    assert fake.writes() == []
+    assert planned["data"]["after"]["results"][0]["schema_fields"]["assayfield_ct"]["value"] == 15
+    applied = await call(writer, "apply_changes", env="sandbox", plan_id=planned["data"]["id"])
+    assert applied["ok"] is True
+    assert applied["data"]["journal"]["result"]["state"] == "updated"
+    path.write_text("id,Ct\nresult_1,16\n", encoding="utf-8")
+    rejected = await call(
+        writer,
+        "plan_changes",
+        env="sandbox",
+        entry=ENTRY_ID,
+        family="results",
+        specification={
+            "operation": "update",
+            "csv_path": str(path),
+            "id_column": "id",
+            "column_map": {"Missing": "Missing"},
+        },
+    )
+    assert rejected["ok"] is False
+    assert rejected["error"]["code"] == "validation_error"
+    assert "not in the header" in rejected["error"]["message"]
