@@ -10,6 +10,10 @@ All notable changes to this project are documented here. The format is based on
 
 - Results plans can upload several table-specific batches, including different result schemas, while preserving the 500-record cap per table. `changes status --wait --timeout SECONDS` and MCP `get_change_status` can poll each task; failed-task errors with an in-range `index` are linked to that table's input row and local correlation ID, and other error shapes remain visible as unmatched.
 
+### Changed
+
+- Relicensed under the Apache License 2.0, with a `NOTICE` file. Versions up to and including 0.4.1 remain available under the MIT License.
+
 ## [0.4.1] - 2026-11-19
 
 ### Added

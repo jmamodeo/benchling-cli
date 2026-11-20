@@ -278,6 +278,7 @@ class ResultsPlanning(ResultUpdatePlanning):
                     "schema_fields": plan.preconditions.get("result_schema_fields"),
                 }
             }
+        entry_id = self._entry_id(plan)
         submitted: list[dict[str, Any]] = []
         failures: list[dict[str, Any]] = []
         uncertain = False
@@ -290,7 +291,7 @@ class ResultsPlanning(ResultUpdatePlanning):
                         "This result plan uses an unsupported bulk-table contract; "
                         "create a new preview"
                     )
-                table = await self.service.get_result_table(plan.entry_id, table_id)
+                table = await self.service.get_result_table(entry_id, table_id)
                 self._expect(
                     table.get("schema_id"),
                     expected[table_id]["schema_id"],

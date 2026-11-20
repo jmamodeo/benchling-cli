@@ -46,6 +46,8 @@ part_app = typer.Typer(help="Read document parts.")
 table_app = typer.Typer(help="Read unstructured tables.")
 schema_app = typer.Typer(help="List and read entry, result, and run schemas.")
 results_app = typer.Typer(help="Read result records and results-table rows.")
+container_app = typer.Typer(help="Read and search inventory containers.")
+container_schema_app = typer.Typer(help="List container schemas.")
 changes_app = typer.Typer(help="Preview and explicitly apply safe changes.")
 mcp_app = typer.Typer(help="Run the local MCP server.")
 issue_app = typer.Typer(
@@ -60,6 +62,8 @@ app.add_typer(part_app, name="part")
 app.add_typer(table_app, name="table")
 app.add_typer(schema_app, name="schema")
 app.add_typer(results_app, name="results")
+app.add_typer(container_app, name="container")
+container_app.add_typer(container_schema_app, name="schema")
 app.add_typer(changes_app, name="changes")
 app.add_typer(mcp_app, name="mcp")
 app.add_typer(issue_app, name="issue")
@@ -572,6 +576,45 @@ def schema_list(
     )
 
 
+@container_app.command("get")
+def container_get(ctx: typer.Context, container_id: str) -> None:
+    """Get an inventory container by ID."""
+    state: State = ctx.obj
+    _execute(state.env, lambda runtime: runtime.service.get_container(container_id))
+
+
+@container_app.command("find")
+def container_find(
+    ctx: typer.Context,
+    barcode: str | None = typer.Option(None, "--barcode", help="Exact container barcode."),
+    name: str | None = typer.Option(None, "--name", help="Exact container name."),
+    limit: int = typer.Option(50, "--limit", min=1, max=100, help="Page size, from 1 to 100."),
+    cursor: str | None = typer.Option(None, "--cursor", help="next_token from the previous page."),
+) -> None:
+    """Find one page of containers by exact barcode or exact name."""
+    state: State = ctx.obj
+    _execute(
+        state.env,
+        lambda runtime: runtime.service.find_containers(
+            barcode=barcode, name=name, limit=limit, cursor=cursor
+        ),
+    )
+
+
+@container_schema_app.command("list")
+def container_schema_list(
+    ctx: typer.Context,
+    limit: int = typer.Option(50, "--limit", min=1, max=100, help="Page size, from 1 to 100."),
+    cursor: str | None = typer.Option(None, "--cursor", help="next_token from the previous page."),
+) -> None:
+    """List one page of container schemas and their field definitions."""
+    state: State = ctx.obj
+    _execute(
+        state.env,
+        lambda runtime: runtime.service.list_container_schemas(limit=limit, cursor=cursor),
+    )
+
+
 @results_app.command("list")
 def results_list(
     ctx: typer.Context,
@@ -744,7 +787,9 @@ def _plan_request(
 @changes_app.command("plan")
 def changes_plan(
     ctx: typer.Context,
-    entry: str = typer.Option(..., help="Entry ID, display ID, or URL."),
+    entry: str | None = typer.Option(
+        None, help="Entry ID, display ID, or URL. Omit for container plans."
+    ),
     family: PlanFamily = typer.Option(..., case_sensitive=False),
     spec: str | None = typer.Option(None, "--spec", help="JSON file path, or '-' for stdin."),
     csv_path: str | None = typer.Option(

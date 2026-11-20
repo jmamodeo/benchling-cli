@@ -149,6 +149,7 @@ def build_mcp_server(
 
     _register_environment_tools(mcp, pool, writable_envs)
     _register_entry_tools(mcp, pool)
+    _register_container_tools(mcp, pool)
     _register_result_tools(mcp, pool)
     _register_export_tool(mcp, pool)
     _register_change_tools(mcp, pool, writable_envs)
@@ -496,6 +497,50 @@ def _register_entry_tools(mcp: MCPServer, pool: RuntimePool) -> None:
         return await safe(env, call)
 
 
+def _register_container_tools(mcp: MCPServer, pool: RuntimePool) -> None:
+    """Register read-only container and container-schema discovery tools."""
+    safe = _make_safe(pool)
+
+    @mcp.tool(annotations=_annotations(True))
+    async def get_container(
+        env: _Env,
+        container_id: Annotated[str, Field(description="Inventory container ID.")],
+    ) -> Envelope[Any]:
+        """Get an inventory container by ID."""
+        return await safe(env, lambda rt: rt.service.get_container(container_id))
+
+    @mcp.tool(annotations=_annotations(True))
+    async def find_containers(
+        env: _Env,
+        barcode: Annotated[str | None, Field(description="Exact container barcode.")] = None,
+        name: Annotated[str | None, Field(description="Exact container name.")] = None,
+        limit: Annotated[
+            int, Field(description="Page size. Defaults to 50 and must be from 1 to 100.")
+        ] = 50,
+        cursor: _PageCursor = None,
+    ) -> Envelope[Any]:
+        """Find one page of containers by exact barcode or exact name."""
+        return await safe(
+            env,
+            lambda rt: rt.service.find_containers(
+                barcode=barcode, name=name, limit=limit, cursor=cursor
+            ),
+        )
+
+    @mcp.tool(annotations=_annotations(True))
+    async def list_container_schemas(
+        env: _Env,
+        limit: Annotated[
+            int, Field(description="Page size. Defaults to 50 and must be from 1 to 100.")
+        ] = 50,
+        cursor: _PageCursor = None,
+    ) -> Envelope[Any]:
+        """List one page of container schemas, including embedded field definitions."""
+        return await safe(
+            env, lambda rt: rt.service.list_container_schemas(limit=limit, cursor=cursor)
+        )
+
+
 def _register_result_tools(mcp: MCPServer, pool: RuntimePool) -> None:
     """Register the schema and result read tools."""
     safe = _make_safe(pool)
@@ -738,14 +783,17 @@ def _register_change_tools(
     @mcp.tool(annotations=_annotations(False))
     async def plan_changes(
         env: _Env,
-        entry: _EntryRef,
         family: Annotated[
             PlanFamily,
-            Field(description="Change family: document, table, fields, or results."),
+            Field(description=("Change family: document, table, fields, results, or containers.")),
         ],
         specification: _ChangeSpecification,
+        entry: Annotated[
+            _EntryRef | None,
+            Field(description="Entry ID, display ID, or URL; omit only for containers."),
+        ] = None,
     ) -> Envelope[Any]:
-        """Create an immutable local preview for one entry and mutation family.
+        """Create an immutable local preview for one entry or container mutation.
 
         The specification is checked against the typed change schema before any
         remote read. An invalid specification is a validation_error envelope and
@@ -754,6 +802,9 @@ def _register_change_tools(
         assay_results, or batches containing table_id and assay_results for each
         table. Each table may contain up to 500 records. Apply the preview later
         with apply_changes; created results land pending until accepted in each table.
+        Container plans support operation "create" with schema_id, or "transfer"
+        with source_container_id, destination_container_id, and destination_contents.
+        Other families require entry.
         """
 
         async def call(rt: Runtime) -> Any:

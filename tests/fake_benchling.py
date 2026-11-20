@@ -344,6 +344,34 @@ class FakeBenchling:
                 },
             ],
         }
+        self.container_schemas = [
+            {
+                "id": "contsch_abc123",
+                "name": "Synthetic vial schema",
+                "type": "container",
+                "modifiedAt": "2026-01-01T00:00:00Z",
+                "fieldDefinitions": [{"name": "Storage note", "type": "text"}],
+            }
+        ]
+        self.containers = [
+            {
+                "id": "con_source1",
+                "name": "Source vial",
+                "barcode": "BAR-SOURCE",
+                "modifiedAt": "2026-01-01T00:00:00Z",
+                "schema": {"id": "contsch_abc123"},
+                "contents": [{"entity": {"id": "ent_sample1"}}],
+            },
+            {
+                "id": "con_dest1",
+                "name": "Destination vial",
+                "barcode": "BAR-DEST",
+                "modifiedAt": "2026-01-02T00:00:00Z",
+                "schema": {"id": "contsch_abc123"},
+                "contents": [],
+            },
+        ]
+        self.container_transfers: list[dict[str, Any]] = []
         self.field_defs = {
             "entsch_abc123": field_definitions(),
             "entsch_choice": [
@@ -504,6 +532,64 @@ class FakeBenchling:
                 result: tuple[int, dict[str, Any]] = method(call, *found.groups())
                 return result
         return 404, {"error": {"message": f"no route {call.method} {call.path}"}}
+
+    def _list_containers(self, call: Call) -> tuple[int, dict[str, Any]]:
+        items = self.containers
+        if call.params.get("barcodes"):
+            barcodes = call.params["barcodes"].split(",")
+            items = [item for item in items if item.get("barcode") in barcodes]
+        if call.params.get("name"):
+            items = [item for item in items if item.get("name") == call.params["name"]]
+        return self._page(
+            deepcopy(items),
+            call,
+            self._limited_page(call, None),
+            key="containers",
+        )
+
+    def _get_container(self, call: Call, container_id: str) -> tuple[int, dict[str, Any]]:
+        found = next((item for item in self.containers if item["id"] == container_id), None)
+        if found is None:
+            return 404, {"error": {"message": "container not found"}}
+        return 200, {"container": deepcopy(found)}
+
+    def _list_container_schemas(self, call: Call) -> tuple[int, dict[str, Any]]:
+        return self._page(
+            deepcopy(self.container_schemas),
+            call,
+            self._limited_page(call, None),
+            key="containerSchemas",
+        )
+
+    def _get_container_schema(self, call: Call, schema_id: str) -> tuple[int, dict[str, Any]]:
+        found = next((item for item in self.container_schemas if item["id"] == schema_id), None)
+        if found is None:
+            return 404, {"error": {"message": "container schema not found"}}
+        return 200, deepcopy(found)
+
+    def _create_container(self, call: Call) -> tuple[int, dict[str, Any]]:
+        container = {
+            "id": f"con_created{len(self.containers)}",
+            "name": call.body.get("name", "Created container"),
+            "barcode": call.body.get("barcode"),
+            "modifiedAt": "2026-01-03T00:00:00Z",
+            "schema": {"id": call.body["schemaId"]},
+            "contents": [],
+            **deepcopy(call.body),
+        }
+        self.containers.append(container)
+        return 201, deepcopy(container)
+
+    def _transfer_container(self, call: Call, destination_id: str) -> tuple[int, dict[str, Any]]:
+        if not any(item["id"] == destination_id for item in self.containers):
+            return 404, {"error": {"message": "destination container not found"}}
+        source_id = call.body.get("sourceContainerId")
+        if not any(item["id"] == source_id for item in self.containers):
+            return 404, {"error": {"message": "source container not found"}}
+        self.container_transfers.append(
+            {"destination_id": destination_id, "body": deepcopy(call.body)}
+        )
+        return 200, {}
 
     # ---- v3 entries --------------------------------------------------
     def _entry_object(self) -> dict[str, Any]:
@@ -1062,6 +1148,12 @@ class FakeBenchling:
 
 
 ROUTES: list[tuple[str, str]] = [
+    (r"/container-schemas", "GET v2|list_container_schemas"),
+    (r"/container-schemas/(\w+)", "GET v2|get_container_schema"),
+    (r"/containers", "GET v2|list_containers"),
+    (r"/containers", "POST v2|create_container"),
+    (r"/containers/(\w+):transfer", "POST v2|transfer_container"),
+    (r"/containers/(\w+)", "GET v2|get_container"),
     (r"/entry/items", "GET v3|list_entries_v3"),
     (r"/entries", "GET v2|list_entries_v2"),
     (r"/entry/(etr_\w+)", "GET v3|get_entry"),

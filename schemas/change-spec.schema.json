@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://example.invalid/benchling-toolkit/change-spec.schema.json",
   "title": "Benchling Toolkit Change Specification",
-  "description": "Select the matching object for the --family argument.",
+  "description": "Select the matching object for the --family argument. Container operations use the containers family and do not require an entry.",
   "$defs": {
     "fieldValueInput": {
       "type": "object",
@@ -205,6 +205,64 @@
           "additionalProperties": { "type": "string", "minLength": 1 },
           "description": "CSV header to a field display name, system name, or field-definition id. The plan resolves each one to a field-definition id and does not send the display name."
         }
+      }
+    },
+    {
+      "title": "Container creation",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operation", "schema_id"],
+      "properties": {
+        "operation": { "const": "create" },
+        "schema_id": { "type": "string", "minLength": 1 },
+        "name": { "type": ["string", "null"] },
+        "barcode": { "type": ["string", "null"] },
+        "project_id": { "type": ["string", "null"] },
+        "parent_storage_id": { "type": ["string", "null"] },
+        "fields": { "type": ["object", "null"] },
+        "restricted_sample_party_ids": {
+          "type": ["array", "null"],
+          "items": { "type": "string" }
+        },
+        "restriction_status": { "type": ["string", "null"] },
+        "sample_owner_ids": { "type": ["array", "null"], "items": { "type": "string" } }
+      }
+    },
+    {
+      "title": "Container transfer",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operation",
+        "source_container_id",
+        "destination_container_id",
+        "destination_contents"
+      ],
+      "properties": {
+        "operation": { "const": "transfer" },
+        "source_container_id": { "type": "string", "minLength": 1 },
+        "destination_container_id": { "type": "string", "minLength": 1 },
+        "transfer_quantity": { "type": ["object", "null"] },
+        "destination_contents": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["entity_id"],
+            "properties": {
+              "entity_id": { "type": "string", "minLength": 1 },
+              "concentration": { "type": ["object", "null"] }
+            }
+          }
+        },
+        "destination_quantity": { "type": ["object", "null"] },
+        "restricted_sample_party_ids": {
+          "type": ["array", "null"],
+          "items": { "type": "string" }
+        },
+        "restriction_status": { "type": ["string", "null"] },
+        "sample_owner_ids": { "type": ["array", "null"], "items": { "type": "string" } }
       }
     }
   ]

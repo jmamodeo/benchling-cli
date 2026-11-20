@@ -28,6 +28,9 @@ READ_TOOLS = {
     "get_result",
     "list_result_tables",
     "list_results_table_rows",
+    "get_container",
+    "find_containers",
+    "list_container_schemas",
     "get_change_status",
 }
 
@@ -135,6 +138,34 @@ async def test_resolve_entry_by_id_and_display_id(client) -> None:
     assert by_id["entry_id"] == by_display["entry_id"] == ENTRY_ID
     missing = await call(client, "resolve_entry", env="sandbox", reference="EXP-99")
     assert missing["error"]["code"] == "not_found"
+
+
+async def test_container_read_tools_and_plans_keep_default_read_only(client, writer, fake) -> None:
+    container = await call(client, "get_container", env="sandbox", container_id="con_source1")
+    assert container["data"]["name"] == "Source vial"
+    found = await call(client, "find_containers", env="sandbox", barcode="BAR-SOURCE", limit=10)
+    assert found["data"]["items"][0]["id"] == "con_source1"
+    schemas = await call(client, "list_container_schemas", env="sandbox")
+    assert schemas["data"]["items"][0]["fieldDefinitions"][0]["name"] == "Storage note"
+
+    planned = await call(
+        client,
+        "plan_changes",
+        env="sandbox",
+        family="containers",
+        specification={
+            "operation": "create",
+            "schema_id": "contsch_abc123",
+            "name": "Synthetic vial from MCP",
+        },
+    )
+    assert planned["ok"] is True, planned
+    denied = await call(client, "apply_changes", env="sandbox", plan_id=planned["data"]["id"])
+    assert denied["error"]["code"] == "unsupported_capability"
+    assert fake.writes() == []
+    applied = await call(writer, "apply_changes", env="sandbox", plan_id=planned["data"]["id"])
+    assert applied["ok"] is True
+    assert [call.path for call in fake.writes()] == ["/api/v2/containers"]
 
 
 async def test_get_entry_without_full_returns_metadata_only(client, fake) -> None:
@@ -863,6 +894,9 @@ async def test_every_tool_parameter_has_a_description(client) -> None:
         "csv_path",
         "id_column",
         "column_map",
+        "source_container_id",
+        "destination_container_id",
+        "destination_contents",
     ):
         assert token in encoded
     described = list(_property_schemas(specification))
@@ -871,7 +905,7 @@ async def test_every_tool_parameter_has_a_description(client) -> None:
         description = prop.get("description")
         assert isinstance(description, str) and description.strip(), name
     family = plan.input_schema["$defs"]["PlanFamily"]
-    assert set(family["enum"]) == {"document", "table", "fields", "results"}
+    assert set(family["enum"]) == {"document", "table", "fields", "results", "containers"}
 
 
 async def test_invalid_plan_specification_is_an_envelope(client, fake) -> None:
