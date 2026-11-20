@@ -34,6 +34,24 @@ def test_envelope_shape_and_env_metadata_on_success(invoke) -> None:
     assert payload["data"]["entry_id"] == ENTRY_ID
 
 
+def test_entry_creation_plan_uses_optional_entry_and_schema_fields(invoke, fake, tmp_path) -> None:
+    request = {
+        "entry_template_id": "etpl_abc123",
+        "folder_id": "lib_abc123",
+        "name": "Fresh experiment",
+        "schema_fields": {"temperature": {"value": 21}},
+    }
+    spec = tmp_path / "entry-create.json"
+    spec.write_text(json.dumps(request), encoding="utf-8")
+
+    code, planned, _ = invoke("changes", "plan", "--family", "entry", "--spec", str(spec))
+
+    assert code == 0
+    assert planned["data"]["request"] == request
+    assert planned["data"]["after"]["request"]["schemaFields"] == {"tsf_temp": {"value": 21}}
+    assert fake.writes() == []
+
+
 def test_environment_is_required_for_api_commands(invoke, fake) -> None:
     code, payload, _ = invoke("doctor", env=None)
     assert code == 2

@@ -1,6 +1,6 @@
 ---
 name: benchling-toolkit
-description: "Use the benchling CLI and its local MCP server to list, read, and export a Benchling notebook, and to preview a change before applying it. Use when the user asks to list, find, or read entries, containers, schemas, or assay results; read sections or document parts; export a table or results to JSON or CSV; or plan and then apply a document, table, field, result, or container change. Credentials come from benchling auth login --env NAME and stay in the OS keychain. The MCP server is read-only unless it was started with --allow-writes ENV. Do not use this for browser automation, or when no environment has been saved with auth login."
+description: "Use the benchling CLI and its local MCP server to list, read, and export a Benchling notebook, and to preview a change before applying it. Use when the user asks to list, find, or read entries, containers, schemas, or assay results; read sections or document parts; export a table or results to JSON or CSV; create an entry from a template; or plan and then apply a document, table, field, result, or container change. Credentials come from benchling auth login --env NAME and stay in the OS keychain. The MCP server is read-only unless it was started with --allow-writes ENV. Do not use this for browser automation, or when no environment has been saved with auth login."
 license: Apache-2.0
 compatibility: "Requires the benchling command from benchling-toolkit (Python 3.11+), an OS keychain, and network access to the tenant saved for that environment. The MCP server is local stdio."
 metadata:
@@ -23,6 +23,7 @@ Use this skill when the person asks to:
 - read an entry, a section, a document part, an unstructured table, entry fields, or results-table rows
 - get a container by ID or find containers by barcode or name
 - export a table or assay results to a local JSON or CSV file
+- create a notebook entry from a template in a folder, after previewing the creation plan
 - preview a document, table, field, result, or container change, and apply it only after they accept that plan
 
 Stop and do not improvise when:
@@ -143,7 +144,7 @@ benchling --env NAME export --kind assay-results --entry etr_example --schema as
 
 ## Preview, then apply
 
-One plan covers one entry and one family (`document`, `table`, `fields`, or `results`), or a container operation (`containers`). Write the JSON specification to a file, then plan. `--spec -` reads that JSON from stdin. Do not combine `--spec` with `--csv`.
+One plan covers one existing-entry mutation, one entry creation, or one container operation. The families are `entry`, `document`, `table`, `fields`, `results`, and `containers`. For `entry`, pass `entry_template_id`, `folder_id`, and `name`; optional `schema_fields` are checked against the template's schema. Omit `--entry` for entry and container plans. Write the JSON specification to a file, then plan. `--spec -` reads that JSON from stdin. Do not combine `--spec` with `--csv`.
 
 ```console
 benchling --env NAME changes plan --entry etr_example --family table --spec set-cells.json
@@ -152,6 +153,8 @@ benchling --env NAME changes plan --family containers --spec transfer-container.
 benchling --env NAME changes apply PLAN_ID
 benchling --env NAME changes status PLAN_ID
 ```
+
+After applying an entry plan, use the returned `entry_id` with `entry inspect` or `results tables`. Entry creates use the V3 `POST /entry` route and are never automatically retried; a plan cannot be replayed after an attempt.
 
 `changes plan` does not write to Benchling. `changes apply` re-checks the plan's preconditions, then writes. `changes status` reads the local journal and does not write.
 
@@ -279,6 +282,6 @@ benchling mcp serve
 benchling mcp serve --allow-writes ENV
 ```
 
-Do not add `--allow-writes` unless the person asked to allow writes for that environment. `export` takes `kind`, `path`, `format`, and optional `part_id`, `entry`, and `schema_id`. It returns the same summary as the CLI and writes a local file only. `apply_changes` for a results upload returns `next_step`: relay it to the user. `plan_changes` takes `env`, `entry`, `family` (`document`, `table`, `fields`, or `results`), and `specification` (the same JSON shapes as `--spec`). `get_change_status` reads the journal and does not need `--allow-writes`.
+Do not add `--allow-writes` unless the person asked to allow writes for that environment. `export` takes `kind`, `path`, `format`, and optional `part_id`, `entry`, and `schema_id`. It returns the same summary as the CLI and writes a local file only. `apply_changes` for entry creation returns the new entry ID; for a results upload, relay `next_step` so the person can accept the pending results. `plan_changes` takes `env`, an optional `entry`, `family` (`entry`, `document`, `table`, `fields`, or `results`), and `specification` (the same JSON shapes as `--spec`). Omit `entry` for the `entry` family. `get_change_status` reads the journal and does not need `--allow-writes`.
 
 Tools for this workflow: `list_entries`, `list_schemas`, `resolve_entry`, `inspect_entry`, `get_entry`, `get_entry_fields`, `get_section`, `get_part`, `get_table`, `get_schema`, `list_results`, `get_result`, `list_result_tables`, `list_results_table_rows`, `export`, `plan_changes`, `apply_changes`, `get_change_status`, `issue_draft`. `list_environments` and `issue_draft` take no environment.

@@ -230,6 +230,7 @@ class EntrySnapshot(BaseModel):
 class PlanFamily(str, Enum):
     """Kinds of change a plan can describe; each has its own planner."""
 
+    ENTRY = "entry"
     DOCUMENT = "document"
     TABLE = "table"
     FIELDS = "fields"

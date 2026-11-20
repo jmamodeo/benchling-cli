@@ -81,18 +81,19 @@ A plan is stale when the entry, fields, or results it was previewed against have
 
 - The checksum detects accidental corruption and a hand edit that forgets to recompute the hash. It is not a MAC and not a signature. A process that can write the state directory can change the plan and replace the checksum. The README safety section states the same limit.
 - The journal has no checksum. A process that can write `journals/{id}.json` can set the status back to `pending` and apply again. Single-use holds against the CLI and MCP tools, not against an editor on the file.
-- The lock and the journal are local to one state directory. Copying a `pending` plan to another machine, or to another `BENCHLING_TOOLKIT_HOME`, starts a second pending journal. Document and table applies are likely to conflict on the entry version. Field updates, result uploads, and result PATCHes can both succeed: they do not send an idempotency key. Result-upload correlation UUIDs are explicitly not idempotency keys.
+- The lock and the journal are local to one state directory. Copying a `pending` plan to another machine, or to another `BENCHLING_TOOLKIT_HOME`, starts a second pending journal. Document and table applies are likely to conflict on the entry version. Field updates, result uploads, entry creates, and result PATCHes can both succeed: they do not send an idempotency key. Result-upload correlation UUIDs are explicitly not idempotency keys.
 - Field updates compare values and then PATCH. The body has no version. A write that arrives in that gap can be overwritten.
 - Result updates compare `modifiedAt` and the mapped values, then PATCH. `UpdateResultInput` has no version field, so Benchling does not reject a stale PATCH. The gap is the time after the re-check and before that result's PATCH. Rows are patched sequentially, so a later row's gap is longer.
-- Result upload is one POST. Two copies of the plan produce two submissions. A timeout is `unknown` so the client will not retry on its own, but a person who then creates a new plan and applies it can submit the records again.
+- Result upload and entry creation are POSTs. Two copies of a pending plan on different state directories can submit/create twice. A timeout is `unknown`, so the client will not retry on its own, but a person who then creates and applies a new plan can create a duplicate entry or submit records again.
 - HTTP 409 is a conflict only when Benchling returns it. Table and document mutations send the version. Field PATCH and result PATCH do not.
 
 ## Write scoping
 
 Every API command and every MCP tool except `list_environments` requires an environment name. There is no default. The plan stores the entry id resolved at preview time, and apply writes that id, not a new reference the caller supplies at apply time.
 
-The write surface is the four families. There is no tool that forwards an arbitrary method and path.
+The write surface is the entry, document, table, fields, and results families. There is no tool that forwards an arbitrary method and path.
 
+- Entry plans create one template-based entry in one folder. Preview checks both resources are active; apply does not re-read them, and Benchling checks current permissions and state.
 - Document plans operate on parts of one entry. A move that would not leave a section at the start fails before a plan exists.
 - Table plans call `get_table_for_entry`. The part must be on that entry and must be an unstructured table. Cell updates name row and column indexes. A merged child cell is rejected. The removed full-table replace operation is not a plan type.
 - Field plans update fields that already exist on the entry's schema. Values are checked against the definition. The PATCH sends field-definition ids.

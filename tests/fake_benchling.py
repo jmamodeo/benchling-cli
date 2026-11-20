@@ -244,6 +244,31 @@ class FakeBenchling:
         self.entry_version = 1
         self.entry_name = "Synthetic experiment"
         self.display_id = "EXP-1"
+        self.entry_templates: dict[str, dict[str, Any]] = {
+            "etpl_abc123": {
+                "id": "etpl_abc123",
+                "name": "Synthetic template",
+                "archived": False,
+                "schema": {"id": "entsch_abc123"},
+                "days": [
+                    {
+                        "notes": [
+                            {
+                                "type": "results_table",
+                                "apiId": "strtbl_created1",
+                                "name": "Template results",
+                                "assayResultSchemaId": "assaysch_abc123",
+                                "columns": ["ct"],
+                            }
+                        ]
+                    }
+                ],
+            }
+        }
+        self.folders: dict[str, dict[str, Any]] = {
+            "lib_abc123": {"id": "lib_abc123", "name": "Synthetic folder", "archived": False}
+        }
+        self.created_entries: dict[str, dict[str, Any]] = {}
         self.parts: list[dict[str, Any]] = [
             {"id": "docpart_sec1", "__typename": "DocumentPartSection", "title": "Methods"},
             text_part(
@@ -599,9 +624,55 @@ class FakeBenchling:
         return entry
 
     def _get_entry(self, call: Call, entry_id: str) -> tuple[int, dict[str, Any]]:
-        if entry_id != ENTRY_ID:
-            return 404, {"error": {"message": "entry not found"}}
-        return 200, self._entry_object()
+        if entry_id == ENTRY_ID:
+            return 200, self._entry_object()
+        created = self.created_entries.get(entry_id)
+        if created is not None:
+            result = {
+                "id": created["id"],
+                "name": created["name"],
+                "versionMetadata": {"versionId": "ver_created1"},
+            }
+            if created.get("schema"):
+                result["schema"] = created["schema"]
+            return 200, result
+        return 404, {"error": {"message": "entry not found"}}
+
+    def _get_entry_template(self, call: Call, template_id: str) -> tuple[int, dict[str, Any]]:
+        template = self.entry_templates.get(template_id)
+        if template is None:
+            return 404, {"error": {"message": "entry template not found"}}
+        return 200, deepcopy(template)
+
+    def _get_folder_v3(self, call: Call, folder_id: str) -> tuple[int, dict[str, Any]]:
+        folder = self.folders.get(folder_id)
+        if folder is None:
+            return 404, {"error": {"message": "folder not found"}}
+        return 200, deepcopy(folder)
+
+    def _create_entry(self, call: Call) -> tuple[int, dict[str, Any]]:
+        body = call.body if isinstance(call.body, dict) else {}
+        template_id = body.get("entryTemplateId")
+        folder_id = body.get("folderId")
+        template = self.entry_templates.get(template_id)
+        if template is None or folder_id not in self.folders:
+            return 404, {"error": {"message": "entry template or folder not found"}}
+        entry_id = f"etr_created{len(self.created_entries) + 1}"
+        entry: dict[str, Any] = {
+            "id": entry_id,
+            "name": body["name"],
+            "folderId": folder_id,
+            "schema": deepcopy(template.get("schema")),
+            "days": deepcopy(template.get("days") or []),
+            "schemaFields": deepcopy(body.get("schemaFields") or {}),
+        }
+        self.created_entries[entry_id] = entry
+        return 201, {
+            "id": entry_id,
+            "name": entry["name"],
+            "folder": {"id": folder_id},
+            "schema": deepcopy(entry["schema"]),
+        }
 
     def _entry_catalog(self) -> list[dict[str, Any]]:
         return [
@@ -1048,6 +1119,9 @@ class FakeBenchling:
 
     # ---- v2 entry / project / task -----------------------------------
     def _get_entry_v2(self, call: Call, entry_id: str) -> tuple[int, dict[str, Any]]:
+        created = self.created_entries.get(entry_id)
+        if created is not None:
+            return 200, {"entry": deepcopy(created)}
         entry: dict[str, Any] = {
             "id": ENTRY_ID,
             "folderId": "lib_abc123",
@@ -1144,6 +1218,9 @@ ROUTES: list[tuple[str, str]] = [
     (r"/containers/(\w+):transfer", "POST v2|transfer_container"),
     (r"/containers/(\w+)", "GET v2|get_container"),
     (r"/entry/items", "GET v3|list_entries_v3"),
+    (r"/entry-template/(\w+)", "GET v3|get_entry_template"),
+    (r"/folder/(\w+)", "GET v3|get_folder_v3"),
+    (r"/entry", "POST v3|create_entry"),
     (r"/entries", "GET v2|list_entries_v2"),
     (r"/entry/(etr_\w+)", "GET v3|get_entry"),
     (r"/entry/(etr_\w+)", "PATCH v3|patch_entry"),

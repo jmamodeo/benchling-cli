@@ -157,13 +157,13 @@ class ResultsPlanning(ResultUpdatePlanning):
         return warnings
 
     async def _apply_results(self, plan: ChangePlan, journal: ChangeJournal) -> dict[str, Any]:
+        entry_id = self._entry_id(plan)
         if plan.preconditions.get("operation") == "update":
             return await self._apply_result_updates(plan, journal)
         if any("id" in record for record in plan.after["records"]):
             raise ConflictError(
                 "This result plan uses an unsupported bulk-table contract; create a new preview"
             )
-        entry_id = self._entry_id(plan)
         table = await self.service.get_result_table(entry_id, plan.preconditions["table_id"])
         self._expect(
             table.get("schema_id"),

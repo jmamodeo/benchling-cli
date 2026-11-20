@@ -27,6 +27,7 @@ from ..models import (
 )
 from .containers import ContainerPlanning
 from .document import DocumentPlanning
+from .entry import EntryPlanning
 from .fields import FieldsPlanning
 from .repository import checksum_for, json_diff
 from .result_update import request_is_result_update
@@ -53,7 +54,12 @@ def _failure_details(exc: BenchlingAgentError) -> dict[str, Any]:
 
 
 class ChangePlanner(
-    DocumentPlanning, TablePlanning, FieldsPlanning, ResultsPlanning, ContainerPlanning
+    EntryPlanning,
+    DocumentPlanning,
+    TablePlanning,
+    FieldsPlanning,
+    ResultsPlanning,
+    ContainerPlanning,
 ):
     """Creates change plans and applies them under a per-plan file lock."""
 
@@ -79,7 +85,14 @@ class ChangePlanner(
                 "CSV result updates require the results family",
                 details={"family": family.value},
             )
-        if family == PlanFamily.CONTAINERS:
+        if family == PlanFamily.ENTRY:
+            if reference is not None:
+                raise ValidationError("Entry creation plans must not specify --entry")
+            entry_id = None
+            before, after, preconditions, guarantees, warnings = await self._plan_entry_create(
+                request
+            )
+        elif family == PlanFamily.CONTAINERS:
             parts = await self._plan_containers(request)
             before, after, preconditions, guarantees, warnings = parts
             entry_id = None
@@ -157,6 +170,8 @@ class ChangePlanner(
 
     async def _run_family_apply(self, plan: ChangePlan, journal: ChangeJournal) -> dict[str, Any]:
         """Dispatch to the apply routine for the plan's family."""
+        if plan.family == PlanFamily.ENTRY:
+            return await self._apply_entry_create(plan, journal)
         appliers = {
             PlanFamily.DOCUMENT: self._apply_document,
             PlanFamily.TABLE: self._apply_table,

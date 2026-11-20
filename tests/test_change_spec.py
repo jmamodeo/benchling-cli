@@ -19,8 +19,11 @@ def parse(value):
 def test_schema_inlines_every_supported_shape() -> None:
     encoded = json.dumps(CHANGE_SPECIFICATION_SCHEMA)
     assert "$ref" not in encoded
-    assert len(CHANGE_SPECIFICATION_SCHEMA["anyOf"]) == 11
+    assert len(CHANGE_SPECIFICATION_SCHEMA["anyOf"]) == 12
     for token in (
+        "entry_template_id",
+        "folder_id",
+        "schema_fields",
         "insert",
         "delete",
         "move",
@@ -40,6 +43,19 @@ def test_schema_inlines_every_supported_shape() -> None:
         "destination_contents",
     ):
         assert token in encoded
+
+
+def test_entry_creation_specification_round_trips_optional_schema_fields() -> None:
+    request = {
+        "entry_template_id": "etpl_abc123",
+        "folder_id": "lib_abc123",
+        "name": "Fresh experiment",
+        "schema_fields": {"temperature": {"value": 21}},
+    }
+
+    assert parse_change_specification(request) == request
+    with pytest.raises(ValidationError):
+        parse_change_specification({**request, "extra": True})
 
 
 def test_document_table_and_field_forms_round_trip() -> None:

@@ -95,6 +95,43 @@ async def test_missing_env_argument_is_a_protocol_error(client) -> None:
     assert result.is_error is True
 
 
+async def test_entry_creation_preview_stays_read_only_until_enabled_apply(
+    client, writer, fake
+) -> None:
+    request = {
+        "entry_template_id": "etpl_abc123",
+        "folder_id": "lib_abc123",
+        "name": "Fresh experiment",
+    }
+    planned = await call(
+        client,
+        "plan_changes",
+        env="sandbox",
+        family="entry",
+        specification=request,
+    )
+    assert planned["data"]["after"]["folder"]["name"] == "Synthetic folder"
+    assert fake.writes() == []
+
+    blocked = await call(
+        client,
+        "apply_changes",
+        env="sandbox",
+        plan_id=planned["data"]["id"],
+    )
+    assert blocked["ok"] is False
+    assert fake.writes() == []
+
+    applied = await call(
+        writer,
+        "apply_changes",
+        env="sandbox",
+        plan_id=planned["data"]["id"],
+    )
+    assert applied["data"]["journal"]["result"]["entry_id"] == "etr_created1"
+    assert len(fake.writes()) == 1
+
+
 async def test_unknown_env_returns_structured_error_with_choices(client, fake) -> None:
     payload = await call(client, "get_entry", env="prod", reference=ENTRY_ID)
     assert payload["ok"] is False
@@ -882,6 +919,8 @@ async def test_every_tool_parameter_has_a_description(client) -> None:
     encoded = json.dumps(specification)
     assert "$ref" not in encoded
     for token in (
+        "entry_template_id",
+        "folder_id",
         "insert",
         "delete",
         "move",
@@ -904,7 +943,14 @@ async def test_every_tool_parameter_has_a_description(client) -> None:
         description = prop.get("description")
         assert isinstance(description, str) and description.strip(), name
     family = plan.input_schema["$defs"]["PlanFamily"]
-    assert set(family["enum"]) == {"document", "table", "fields", "results", "containers"}
+    assert set(family["enum"]) == {
+        "entry",
+        "document",
+        "table",
+        "fields",
+        "results",
+        "containers",
+    }
 
 
 async def test_invalid_plan_specification_is_an_envelope(client, fake) -> None:
