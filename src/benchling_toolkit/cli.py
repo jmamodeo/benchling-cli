@@ -16,7 +16,12 @@ import typer
 
 from . import __version__
 from .credentials import build_environment, collect_status, login, login_fix_values, logout
-from .environment import ENV_NAME, EnvironmentConfigStore, invalid_environment_name
+from .environment import (
+    ENV_NAME,
+    EnvironmentConfigStore,
+    check_apply_allowed,
+    invalid_environment_name,
+)
 from .errors import (
     AuthenticationError,
     BenchlingAgentError,
@@ -74,10 +79,15 @@ app.add_typer(issue_app, name="issue")
 
 
 class State:
-    """Per-invocation state stored on the Typer context; env is the --env selection."""
+    """Per-invocation state stored on the Typer context; env is the --env selection.
 
-    def __init__(self, env: str | None) -> None:
+    env_on_command_line is True only when --env was typed on the command line,
+    not filled from a default or an environment variable.
+    """
+
+    def __init__(self, env: str | None, *, env_on_command_line: bool = False) -> None:
         self.env = env
+        self.env_on_command_line = env_on_command_line
 
 
 def _show_version(value: bool) -> None:
@@ -95,7 +105,9 @@ def root(
     ),
 ) -> None:
     """Safe, auditable tools for structured Benchling entry data."""
-    ctx.obj = State(env)
+    # Typer may vendor click, so compare the ParameterSource member by name.
+    source = getattr(ctx.get_parameter_source("env"), "name", None)
+    ctx.obj = State(env, env_on_command_line=bool(env) and source == "COMMANDLINE")
 
 
 def _json(value: Any) -> str:
@@ -299,6 +311,14 @@ def auth_login(
         "--secret-stdin",
         help="Read the client secret from stdin. It is never accepted as an argument.",
     ),
+    protected: bool | None = typer.Option(
+        None,
+        "--protected/--unprotected",
+        help=(
+            "Mark the environment protected: changes apply then needs --confirm-env NAME. "
+            "Omit to keep the saved setting (new environments are not protected)."
+        ),
+    ),
 ) -> None:
     """Save a verified client secret for one environment.
 
@@ -340,6 +360,7 @@ def auth_login(
                 tenant_url=url,
                 client_id=client,
                 secret=secret,
+                protected=protected,
             )
     except BenchlingAgentError as exc:
         _auth_failure(exc)
@@ -350,6 +371,7 @@ def auth_login(
                 "tenant_url": environment.base_url,
                 "client_id": environment.client_id,
                 "credential_source": "keyring",
+                "protected": environment.protected,
                 "saved": True,
             },
             env=environment.name,
@@ -372,6 +394,45 @@ def auth_logout(
     except BenchlingAgentError as exc:
         _auth_failure(exc)
     _emit(Envelope.success({"env": name, "removed": True}, env=name))
+
+
+def _set_protection(ctx: typer.Context, env: str | None, protected: bool) -> None:
+    state: State = ctx.obj
+    store = EnvironmentConfigStore()
+    try:
+        name = _require_env_name(env or state.env, store)
+        environment = store.set_protected(name, protected)
+    except BenchlingAgentError as exc:
+        _auth_failure(exc)
+    _emit(
+        Envelope.success(
+            {"env": environment.name, "protected": environment.protected},
+            env=environment.name,
+            tenant_url=environment.base_url,
+        )
+    )
+
+
+@auth_app.command("protect")
+def auth_protect(
+    ctx: typer.Context,
+    env: str | None = typer.Option(None, "--env", "-e", help="Environment name to protect."),
+) -> None:
+    """Mark a saved environment protected.
+
+    `changes apply` then refuses it unless --env names it on the command line and
+    --confirm-env repeats the name. Reads are unaffected. No secret is read.
+    """
+    _set_protection(ctx, env, True)
+
+
+@auth_app.command("unprotect")
+def auth_unprotect(
+    ctx: typer.Context,
+    env: str | None = typer.Option(None, "--env", "-e", help="Environment name to unprotect."),
+) -> None:
+    """Remove the protected mark from a saved environment."""
+    _set_protection(ctx, env, False)
 
 
 @auth_app.command("status")
@@ -904,10 +965,42 @@ def changes_plan(
 
 
 @changes_app.command("apply")
-def changes_apply(ctx: typer.Context, plan_id: str) -> None:
-    """Apply a previously created plan, re-checking its preconditions first."""
+def changes_apply(
+    ctx: typer.Context,
+    plan_id: str,
+    confirm_env: str | None = typer.Option(
+        None,
+        "--confirm-env",
+        help="Repeat the --env name. Required to apply to a protected environment.",
+    ),
+) -> None:
+    """Apply a previously created plan, re-checking its preconditions first.
+
+    A protected environment is refused unless --env names it on the command line
+    and --confirm-env repeats the same name.
+    """
     state: State = ctx.obj
-    _execute(state.env, lambda runtime: runtime.planner.apply(plan_id))
+    try:
+        # Refuse before the keychain or the network is touched.
+        environment = EnvironmentConfigStore().resolve(state.env)
+        check_apply_allowed(
+            environment,
+            env_on_command_line=state.env_on_command_line,
+            confirm_env=confirm_env,
+        )
+    except BenchlingAgentError as exc:
+        _emit(Envelope.failure(exc))
+        raise typer.Exit(int(exc.exit_code)) from None
+
+    async def call(runtime: Runtime) -> dict[str, Any]:
+        check_apply_allowed(
+            runtime.environment,
+            env_on_command_line=state.env_on_command_line,
+            confirm_env=confirm_env,
+        )
+        return await runtime.planner.apply(plan_id)
+
+    _execute(state.env, call)
 
 
 @changes_app.command("status")

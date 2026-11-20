@@ -88,10 +88,13 @@ def login(
     tenant_url: str,
     client_id: str,
     secret: str,
+    protected: bool | None = None,
     http: httpx.Client | None = None,
 ) -> Environment:
     """Verify client credentials, then save the environment and its secret.
 
+    ``protected`` marks the environment for the write guard. None keeps the
+    saved flag of an existing environment, so a fresh login never drops it.
     Nothing is written if the token request fails. A failure while saving rolls
     the keychain and environments.json back to their previous contents.
     """
@@ -107,6 +110,9 @@ def login(
         keychain.require()
         if store.environments_path.exists():
             store.configured_names()
+        if protected is None:
+            protected = store.saved_protection(name)
+        environment = environment.model_copy(update={"protected": protected})
         _verify_token(environment, secret, http)
         previous_secret = keychain.get(name)
         previous_file = _read_file(store)
@@ -181,6 +187,7 @@ def collect_status(
         for item in names:
             environment = store.resolve(item)
             row = auth.status(environment)
+            row["protected"] = environment.protected
             if check:
                 row["token_check"] = _token_check(auth, environment, bool(secrets.get(item)))
                 row["access_token_cached"] = auth.status(environment)["access_token_cached"]

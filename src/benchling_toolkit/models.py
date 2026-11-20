@@ -143,6 +143,7 @@ class Environment(BaseModel):
     tenant_url: HttpUrl
     auth_method: AuthMethod
     client_id: str | None = None
+    protected: bool = False
 
     @field_validator("tenant_url", mode="before")
     @classmethod

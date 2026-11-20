@@ -140,7 +140,8 @@ def build_mcp_server(
             "an explicit env. Use list_entries and list_schemas to discover ids. "
             "Use get_entries for bulk lookup by IDs, get_folder for folder details, "
             "get_template for template structure, and list_templates to discover templates. "
-            "Use plan_changes before apply_changes in the same env. "
+            "Use plan_changes before apply_changes in the same env. A protected env "
+            "refuses apply_changes unless the server was started with --allow-writes for it. "
             "Results created by apply_changes land as pending: relay its next_step, "
             "because a person must accept them in the results table in Benchling. "
             "Use export to write a large table or assay results to a file; "
@@ -207,11 +208,12 @@ def _register_environment_tools(
 
     @mcp.tool(annotations=_annotations(True))
     async def list_environments() -> Envelope[Any]:
-        """List configured environments, their tenants, and whether writes are allowed."""
+        """List configured environments, their tenants, protection, and whether writes are allowed."""
         try:
             envs = {
                 name: {
                     "tenant_url": data.get("tenant_url"),
+                    "protected": data.get("protected", False),
                     "writes_allowed": name in writable_envs,
                 }
                 for name, data in pool.config.metadata().items()
@@ -913,13 +915,25 @@ def _register_change_tools(
     ) -> Envelope[Any]:
         """Explicitly apply a previously previewed plan when writes are enabled for env.
 
+        Writes need env in the server's --allow-writes list; a protected env is
+        refused with a message saying so, and only a restart can enable it.
+
         Entry creation returns the new entry ID for later inspection. After a
         results upload, relay next_step to have the person accept the pending
         results in the named table.
         """
 
         async def call(rt: Runtime) -> dict[str, Any]:
-            if rt.environment.name not in writable_envs:
+            name = rt.environment.name
+            protected = rt.environment.protected or pool.config.saved_protection(name)
+            if name not in writable_envs and protected:
+                raise UnsupportedError(
+                    f"Environment {name} is protected and MCP writes to it are disabled; "
+                    f"it must be listed in --allow-writes. A person can restart with "
+                    f"`benchling mcp serve --allow-writes {name}`",
+                    details={"env": name, "protected": True},
+                )
+            if name not in writable_envs:
                 raise UnsupportedError(
                     f"MCP writes are disabled for {rt.environment.name}; restart with "
                     f"`benchling mcp serve --allow-writes {rt.environment.name}`"

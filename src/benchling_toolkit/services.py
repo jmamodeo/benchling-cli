@@ -9,6 +9,7 @@ from urllib.parse import quote, urlparse
 
 from . import listing
 from .api import BenchlingAPI
+from .environment import protection_summary
 from .errors import ConflictError, NotFoundError, UnsupportedError, UpstreamError, ValidationError
 from .models import CompletenessIssue, EntrySnapshot
 from .redact import redact_text
@@ -1439,6 +1440,8 @@ class BenchlingService:
             "env": self.api.environment.name,
             "tenant_url": self.api.environment.base_url,
             "auth_method": self.api.environment.auth_method.value,
+            "protected": self.api.environment.protected,
+            "protection": protection_summary(self.api.environment),
             "checks": checks,
             "capabilities": {
                 "document_parts": v3_ok,

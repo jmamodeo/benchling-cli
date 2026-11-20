@@ -42,6 +42,8 @@ The MCP server is read-only by default. `benchling mcp serve` does not enable wr
 
 `changes apply PLAN_ID` is the remote write. Run it only after the person accepts that plan id, and only with the same `--env` that created the plan. Show them the plan id, the family, and the preview in the envelope before you apply. A plan is single-use. A stale plan exits 5. Do not retry a write that exits 8 (partial or unknown).
 
+A protected environment refuses `changes apply` (exit 2) unless `--env NAME` is on the command line and `--confirm-env NAME` repeats it. Add `--confirm-env` only after the person has confirmed that environment name for this plan. Never guess it, and never run `auth unprotect` to get around the guard. `doctor` shows `protected` and a `protection` line. On MCP, a protected environment's `apply_changes` is refused unless the server was started with `--allow-writes` for it. Reads and previews are unaffected.
+
 `export` writes a local file and does not change Benchling. It does not need `--allow-writes`. Leave an existing file in place unless the person asked to replace it with `--overwrite`.
 
 There is no default environment. Pass `--env NAME` on every API command. `-e` is the short form. `NAME` uses lowercase letters and digits, starts with a letter, and is at most 32 characters. Use a read environment for reads. Use a write environment only when the person asked for a write.
@@ -66,7 +68,14 @@ benchling --env NAME auth status --check
 benchling --env NAME doctor
 ```
 
-`auth status` lists saved environments and whether a keychain secret is present. `--check` requests a token and does not print or save it. `doctor` makes read-only API checks. A failed doctor check exits 3.
+The person can mark an environment protected in their own terminal:
+
+```console
+benchling auth login --env NAME --protected
+benchling auth protect --env NAME
+```
+
+`auth status` lists saved environments, whether a keychain secret is present, and whether each is `protected`. `--check` requests a token and does not print or save it. `doctor` makes read-only API checks. A failed doctor check exits 3.
 
 If `benchling` is not on `PATH`, run `uv run benchling` from a checkout of this repository. The same subcommands apply.
 
@@ -160,6 +169,7 @@ benchling --env NAME changes plan --entry etr_example --family table --spec set-
 benchling --env NAME changes plan --family containers --spec create-container.json
 benchling --env NAME changes plan --family containers --spec transfer-container.json
 benchling --env NAME changes apply PLAN_ID
+benchling --env NAME changes apply PLAN_ID --confirm-env NAME
 benchling --env NAME changes status PLAN_ID
 benchling --env NAME changes status PLAN_ID --wait --timeout 300
 ```
@@ -169,6 +179,8 @@ After applying an entry plan, use the returned `entry_id` with `entry inspect` o
 `changes plan` does not write to Benchling. `changes apply` re-checks the plan's preconditions, then writes. `changes status` reads each recorded result task once by default and stores returned task status locally. Pass `--wait --timeout SECONDS` to poll until all tasks are complete or the timeout expires.
 
 Container create plans name a `schema_id`; transfer plans name a `source_container_id`, a `destination_container_id`, and `destination_contents` (using `entity_id`). Review the preview before `changes apply`. Create re-checks the schema and transfer re-checks both container modification timestamps. They are single-use plans, and uncertain writes are not retried.
+
+`examples/results-plate-reader.json`, `examples/results-multi-schema.json`, and `examples/results-invalid.json` are canned results specifications with synthetic IDs. They are for smoke tests against the offline fake API (`uv run pytest tests/test_examples.py`), not for a real tenant.
 
 Table, set cells. `examples/table-set-cells.json` is this shape. `table_part_id` is a `docpart_…` id.
 
@@ -300,7 +312,7 @@ Reads, `export`, and `plan_changes` work when the server was started as:
 benchling mcp serve
 ```
 
-`apply_changes` works only for an environment named at startup:
+`apply_changes` works only for an environment named at startup. A protected environment is refused with a message that says so:
 
 ```console
 benchling mcp serve --allow-writes ENV

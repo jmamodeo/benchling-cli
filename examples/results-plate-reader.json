@@ -1,0 +1,9 @@
+{
+  "table_id": "strtbl_plate",
+  "assay_results": [
+    { "schemaId": "assaysch_plate", "fields": { "well": { "value": "A1" }, "absorbance": { "value": 0.112 }, "wavelength_nm": { "value": 450 } } },
+    { "schemaId": "assaysch_plate", "fields": { "well": { "value": "A2" }, "absorbance": { "value": 0.487 }, "wavelength_nm": { "value": 450 } } },
+    { "schemaId": "assaysch_plate", "fields": { "well": { "value": "A3" }, "absorbance": { "value": 0.951 }, "wavelength_nm": { "value": 450 } } },
+    { "schemaId": "assaysch_plate", "fields": { "well": { "value": "B1" }, "absorbance": { "value": 0.048 }, "wavelength_nm": { "value": 450 } } }
+  ]
+}
