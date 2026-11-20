@@ -293,7 +293,7 @@ The accept control may insert every pending result that matches the table's sche
 
 ## Working alongside the browser
 
-Use the toolkit for every read, write, export and check. Use a browser only to see what a person sees and to do what the public API cannot, chiefly accepting pending results. The toolkit writes as the app; the browser acts as the signed-in user, so both need access to the entry. The signed-in user needs access to the entry, and the app needs access to its folder.
+Use the toolkit for every read, write, export and check. Use a browser only to see what a person sees and to do what the public API cannot, chiefly accepting pending results. The toolkit writes as the app; the browser acts as the signed-in user, so the signed-in user needs access to the entry and the app needs access to its folder.
 
 1. Get the entry's link. `benchling --env NAME entry get ENTRY` returns a stable `web_url` field, taken from Benchling's `webUrl` ("the absolute URL of the entry in the Benchling web app", Get Entry by ID on docs.benchling.com). Check that its host is the tenant saved for NAME before you open it. If there is no `web_url`, search the tenant for the display ID.
 2. Before you push results, open the entry and confirm its title, sections and results tables match `entry get` and `entry inspect`.

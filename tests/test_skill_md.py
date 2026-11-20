@@ -153,7 +153,10 @@ def test_skill_pairs_the_toolkit_with_a_browser_without_driving_one() -> None:
     alongside = body.split("## Working alongside the browser", 1)[1].split("\n## ", 1)[0]
     for phrase in ("`web_url`", "results pending --plan PLAN_ID", "results verify PLAN_ID"):
         assert phrase in alongside
-    assert "The toolkit writes as the app; the browser acts as the signed-in user" in alongside
+    assert (
+        "The toolkit writes as the app; the browser acts as the signed-in user, so the "
+        "signed-in user needs access to the entry and the app needs access to its folder."
+    ) in alongside
 
 
 def test_skill_urls_are_the_repository_only() -> None:
