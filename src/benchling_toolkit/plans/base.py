@@ -8,9 +8,11 @@ from typing import Any
 from ..api import BenchlingAPI
 from ..errors import (
     ConflictError,
+    ValidationError,
 )
 from ..models import (
     ChangeJournal,
+    ChangePlan,
     JournalEvent,
 )
 from ..services import (
@@ -51,6 +53,12 @@ class PlannerBase:
                 f"{label.capitalize()} changed after the plan was created",
                 details={"expected": expected, "actual": actual},
             )
+
+    def _plan_entry_id(self, plan: ChangePlan) -> str:
+        """Return the existing entry ID, rejecting a missing plan target."""
+        if not plan.entry_id:
+            raise ValidationError("This plan does not reference an existing entry")
+        return plan.entry_id
 
     def _event(
         self, journal: ChangeJournal, stage: str, status: str, details: dict[str, Any]

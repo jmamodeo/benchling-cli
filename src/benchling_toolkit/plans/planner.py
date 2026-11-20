@@ -25,6 +25,7 @@ from ..models import (
     PlanStatus,
 )
 from .document import DocumentPlanning
+from .entry import EntryPlanning
 from .fields import FieldsPlanning
 from .repository import checksum_for, json_diff
 from .result_update import request_is_result_update
@@ -50,11 +51,13 @@ def _failure_details(exc: BenchlingAgentError) -> dict[str, Any]:
     return details
 
 
-class ChangePlanner(DocumentPlanning, TablePlanning, FieldsPlanning, ResultsPlanning):
+class ChangePlanner(
+    EntryPlanning, DocumentPlanning, TablePlanning, FieldsPlanning, ResultsPlanning
+):
     """Creates change plans and applies them under a per-plan file lock."""
 
     async def plan(
-        self, reference: str, family: PlanFamily | str, request: dict[str, Any]
+        self, reference: str | None, family: PlanFamily | str, request: dict[str, Any]
     ) -> ChangePlan:
         """Build and persist a checksummed plan without writing to the entry.
 
@@ -73,17 +76,27 @@ class ChangePlanner(DocumentPlanning, TablePlanning, FieldsPlanning, ResultsPlan
                 "CSV result updates require the results family",
                 details={"family": family.value},
             )
-        resolved = await self.service.resolve_entry(reference)
-        entry_id = resolved["entry_id"]
-        planners = {
-            PlanFamily.DOCUMENT: self._plan_document,
-            PlanFamily.TABLE: self._plan_table,
-            PlanFamily.FIELDS: self._plan_fields,
-            PlanFamily.RESULTS: self._plan_results,
-        }
-        before, after, preconditions, guarantees, warnings = await planners[family](
-            entry_id, request
-        )
+        if family == PlanFamily.ENTRY:
+            if reference is not None:
+                raise ValidationError("Entry creation plans must not specify --entry")
+            entry_id = None
+            before, after, preconditions, guarantees, warnings = await self._plan_entry_create(
+                request
+            )
+        else:
+            if reference is None:
+                raise ValidationError("This change family requires an entry reference")
+            resolved = await self.service.resolve_entry(reference)
+            entry_id = resolved["entry_id"]
+            planners = {
+                PlanFamily.DOCUMENT: self._plan_document,
+                PlanFamily.TABLE: self._plan_table,
+                PlanFamily.FIELDS: self._plan_fields,
+                PlanFamily.RESULTS: self._plan_results,
+            }
+            before, after, preconditions, guarantees, warnings = await planners[family](
+                entry_id, request
+            )
         plan_data: dict[str, Any] = {
             "schema_version": "1.0",
             "id": uuid.uuid4().hex,
@@ -144,6 +157,8 @@ class ChangePlanner(DocumentPlanning, TablePlanning, FieldsPlanning, ResultsPlan
 
     async def _run_family_apply(self, plan: ChangePlan, journal: ChangeJournal) -> dict[str, Any]:
         """Dispatch to the apply routine for the plan's family."""
+        if plan.family == PlanFamily.ENTRY:
+            return await self._apply_entry_create(plan, journal)
         appliers = {
             PlanFamily.DOCUMENT: self._apply_document,
             PlanFamily.TABLE: self._apply_table,

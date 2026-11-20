@@ -8,7 +8,10 @@
       "captured_at": "2026-11-19",
       "snapshot": "contracts/benchling-v3-openapi.yaml",
       "routes_used": [
+        "/entry",
         "/entry/items",
+        "/entry-template/{entry_template_id}",
+        "/folder/{folder_id}",
         "/entry/{entry_id}",
         "/entry-schema/items",
         "/result-schema/items",

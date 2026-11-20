@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = json.loads((ROOT / "contracts" / "openapi-manifest.json").read_text())
 
 _V3_ENTRY = re.compile(r"/api/v3/entry/[^/]+$")
+_V3_ENTRY_CREATE = re.compile(r"/api/v3/entry$")
 _V3_RESULT = re.compile(r"/api/v3/result/[^/]+$")
 _V2_BULK = re.compile(r"/api/v2/assay-results:bulk-create$")
 
@@ -66,6 +67,8 @@ def _schema_errors(spec_name: str, schema_name: str, instance: Any) -> list[str]
 
 
 def _request_schema(call: Any) -> tuple[str, str] | None:
+    if call.method == "POST" and _V3_ENTRY_CREATE.search(call.path):
+        return "benchling-v3", "CreateEntryInput"
     if call.method == "PATCH" and _V3_ENTRY.search(call.path):
         return "benchling-v3", "UpdateEntryInput"
     if call.method == "PATCH" and _V3_RESULT.search(call.path):
@@ -146,6 +149,17 @@ async def test_every_client_request_body_matches_the_openapi_schema(
         {"operation": "append_rows", "table_part_id": TABLE_PART, "rows": [["D", "4"]]},
     )
     await _apply(runtime, "fields", {"schema_fields": {"temperature": {"value": 21}}})
+    entry_plan = await runtime.planner.plan(
+        None,
+        "entry",
+        {
+            "entry_template_id": "etpl_abc123",
+            "folder_id": "lib_abc123",
+            "name": "Fresh experiment",
+            "schema_fields": {"temperature": {"value": 21}},
+        },
+    )
+    await runtime.planner.apply(entry_plan.id)
     await _apply(
         runtime,
         "results",

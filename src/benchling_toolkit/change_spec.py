@@ -306,6 +306,30 @@ class ResultCsvUpdate(BaseModel):
         return value
 
 
+class EntryCreationSpecification(BaseModel):
+    """Create a notebook entry from a template in a folder."""
+
+    model_config = _STRICT
+
+    entry_template_id: str = Field(min_length=1, description="ID of the entry template to clone.")
+    folder_id: str = Field(min_length=1, description="ID of the destination folder.")
+    name: str = Field(min_length=1, description="Name of the new notebook entry.")
+    schema_fields: dict[str, FieldValueInput] | None = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "Optional schema values using system names or field-definition IDs. "
+            "The plan resolves keys to field-definition IDs."
+        ),
+    )
+
+    @field_validator("schema_fields")
+    @classmethod
+    def schema_fields_present(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
+        """Allow schema_fields to be omitted, but not explicitly null."""
+        return _omit(value)
+
+
 ChangeSpecification = (
     DocumentInsert
     | DocumentDelete
@@ -316,6 +340,7 @@ ChangeSpecification = (
     | FieldChange
     | ResultUpload
     | ResultCsvUpdate
+    | EntryCreationSpecification
 )
 
 _BY_OPERATION: dict[str, type[BaseModel]] = {
@@ -334,6 +359,7 @@ _SUPPORTED = [
     "fields: schema_fields",
     "results upload: table_id and assay_results",
     "results update: operation update, csv_path, id_column, column_map",
+    "entry: entry_template_id, folder_id, name, optional schema_fields",
 ]
 
 
@@ -370,6 +396,8 @@ CHANGE_SPECIFICATION_SCHEMA: dict[str, Any] = _inline_json_schema(
 
 def _model_for(value: dict[str, Any]) -> type[BaseModel]:
     """Pick the one shape this object is claiming to be."""
+    if "entry_template_id" in value or "folder_id" in value:
+        return EntryCreationSpecification
     operation = value.get("operation")
     if isinstance(operation, str) and operation in _BY_OPERATION:
         return _BY_OPERATION[operation]

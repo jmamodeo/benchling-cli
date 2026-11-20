@@ -744,7 +744,9 @@ def _plan_request(
 @changes_app.command("plan")
 def changes_plan(
     ctx: typer.Context,
-    entry: str = typer.Option(..., help="Entry ID, display ID, or URL."),
+    entry: str | None = typer.Option(
+        None, "--entry", help="Entry ID, display ID, or URL. Omit for entry creation."
+    ),
     family: PlanFamily = typer.Option(..., case_sensitive=False),
     spec: str | None = typer.Option(None, "--spec", help="JSON file path, or '-' for stdin."),
     csv_path: str | None = typer.Option(
@@ -771,6 +773,10 @@ def changes_plan(
     """
     state: State = ctx.obj
     try:
+        if family == PlanFamily.ENTRY and entry is not None:
+            raise ValidationError("Entry creation plans must not specify --entry")
+        if family != PlanFamily.ENTRY and entry is None:
+            raise ValidationError("This change family requires --entry")
         request = _plan_request(family, spec, csv_path, id_column, column_map)
     except BenchlingAgentError as exc:
         _emit(Envelope.failure(exc))

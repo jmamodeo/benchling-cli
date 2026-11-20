@@ -19,7 +19,7 @@ async def delete_plan(runtime):
 async def test_unknown_family_lists_supported_families(runtime) -> None:
     with pytest.raises(ValidationError) as caught:
         await runtime.planner.plan(ENTRY_ID, "everything", {})
-    assert caught.value.details["supported"] == ["document", "table", "fields", "results"]
+    assert caught.value.details["supported"] == ["entry", "document", "table", "fields", "results"]
 
 
 async def test_plan_is_persisted_with_stable_checksum_and_diff(runtime) -> None:

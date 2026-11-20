@@ -32,6 +32,10 @@ _EntryRef = Annotated[
     str,
     Field(description="Entry ID, display ID, or same-tenant entry URL."),
 ]
+_OptionalEntryRef = Annotated[
+    str | None,
+    Field(description="Entry ID, display ID, or same-tenant entry URL. Omit for entry creation."),
+]
 _PageCursor = Annotated[
     str | None,
     Field(description="next_token from the previous page. Omit it to read the first page."),
@@ -738,22 +742,21 @@ def _register_change_tools(
     @mcp.tool(annotations=_annotations(False))
     async def plan_changes(
         env: _Env,
-        entry: _EntryRef,
         family: Annotated[
             PlanFamily,
-            Field(description="Change family: document, table, fields, or results."),
+            Field(description="Change family: entry, document, table, fields, or results."),
         ],
         specification: _ChangeSpecification,
+        entry: _OptionalEntryRef = None,
     ) -> Envelope[Any]:
-        """Create an immutable local preview for one entry and mutation family.
+        """Create an immutable local preview for an entry mutation or entry creation.
 
         The specification is checked against the typed change schema before any
-        remote read. An invalid specification is a validation_error envelope and
-        nothing is written. Result updates pass operation "update", csv_path,
-        id_column, and column_map. Inline result uploads pass table_id and
-        assay_results; the created results land as pending until a person accepts
-        them in the results table in Benchling. Apply the preview later with
-        apply_changes.
+        remote read. For family "entry", omit entry and pass entry_template_id,
+        folder_id, and name; optional schema_fields are checked against the
+        template schema. An invalid specification is a validation_error envelope
+        and nothing is written. Result updates pass operation "update", csv_path,
+        id_column, and column_map. Apply the preview later with apply_changes.
         """
 
         async def call(rt: Runtime) -> Any:
@@ -772,9 +775,9 @@ def _register_change_tools(
     ) -> Envelope[Any]:
         """Explicitly apply a previously previewed plan when writes are enabled for env.
 
-        After a results upload the response has next_step: tell the user to open the
-        named entry and results table and click the plug icon to accept the pending
-        results. They are not in the table, and cannot be updated, until then.
+        Entry creation returns the new entry ID for later inspection. After a
+        results upload, relay next_step to have the person accept the pending
+        results in the named table.
         """
 
         async def call(rt: Runtime) -> dict[str, Any]:

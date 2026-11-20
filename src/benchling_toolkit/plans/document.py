@@ -147,7 +147,8 @@ class DocumentPlanning(PlannerBase):
         return before, after
 
     async def _apply_document(self, plan: ChangePlan, journal: ChangeJournal) -> dict[str, Any]:
-        current = await self.api.request("GET", f"/entry/{plan.entry_id}")
+        entry_id = self._plan_entry_id(plan)
+        current = await self.api.request("GET", f"/entry/{entry_id}")
         version = entry_version(current)
         self._expect(version, plan.preconditions["entry_version"], "entry version")
         request = plan.request
@@ -157,12 +158,12 @@ class DocumentPlanning(PlannerBase):
 
         mutation = self._parts_mutation(operation, request, version)
         response = await self.api.request(
-            "PATCH", f"/entry/{plan.entry_id}", json={"partsMutation": mutation}
+            "PATCH", f"/entry/{entry_id}", json={"partsMutation": mutation}
         )
         self._event(journal, operation, "succeeded", write_event_details(response))
         if operation == "insert":
             discovered = await self._discover_new_part_ids(
-                plan.entry_id, plan.preconditions.get("part_ids", [])
+                entry_id, plan.preconditions.get("part_ids", [])
             )
             changed_part_ids = discovered["ids"]
         else:
@@ -181,6 +182,7 @@ class DocumentPlanning(PlannerBase):
         self, plan: ChangePlan, journal: ChangeJournal, version: str
     ) -> dict[str, Any]:
         """Replace text by inserting the new part, then deleting the original (two requests)."""
+        entry_id = self._plan_entry_id(plan)
         target = plan.request["part_id"]
         insertion = {
             "operationType": "insert",
@@ -189,11 +191,11 @@ class DocumentPlanning(PlannerBase):
             "parts": [plan.after["part"]],
         }
         first = await self.api.request(
-            "PATCH", f"/entry/{plan.entry_id}", json={"partsMutation": insertion}
+            "PATCH", f"/entry/{entry_id}", json={"partsMutation": insertion}
         )
         self._event(journal, "insert_replacement", "succeeded", write_event_details(first))
         self.repository.save_journal(journal)
-        updated = await self.api.request("GET", f"/entry/{plan.entry_id}")
+        updated = await self.api.request("GET", f"/entry/{entry_id}")
         next_version = entry_version(updated)
         deletion = {
             "operationType": "delete",
@@ -201,11 +203,11 @@ class DocumentPlanning(PlannerBase):
             "sourceRange": {"start": target, "end": target},
         }
         second = await self.api.request(
-            "PATCH", f"/entry/{plan.entry_id}", json={"partsMutation": deletion}
+            "PATCH", f"/entry/{entry_id}", json={"partsMutation": deletion}
         )
         self._event(journal, "delete_original", "succeeded", write_event_details(second))
         discovered = await self._discover_new_part_ids(
-            plan.entry_id, plan.preconditions.get("part_ids", [])
+            entry_id, plan.preconditions.get("part_ids", [])
         )
         return {
             "operations": [first, second],

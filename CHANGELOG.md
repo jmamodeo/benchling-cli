@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- `changes plan --family entry` previews creation from an entry template in a folder. It reads and validates the V3 template and folder, supports optional schema fields, and applies once with V3 `POST /entry`. The create response's entry ID is returned for inspection; the plan is not reusable after any attempt.
+
 ## [0.4.1] - 2026-11-19
 
 ### Added

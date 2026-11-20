@@ -230,6 +230,7 @@ class EntrySnapshot(BaseModel):
 class PlanFamily(str, Enum):
     """Kinds of change a plan can describe; each has its own planner."""
 
+    ENTRY = "entry"
     DOCUMENT = "document"
     TABLE = "table"
     FIELDS = "fields"
@@ -260,7 +261,7 @@ class ChangePlan(BaseModel):
     created_at: datetime
     env: str
     tenant_url: str
-    entry_id: str
+    entry_id: str | None = None
     family: PlanFamily
     request: dict[str, Any]
     before: dict[str, Any]

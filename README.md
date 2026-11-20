@@ -14,7 +14,7 @@ Safe, auditable tools for AI agents working in Benchling.
 An electronic lab notebook is a scientific record, so letting an AI agent write to one directly is hard to trust. `benchling-toolkit` is a toolkit of safe, auditable tools that AI agents use to work with a [Benchling](https://www.benchling.com) tenant: a JSON-first CLI and a local [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server that is read-only by default. Every change is first previewed as an immutable, checksummed plan that records what will change and the version preconditions it depends on. A separate, explicit step applies it: that step re-checks the preconditions, refuses stale or already-used plans, and records each stage in a local execution journal. The MCP server cannot apply writes unless an operator opts a specific environment in with `--allow-writes`.
 
 - Public Benchling API only; it never automates the browser.
-- Four change families: document text, unstructured tables, entry fields, and assay results.
+- Five plan families: template-based entry creation, document text, unstructured tables, entry fields, and assay results.
 - Several environments at once. Each one is saved with `benchling auth login`; the client secret stays in the OS keychain.
 - One versioned JSON envelope and stable exit codes for both interfaces.
 
@@ -317,7 +317,7 @@ A results-table or unstructured-table cell is flattened the same way. A link or 
 
 ### Preview and apply changes
 
-A change specification covers one entry and one mutation family. Previewing only reads Benchling and creates a local immutable plan:
+A change specification covers one existing-entry mutation or one new-entry creation. Previewing only reads Benchling and creates a local immutable plan:
 
 ```console
 benchling --env dev changes plan \
@@ -333,12 +333,28 @@ benchling --env dev changes plan \
   --map Ct=Ct \
   --map Note=Note
 
+benchling --env dev changes plan \
+  --family entry \
+  --spec - <<'JSON'
+{
+  "entry_template_id": "etpl_abc123",
+  "folder_id": "lib_abc123",
+  "name": "Fresh experiment",
+  "schema_fields": {
+    "temperature": { "value": 21 }
+  }
+}
+JSON
+
 benchling --env dev changes apply PLAN_ID
 benchling --env dev changes status PLAN_ID
 ```
 
-Supported specifications are documented in [schemas/change-spec.schema.json](schemas/change-spec.schema.json). The four families are:
+An entry specification uses `entry_template_id`, `folder_id`, and `name`, and may include `schema_fields` when the template has a schema. Preview reads the template and folder, refuses missing or archived resources, and shows their names and IDs. Apply creates the entry once and returns its ID; use that ID with `entry inspect` or `results tables`. The V3 `Entry.Create` route supports `entryTemplateId` to instantiate a template ([Benchling API docs](https://docs.benchling.com/docs/api/benchling-api/entry/create)); template and folder reads use [EntryTemplate.Get](https://docs.benchling.com/docs/api/benchling-api/entry-template/get) and [Folder.Get](https://docs.benchling.com/docs/api/benchling-api/folder/get).
 
+Supported specifications are documented in [schemas/change-spec.schema.json](schemas/change-spec.schema.json). The five families are:
+
+- `entry`: create an entry from a template in a folder; optional schema fields are validated against the template's schema and sent by field-definition ID;
 - `document`: insert, delete, move, or replace a text part;
 - `table`: set selected cells or append rows on an unstructured table;
 - `fields`: update fields already present on the entry's assigned schema; and
@@ -347,6 +363,8 @@ Supported specifications are documented in [schemas/change-spec.schema.json](sch
 Field inputs must use a schema field's V3 `systemName` or its field-definition ID and have the shape `{"value": ...}`. Plans show both identifiers, send the field-definition ID, validate value types and constraints, and re-check the affected definitions and values immediately before applying. Result uploads also verify that the table belongs to the selected entry, that every record uses the table's result schema, and that any supplied project IDs are readable. Result upload field keys stay system names.
 
 A result update reads a CSV file instead of inline records. `--id-column` is the column that holds the result id (`id` in an assay-result export). Each `--map CSV_COLUMN=FIELD` is required; columns are not guessed from the header. `FIELD` is the export display name, the system name, or the field-definition id. The preview resolves every mapped column to a field-definition id and shows only the values that would change. Unmapped columns, including `createdAt` and `modifiedAt`, are not written. A blank cell clears a value that is present. A blank cell on an empty field is not a change, so an unmodified export round-trips: export writes both null and an empty string as a blank cell. Unknown columns, ambiguous names, and bad rows are one error and nothing is written. Apply re-reads each result and sends `PATCH /result/{id}` with `schemaFields` keyed by field-definition id, and only when `modifiedAt` and the mapped values still match the plan. The CSV is not read again at apply time. The limit is 500 rows. The same specification (`operation`, `csv_path`, `id_column`, `column_map`) is what `plan_changes` accepts.
+
+Entry creation is also single-use. A plan with a successful or uncertain create attempt cannot be applied again; a new plan and apply can still create another entry.
 
 Results land as pending: they do not appear in the notebook results table, and have no entry, until a person clicks the plug (integrate) icon in that table's toolbar in Benchling. After a results upload, `changes apply` returns `next_step` naming the entry and table. The accept control may insert every pending result that matches the table's schema, not only the ones just pushed. See [docs/api-limitations.md](docs/api-limitations.md). A table write updates the named cells or appends rows, checked against the entry version, and resets table evaluation until Benchling's browser evaluates it again.
 Table upload plans use local correlation UUIDs; the tenant assigns the actual result IDs. Local UUIDs are not idempotency keys. Caller-supplied result IDs are rejected by the CLI because the tested tenant rejects them on this endpoint despite the public OpenAPI declaration. Notebook table uploads are limited to 500 records. The immediate apply result is `submission_pending`; task success is reported separately as `pending_integration`.
