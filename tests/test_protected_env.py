@@ -233,3 +233,15 @@ async def test_mcp_apply_on_protected_env_needs_allow_writes(pool, fake) -> None
     writer = build_mcp_server(pool, writable_envs={"sandbox"})
     applied = await _mcp_call(writer, "apply_changes", env="sandbox", plan_id=plan_id)
     assert applied["ok"] is True, applied
+
+
+def test_protected_refusal_happens_before_keychain_or_network(benchling_env, monkeypatch) -> None:
+    EnvironmentConfigStore().set_protected("sandbox", True)
+
+    def no_runtime(env):
+        raise AssertionError("Runtime must not be built for a refused apply")
+
+    monkeypatch.setattr(cli, "Runtime", no_runtime)
+    result = CliRunner().invoke(cli.app, ["--env", "sandbox", "changes", "apply", "a" * 32])
+    assert result.exit_code == 2
+    assert json.loads(result.stdout)["error"]["details"] == {"env": "sandbox", "protected": True}

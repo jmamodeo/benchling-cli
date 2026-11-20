@@ -980,6 +980,17 @@ def changes_apply(
     and --confirm-env repeats the same name.
     """
     state: State = ctx.obj
+    try:
+        # Refuse before the keychain or the network is touched.
+        environment = EnvironmentConfigStore().resolve(state.env)
+        check_apply_allowed(
+            environment,
+            env_on_command_line=state.env_on_command_line,
+            confirm_env=confirm_env,
+        )
+    except BenchlingAgentError as exc:
+        _emit(Envelope.failure(exc))
+        raise typer.Exit(int(exc.exit_code)) from None
 
     async def call(runtime: Runtime) -> dict[str, Any]:
         check_apply_allowed(

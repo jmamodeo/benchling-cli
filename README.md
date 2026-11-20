@@ -202,6 +202,22 @@ benchling auth logout --env dev
 
 `auth status` is the only way to list saved environments. It shows each tenant URL without a trailing slash and whether a keychain secret is present. It never prints the secret. `--check` requests a token and puts the specific failure in the top-level message (for example `Client secret is not in the keychain; run benchling auth login --env dev`). `doctor` makes read-only API checks. When a check fails, the envelope is `ok: false`, the process exits 3, and each failed check includes a hint. `auth logout` removes the `environments.json` record and the keychain secret; it does not revoke the app in Benchling. Logging out an environment that was never configured says that it is not configured.
 
+### Protected environments
+
+Mark a production environment protected so a write needs its name typed twice. Pass `--protected` at login, or set it later. Protection is stored as `protected` in that environment's `environments.json` record. A later login without `--protected` or `--unprotected` keeps the saved setting:
+
+```console
+benchling auth login --env prod --protected
+benchling auth protect --env prod
+benchling auth unprotect --env prod
+```
+
+On a protected environment, `changes apply` is refused (exit 2) unless `--env` names it on the command line and `--confirm-env` repeats the same name. There is no default environment and no environment-variable override for either flag. A `--confirm-env` that names a different environment is refused for any environment. Reads, `changes plan` and `changes status` are unaffected. The MCP tool `apply_changes` needs a protected environment in `--allow-writes`, and its refusal says the environment is protected. `doctor`, `auth status` and the MCP tool `list_environments` report `protected`. `doctor` also prints a `protection` line naming the flags a write needs.
+
+```console
+benchling --env prod changes apply PLAN_ID --confirm-env prod
+```
+
 ## Headless Linux
 
 Linux servers and agent machines often have no Secret Service on the session bus. `benchling` will not write the client secret to a plaintext file. Install a provider if it is missing (`gnome-keyring` and `dbus` on Debian/Ubuntu), then unlock a keyring and run the login in that same session. Pipe the keyring password on stdin so it is not a shell argument:
@@ -360,9 +376,12 @@ benchling --env dev changes plan \
 JSON
 
 benchling --env dev changes apply PLAN_ID
+benchling --env prod changes apply PLAN_ID --confirm-env prod
 benchling --env dev changes status PLAN_ID
 benchling --env dev changes status PLAN_ID --wait --timeout 300
 ```
+
+`--confirm-env` is required only for a [protected environment](#protected-environments).
 
 An entry specification uses `entry_template_id`, `folder_id`, and `name`, and may include `schema_fields` when the template has a schema. Preview reads V3 template metadata and folder data, refuses missing or archived resources, and shows their names and IDs. Use `template get` for the template's note structure; V3 `EntryTemplate.Get` returns metadata only. Apply creates the entry once and returns its ID; use that ID with `entry inspect` or `results tables`. The V3 `Entry.Create` route supports `entryTemplateId` to instantiate a template ([Benchling API docs](https://docs.benchling.com/docs/api/benchling-api/entry/create)); template and folder reads use [EntryTemplate.Get](https://docs.benchling.com/docs/api/benchling-api/entry-template/get) and [Folder.Get](https://docs.benchling.com/docs/api/benchling-api/folder/get).
 Container creation and transfer use the same local preview and explicit apply lifecycle. Container plans do not take `--entry`:
@@ -424,6 +443,12 @@ Use `batches` in a results specification to push multiple tables in one plan:
 }
 ```
 
+Three canned results specifications in [`examples/`](examples/) use synthetic IDs and generic data: `results-plate-reader.json` (one plate-reader style table), `results-multi-schema.json` (two tables with different result schemas) and `results-invalid.json` (a wrong-type value and a missing required field, for the validation error path). Each record has the `schemaId` and `fields` shape of V2 [bulk create assay results](https://docs.benchling.com/docs/api/v2/benchling-api/assay-results/bulk-create-assay-results). Pass one with `--family results --spec` against an entry that has those tables. To run all three through `changes plan` and `changes apply` against the offline fake API (`tests/fake_benchling.py`, which installs the `strtbl_plate` table), with no credentials or network:
+
+```console
+uv run pytest tests/test_examples.py
+```
+
 Apply submits each table separately and journals each task. A rejected batch does not stop later batches; inspect the partial journal before making a fresh plan, and never retry automatically. `changes status` checks every task once by default. Add `--wait --timeout SECONDS` to poll until all tasks are terminal or the timeout expires. A failed task's documented error `index` is mapped to that batch's zero-based row index and local correlation ID. Errors without an in-range index remain under `unmatched_row_errors` alongside the raw error object.
 Entry creation is also single-use. A plan with a successful or uncertain create attempt cannot be applied again; a new plan and apply can still create another entry.
 
@@ -460,7 +485,7 @@ On Linux the standard MCP SDK starts the stdio server with only `HOME`, `LOGNAME
 
 Startup failures, including a missing keychain, are a JSON envelope on stderr and a non-zero exit. Stdout is reserved for the MCP protocol. The stderr text names the MCP SDK's default environment and the `env` block. Request logging is off unless you pass `--verbose`.
 
-Every tool except `list_environments` and `issue_draft` takes a required `env` argument, and each call is authenticated with that environment's credentials. Every parameter on every tool has a description in the published input schema. The server is read-only by default. To permit `apply_changes` in specific environments, add `--allow-writes ENV` after `serve` (repeatable, e.g. `--allow-writes dev --allow-writes test`); reads remain available in all environments. A plan can only be applied or checked in the environment that created it. `plan_changes` remains available because it performs remote reads and writes only an immutable local preview. Its `specification` is a typed object, the same shapes as [schemas/change-spec.schema.json](schemas/change-spec.schema.json): a document or table `operation`, `schema_fields`, inline `assay_results` or table-specific result `batches`, or a result update with `operation` `update`, `csv_path`, `id_column`, and `column_map`. A specification that does not match is a `validation_error` in the standard envelope, and nothing is planned. `apply_changes` is still gated by `--allow-writes ENV`. `get_change_status` polls result tasks and accepts `wait` and `timeout`; status checks work without `--allow-writes`. The CLI still passes its JSON file to the planner. Large entry, section, table, result, and schema responses expose offset/limit or cursor pagination and never silently truncate data. `list_entries`, `list_schemas`, and `list_results_table_rows` use `limit` (default 50, maximum 100) and return `next_token` for the following page. `list_results_table_rows` is a read, so it works without `--allow-writes`. `export` reads every page internally and writes a local JSON or CSV file. Its response is the same summary as the CLI (row count, columns, path, SHA-256) and does not include the rows. It does not write to Benchling, and it does not need `--allow-writes`. An existing file is left unchanged unless `overwrite` is true.
+Every tool except `list_environments` and `issue_draft` takes a required `env` argument, and each call is authenticated with that environment's credentials. Every parameter on every tool has a description in the published input schema. The server is read-only by default. To permit `apply_changes` in specific environments, add `--allow-writes ENV` after `serve` (repeatable, e.g. `--allow-writes dev --allow-writes test`); reads remain available in all environments. A [protected environment](#protected-environments) is refused unless it is in `--allow-writes`, and the refusal says it is protected. A plan can only be applied or checked in the environment that created it. `plan_changes` remains available because it performs remote reads and writes only an immutable local preview. Its `specification` is a typed object, the same shapes as [schemas/change-spec.schema.json](schemas/change-spec.schema.json): a document or table `operation`, `schema_fields`, inline `assay_results` or table-specific result `batches`, or a result update with `operation` `update`, `csv_path`, `id_column`, and `column_map`. A specification that does not match is a `validation_error` in the standard envelope, and nothing is planned. `apply_changes` is still gated by `--allow-writes ENV`. `get_change_status` polls result tasks and accepts `wait` and `timeout`; status checks work without `--allow-writes`. The CLI still passes its JSON file to the planner. Large entry, section, table, result, and schema responses expose offset/limit or cursor pagination and never silently truncate data. `list_entries`, `list_schemas`, and `list_results_table_rows` use `limit` (default 50, maximum 100) and return `next_token` for the following page. `list_results_table_rows` is a read, so it works without `--allow-writes`. `export` reads every page internally and writes a local JSON or CSV file. Its response is the same summary as the CLI (row count, columns, path, SHA-256) and does not include the rows. It does not write to Benchling, and it does not need `--allow-writes`. An existing file is left unchanged unless `overwrite` is true.
 
 The CLI and MCP tools share the same versioned envelope. Static schemas for the envelope and change specifications live under [`schemas/`](schemas/). MCP publishes the generated input and output schema for each tool during discovery. Each input parameter includes a description, and `plan_changes` `specification` is the typed union of those change shapes.
 
@@ -529,6 +554,7 @@ flowchart TD
 - **Version preconditions.** Document edits and table writes send the entry version observed at preview time, and Benchling answers HTTP 409 if it is stale. Table plans re-check that entry version just before writing. A concurrent edit becomes a conflict instead of an overwrite. Entry field updates have no atomic server-side precondition, so the affected values are compared immediately before writing; this is best effort. CSV result updates re-check each result's `modifiedAt`, entry, schema, and mapped values before any `PATCH /result/{id}`. That PATCH body has no version field, so the check is local. A mismatch writes nothing.
 - **Single use.** A plan with any prior attempt cannot be applied again, and a per-plan file lock stops a CLI and an MCP process from applying the same plan concurrently on one machine.
 - **Writes are never retried.** A write that times out or fails with a server error leaves the journal in `unknown`/`partial` state for a person to reconcile; reads are retried with bounded backoff.
+- **Protected environments.** `changes apply` on an environment marked protected is refused unless `--env` names it on the command line and `--confirm-env` repeats the name. MCP `apply_changes` needs it in `--allow-writes`. The flag is local configuration. It is not a Benchling permission.
 - **Read-only MCP by default.** `apply_changes` is refused unless the server was started with `--allow-writes ENV` for that environment. `plan_changes` stays available because it only reads Benchling and writes a local preview.
 - **Export writes a local file only.** `export` reads Benchling and writes JSON or CSV on this machine. The response is a summary. An existing file is not replaced unless overwrite is set.
 - **Explicit environment on every call.** There is no default environment, so a command or tool call cannot reach a tenant by omission.
@@ -571,7 +597,7 @@ uv run mypy
 uv run pytest --cov
 ```
 
-The suite has 396 test functions (620 collected cases, parametrization included) and reaches 97% branch coverage. CI enforces a `fail_under` floor of 96% in `pyproject.toml`, and also builds the sdist and wheel, runs `twine check`, and smoke-tests the built wheel. CI installs `skills-ref` 0.1.1 and runs its `agentskills validate` command on this directory.
+The suite has 503 test functions (788 collected cases, parametrization included) and reaches 96% branch coverage. CI enforces a `fail_under` floor of 96% in `pyproject.toml`, and also builds the sdist and wheel, runs `twine check`, and smoke-tests the built wheel. CI installs `skills-ref` 0.1.1 and runs its `agentskills validate` command on this directory.
 
 ### Public OpenAPI drift
 
