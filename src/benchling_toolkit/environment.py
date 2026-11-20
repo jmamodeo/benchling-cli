@@ -1,7 +1,7 @@
 """Named environments stored in environments.json.
 
-The file holds the tenant URL and client ID only. Client secrets live in the
-OS keychain. ``BENCHLING_<ENV>_*`` variables are not read.
+The file holds the tenant URL, client ID and protected flag only. Client
+secrets live in the OS keychain. ``BENCHLING_<ENV>_*`` variables are not read.
 """
 
 from __future__ import annotations
@@ -30,6 +30,51 @@ def invalid_environment_name(name: str, *, available: list[str] | None = None) -
         f"Invalid environment name{shown}: {ENV_NAME_RULE}.",
         details={"env": None, "available_envs": list(available or [])},
     )
+
+
+def protection_summary(environment: Environment) -> str:
+    """One line describing what a write to this environment requires."""
+    name = environment.name
+    if environment.protected:
+        return (
+            f"protected: `changes apply` needs `--env {name} --confirm-env {name}`; "
+            f"MCP `apply_changes` needs `--allow-writes {name}`"
+        )
+    return (
+        f"not protected: `changes apply` needs `--env {name}`; "
+        f"MCP `apply_changes` needs `--allow-writes {name}`"
+    )
+
+
+def check_apply_allowed(
+    environment: Environment, *, env_on_command_line: bool, confirm_env: str | None
+) -> None:
+    """Refuse a CLI apply to a protected environment unless it is named and confirmed.
+
+    The environment must come from ``--env`` on the command line, and
+    ``--confirm-env`` must repeat the same name. A ``--confirm-env`` that names
+    another environment is refused even when the target is not protected.
+    """
+    name = environment.name
+    details: dict[str, Any] = {"env": name, "protected": environment.protected}
+    if confirm_env is not None and confirm_env != name:
+        raise ValidationError(
+            f"--confirm-env does not match --env {name}; nothing was applied",
+            details=details,
+        )
+    if not environment.protected:
+        return
+    if not env_on_command_line:
+        raise ValidationError(
+            f"Environment {name} is protected; name it with --env {name} on the command line",
+            details=details,
+        )
+    if confirm_env is None:
+        raise ValidationError(
+            f"Environment {name} is protected; nothing was applied. To write, rerun "
+            f"`benchling --env {name} changes apply PLAN_ID --confirm-env {name}`",
+            details=details,
+        )
 
 
 def write_private(path: Path, text: str) -> None:
@@ -113,8 +158,28 @@ class EnvironmentConfigStore(ConfigStore):
         records[environment.name] = {
             "tenant_url": environment.base_url,
             "client_id": environment.client_id,
+            "protected": environment.protected,
         }
         self._write(records)
+
+    def saved_protection(self, name: str) -> bool:
+        """Saved protected flag, read without validating the rest of the record.
+
+        Any value other than a missing key or ``false`` counts as protected, so a
+        damaged flag fails closed.
+        """
+        if not self.environments_path.exists():
+            return False
+        record = self._records().get(name)
+        if record is None:
+            return False
+        return record.get("protected", False) is not False
+
+    def set_protected(self, name: str, protected: bool) -> Environment:
+        """Mark or unmark one saved environment as protected and return the updated record."""
+        environment = self.resolve(name).model_copy(update={"protected": protected})
+        self.upsert(environment)
+        return environment
 
     def remove(self, name: str) -> bool:
         """Remove one environment. Returns True when a record was deleted."""
@@ -161,6 +226,12 @@ class EnvironmentConfigStore(ConfigStore):
             or any(character in client_id for character in "\r\n\x00")
         ):
             raise ValidationError("Invalid client ID", details={"env": name, "field": "client_id"})
+        protected = record.get("protected", False)
+        if not isinstance(protected, bool):
+            raise ValidationError(
+                "Invalid protected flag; expected true or false",
+                details={"env": name, "field": "protected"},
+            )
         tenant_url = record.get("tenant_url")
         if not isinstance(tenant_url, str) or not tenant_url.strip():
             raise ValidationError(
@@ -175,6 +246,7 @@ class EnvironmentConfigStore(ConfigStore):
                     "tenant_url": tenant_url,
                     "client_id": client_id,
                     "auth_method": AuthMethod.CLIENT_CREDENTIALS,
+                    "protected": protected,
                 }
             )
         except ModelValidationError as exc:
