@@ -25,6 +25,7 @@ from ..models import (
     PlanFamily,
     PlanStatus,
 )
+from . import readback
 from .containers import ContainerPlanning
 from .document import DocumentPlanning
 from .entry import EntryPlanning
@@ -397,6 +398,306 @@ class ChangePlanner(
                 finally:
                     lock.release()
         return status
+
+    def _readback_plan(self, plan_id: str) -> tuple[ChangePlan, ChangeJournal]:
+        """Load an applied result upload plan for read-back in the active environment."""
+        plan = self.repository.load_plan(plan_id)
+        self._check_plan_scope(plan)
+        if plan.family != PlanFamily.RESULTS or plan.preconditions.get("operation") == "update":
+            raise ValidationError(
+                "Only result upload plans can be read back",
+                details={"plan_id": plan_id, "family": plan.family.value},
+            )
+        journal = self.repository.load_journal(plan_id)
+        if journal.status == PlanStatus.PENDING:
+            raise ValidationError(
+                "Plan has not been applied yet; run `changes apply` first",
+                details={"plan_id": plan_id, "status": journal.status.value},
+            )
+        return plan, journal
+
+    async def _submitted_batches(self, journal: ChangeJournal) -> list[dict[str, Any]]:
+        """Each submitted batch with its server-assigned record IDs.
+
+        IDs come from the journal. When ``changes status`` has not stored them yet, the
+        task is read once without waiting. The journal is not written.
+        """
+        result = journal.result or {}
+        stored_batches = result.get("batches")
+        known = {
+            item.get("task_id"): item
+            for item in (stored_batches if isinstance(stored_batches, list) else [])
+            if isinstance(item, dict)
+        }
+        submitted: list[dict[str, Any]] = []
+        for task in self._result_tasks(journal):
+            task_id = task["task_id"]
+            stored = dict(known.get(task_id) or {})
+            if result.get("task_id") == task_id:
+                stored = {**result, **stored}
+            entry: dict[str, Any] = {
+                "batch_index": task.get("batch_index", 0),
+                "table_id": task.get("table_id"),
+                "task_id": task_id,
+                "record_ids": [
+                    item for item in stored.get("record_ids") or [] if isinstance(item, str)
+                ],
+                "task_status": stored.get("task_status"),
+            }
+            if not entry["record_ids"]:
+                polled = await self._poll_result_task(task, wait=False, deadline=0.0)
+                entry["record_ids"] = polled.get("record_ids", [])
+                entry["task_status"] = polled.get("task_status", entry["task_status"])
+                if "remote_task_error" in polled:
+                    entry["remote_task_error"] = polled["remote_task_error"]
+            submitted.append(entry)
+        return submitted
+
+    @staticmethod
+    def _unsubmitted_reason(journal: ChangeJournal, batch_index: int) -> str:
+        """Why a planned batch has no task: the journal's submit outcome for it."""
+        for event in journal.events:
+            if event.stage == "submit_results" and event.details.get("batch_index") == batch_index:
+                if event.status == "failed":
+                    return "submission_failed"
+                if event.status == "unknown":
+                    return "submission_unconfirmed"
+        return "not_submitted"
+
+    @staticmethod
+    def _no_ids_reason(batch: dict[str, Any]) -> str:
+        if "remote_task_error" in batch:
+            return "task_unreadable"
+        return {
+            "RUNNING": "task_running",
+            "FAILED": "task_failed",
+        }.get(str(batch.get("task_status")), "no_record_ids")
+
+    @staticmethod
+    def _readback_limit(value: object, label: str, maximum: int) -> int:
+        if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= maximum:
+            raise ValidationError(f"{label} must be between 1 and {maximum}")
+        return value
+
+    async def read_back_results(
+        self,
+        *,
+        plan_id: str | None = None,
+        result_ids: list[str] | None = None,
+        schema_id: str | None = None,
+        created_after: str | None = None,
+        limit: int = 50,
+        cursor: str | None = None,
+    ) -> dict[str, Any]:
+        """Fetch result records, including pending ones, and mark each pending or accepted.
+
+        Exactly one source: a result upload plan ID (its journal record IDs), explicit
+        V2 result IDs, or a result schema ID with a created-after time. At most ``limit``
+        records are listed; counts cover every record read. Nothing is written.
+        """
+        limit = self._readback_limit(limit, "limit", 100)
+        by_schema = schema_id is not None or created_after is not None
+        if sum([plan_id is not None, result_ids is not None, by_schema]) != 1:
+            raise ValidationError(
+                "Pass exactly one of plan_id, result_ids, or schema_id with created_after"
+            )
+        if cursor is not None and not by_schema:
+            raise ValidationError("cursor applies only to schema_id with created_after")
+        response: dict[str, Any]
+        items: list[dict[str, Any]]
+        not_found: list[str] = []
+        next_step: str | None
+        if by_schema:
+            if schema_id is None or created_after is None:
+                raise ValidationError("schema_id and created_after must be passed together")
+            page = await self.service.list_assay_results(
+                schema_id=schema_id, created_after=created_after, page_size=limit, cursor=cursor
+            )
+            items = [readback.summarize_record(record) for record in page["items"]]
+            response = {
+                "source": {"mode": "schema", "schema_id": schema_id, "created_after": created_after}
+            }
+            response["next_token"] = page["next_token"]
+            next_step = readback.pending_next_step(readback.state_counts(items)[readback.PENDING])
+        elif result_ids is not None:
+            fetched = await self.service.get_assay_results(result_ids)
+            items = [readback.summarize_record(record) for record in fetched["items"]]
+            not_found = fetched["not_found"]
+            response = {"source": {"mode": "ids", "requested": len(items) + len(not_found)}}
+            next_step = readback.pending_next_step(readback.state_counts(items)[readback.PENDING])
+        else:
+            assert plan_id is not None
+            plan, journal = self._readback_plan(plan_id)
+            submitted = await self._submitted_batches(journal)
+            names = {
+                batch["table_id"]: batch["table_name"] for batch in readback.planned_batches(plan)
+            }
+            table_of = {
+                record_id: batch.get("table_id")
+                for batch in submitted
+                for record_id in batch["record_ids"]
+            }
+            items = []
+            if table_of:
+                fetched = await self.service.get_assay_results(list(table_of))
+                not_found = fetched["not_found"]
+                items = [
+                    readback.summarize_record(record, table_id=table_of.get(record.get("id")))
+                    for record in fetched["items"]
+                ]
+            response = {
+                "source": {"mode": "plan", "plan_id": plan_id, "entry_id": plan.entry_id},
+                "batches": [
+                    {
+                        key: batch[key]
+                        for key in (
+                            "batch_index",
+                            "table_id",
+                            "task_id",
+                            "task_status",
+                            "remote_task_error",
+                        )
+                        if key in batch
+                    }
+                    | {"record_count": len(batch["record_ids"])}
+                    for batch in submitted
+                ],
+            }
+            pending_tables = list(
+                dict.fromkeys(
+                    str(names.get(item.get("table_id")) or item.get("table_id"))
+                    for item in items
+                    if item["state"] == readback.PENDING
+                )
+            )
+            next_step = readback.pending_next_step(
+                len([item for item in items if item["state"] == readback.PENDING]),
+                entry_id=plan.entry_id,
+                table_names=pending_tables,
+            )
+        ordered = readback.sort_by_state(items)
+        counts = readback.state_counts(items)
+        response.update(
+            {
+                "counts": {"read": len(items), **counts, "not_found": len(not_found)},
+                "items": ordered[:limit],
+                "returned": min(len(ordered), limit),
+                "truncated": len(ordered) > limit,
+                "needs_accept": [
+                    item["id"] for item in ordered if item["state"] == readback.PENDING
+                ][:limit],
+                "not_found": not_found[:limit],
+                "next_step": next_step,
+            }
+        )
+        return response
+
+    async def verify_results(self, plan_id: str, *, sample: int = 20) -> dict[str, Any]:
+        """Read back a result upload plan's records and diff them against the plan.
+
+        Planned fields are compared by system name. Mismatched, missing and extra rows
+        are counted in full and listed up to ``sample`` each. Nothing is written.
+        """
+        sample = self._readback_limit(sample, "sample", 200)
+        plan, journal = self._readback_plan(plan_id)
+        batches = readback.planned_batches(plan)
+        submitted = {
+            batch["batch_index"]: batch for batch in await self._submitted_batches(journal)
+        }
+        if len(batches) == 1 and len(submitted) == 1 and 0 not in submitted:
+            submitted = {0: next(iter(submitted.values()))}
+        all_ids = [record_id for batch in submitted.values() for record_id in batch["record_ids"]]
+        records: dict[str, dict[str, Any]] = {}
+        not_found: set[str] = set()
+        if all_ids:
+            fetched = await self.service.get_assay_results(all_ids)
+            records = {str(record.get("id")): record for record in fetched["items"]}
+            not_found = set(fetched["not_found"])
+        totals: dict[str, list[dict[str, Any]]] = {
+            "matched": [],
+            "mismatched": [],
+            "missing": [],
+            "extra": [],
+        }
+        fetched_states: list[dict[str, Any]] = []
+        batch_reports = []
+        for index, batch in enumerate(batches):
+            task = submitted.get(index)
+            if task is None:
+                reason = self._unsubmitted_reason(journal, index)
+                found: list[dict[str, Any]] = []
+            else:
+                found = [
+                    records[item] for item in dict.fromkeys(task["record_ids"]) if item in records
+                ]
+                if any(item in not_found for item in task["record_ids"]):
+                    reason = "result_not_found"
+                elif not task["record_ids"]:
+                    reason = self._no_ids_reason(task)
+                else:
+                    reason = "no_matching_result"
+            diff = readback.diff_batch(batch, found, missing_reason=reason)
+            for key, rows in diff.items():
+                totals[key].extend(rows)
+            fetched_states.extend({"state": readback.result_state(record)} for record in found)
+            batch_reports.append(
+                {
+                    "table_id": batch["table_id"],
+                    "planned": len(batch["records"]),
+                    "fetched": len(found),
+                    **{key: len(rows) for key, rows in diff.items()},
+                    **(
+                        {"task_id": task["task_id"], "task_status": task.get("task_status")}
+                        if task
+                        else {"submission": reason}
+                    ),
+                }
+            )
+        states = readback.state_counts(fetched_states)
+        paired = totals["matched"] + totals["mismatched"] + totals["extra"]
+        pending_rows = [row for row in paired if row["state"] == readback.PENDING]
+        pending_tables = list(
+            dict.fromkeys(
+                str(
+                    next(
+                        (b["table_name"] for b in batches if b["table_id"] == row["table_id"]),
+                        row["table_id"],
+                    )
+                )
+                for row in pending_rows
+            )
+        )
+        planned_count = sum(len(batch["records"]) for batch in batches)
+        ok = not (totals["mismatched"] or totals["missing"] or totals["extra"])
+        return {
+            "plan_id": plan_id,
+            "entry_id": plan.entry_id,
+            "ok": ok,
+            "summary": (
+                f"{len(totals['matched'])} of {planned_count} planned rows match; "
+                f"{len(totals['mismatched'])} mismatched, {len(totals['missing'])} missing, "
+                f"{len(totals['extra'])} extra; {states[readback.PENDING]} pending acceptance"
+            ),
+            "counts": {
+                "planned": planned_count,
+                "fetched": len(fetched_states),
+                **{key: len(rows) for key, rows in totals.items()},
+                **states,
+                "not_found": len(not_found),
+            },
+            "sample_limit": sample,
+            "mismatched": totals["mismatched"][:sample],
+            "missing": totals["missing"][:sample],
+            "extra": totals["extra"][:sample],
+            "needs_accept": [
+                {key: row.get(key) for key in ("table_id", "plan_row_index", "result_id")}
+                for row in pending_rows
+            ][:sample],
+            "batches": batch_reports,
+            "next_step": readback.pending_next_step(
+                len(pending_rows), entry_id=plan.entry_id, table_names=pending_tables
+            ),
+        }
 
     def _result_tasks(self, journal: ChangeJournal) -> list[dict[str, Any]]:
         """Find task submissions in append-only events, with support for older journals."""

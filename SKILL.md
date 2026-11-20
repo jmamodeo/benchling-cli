@@ -143,6 +143,8 @@ benchling --env NAME schema get assaysch_example
 benchling --env NAME results get RESULT_ID
 benchling --env NAME results tables etr_example
 benchling --env NAME results rows docpart_example --limit 50 --cursor NEXT_TOKEN
+benchling --env NAME results pending --plan PLAN_ID
+benchling --env NAME results verify PLAN_ID
 ```
 
 `table get` reads an unstructured table. Its argument is a `docpart_…` id from `entry inspect`. `results tables` returns `table_id` values that are `strtbl_…` ids. `results rows` reads one page of a results-table part (`docpart_…`) from that part's rows URL. `schema get` includes each dropdown field's options.
@@ -273,7 +275,7 @@ Results created through the API do not go straight into a notebook results table
 
 After a results create, tell the user, naming the entry and every submitted table: "Open entry X, go to results table Y, and click the plug icon in its toolbar to accept the pending results. Until you do, they do not show in the table and I cannot update them, because a results update needs a result that is on the entry. Refresh the page if the entry is already open." The apply response carries the same text in `next_step`, including partial or unconfirmed submissions where acceptance may be needed. Say it every time.
 
-Check, do not assume. Re-read with `results list --entry ENTRY` and `results rows PART_ID`. Pending results are missing from the entry and the table. After acceptance they appear on the entry. Only then plan a results update. A result that is not on the entry is refused at plan time with "Result is not on the selected entry", and nothing is written.
+Check, do not assume. `results pending --plan PLAN_ID` reads the plan's records back, including pending ones, and marks each `pending` or `accepted`; `needs_accept` lists the rows that still need the plug icon. `results verify PLAN_ID` diffs the pushed records against the plan field by field and reports mismatched, missing, and extra rows. Without a plan, use `results pending --id RESULT_ID` or `results pending --schema SCHEMA_ID --created-after TIME` (V2 has no entry filter, so that can include other entries' results). `results list --entry ENTRY` and `results rows PART_ID` do not show pending results. After acceptance they appear on the entry. Only then plan a results update. A result that is not on the entry is refused at plan time with "Result is not on the selected entry", and nothing is written.
 
 The accept control may insert every pending result that matches the table's schema, not only the ones just pushed. Do not create stray or test results against a table you care about.
 
@@ -318,6 +320,6 @@ benchling mcp serve
 benchling mcp serve --allow-writes ENV
 ```
 
-Do not add `--allow-writes` unless the person asked to allow writes for that environment. `export` takes `kind`, `path`, `format`, and optional `part_id`, `entry`, and `schema_id`. It returns the same summary as the CLI and writes a local file only. `apply_changes` for entry creation returns the new entry ID; for results uploads it returns `next_step`: relay it to the user so they can accept pending results. `plan_changes` takes `env`, an optional `entry`, `family` (`entry`, `document`, `table`, `fields`, `results`, or `containers`), and `specification` (the same JSON shapes as `--spec`, including table-specific result `batches`). Omit `entry` for entry and container plans. `get_change_status` accepts `wait` and `timeout` to poll result tasks and does not need `--allow-writes`.
+Do not add `--allow-writes` unless the person asked to allow writes for that environment. `export` takes `kind`, `path`, `format`, and optional `part_id`, `entry`, and `schema_id`. It returns the same summary as the CLI and writes a local file only. `apply_changes` for entry creation returns the new entry ID; for results uploads it returns `next_step`: relay it to the user so they can accept pending results. `plan_changes` takes `env`, an optional `entry`, `family` (`entry`, `document`, `table`, `fields`, `results`, or `containers`), and `specification` (the same JSON shapes as `--spec`, including table-specific result `batches`). Omit `entry` for entry and container plans. `get_change_status` accepts `wait` and `timeout` to poll result tasks and does not need `--allow-writes`. `read_back_results` and `verify_results` read pushed results back, including pending ones, and do not need `--allow-writes`.
 
-Tools for this workflow: `list_entries`, `list_schemas`, `resolve_entry`, `inspect_entry`, `get_entry`, `get_entries`, `get_folder`, `inspect_entry_template`, `get_entry_fields`, `get_section`, `get_part`, `get_table`, `get_schema`, `list_results`, `get_result`, `list_result_tables`, `list_results_table_rows`, `export`, `plan_changes`, `apply_changes`, `get_change_status`, `issue_draft`. `list_environments` and `issue_draft` take no environment.
+Tools for this workflow: `list_entries`, `list_schemas`, `resolve_entry`, `inspect_entry`, `get_entry`, `get_entries`, `get_folder`, `inspect_entry_template`, `get_entry_fields`, `get_section`, `get_part`, `get_table`, `get_schema`, `list_results`, `get_result`, `list_result_tables`, `list_results_table_rows`, `read_back_results`, `verify_results`, `export`, `plan_changes`, `apply_changes`, `get_change_status`, `issue_draft`. `list_environments` and `issue_draft` take no environment.

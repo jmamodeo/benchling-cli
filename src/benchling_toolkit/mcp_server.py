@@ -144,6 +144,8 @@ def build_mcp_server(
             "refuses apply_changes unless the server was started with --allow-writes for it. "
             "Results created by apply_changes land as pending: relay its next_step, "
             "because a person must accept them in the results table in Benchling. "
+            "Use read_back_results to read results back, including pending ones, and "
+            "verify_results to diff an applied result plan against what was created. "
             "Use export to write a large table or assay results to a file; "
             "the tool returns a summary, not the rows. "
             "When these tools cannot do what the user asked, ALWAYS explain the "
@@ -789,6 +791,72 @@ def _register_result_tools(mcp: MCPServer, pool: RuntimePool) -> None:
             env,
             lambda rt: rt.service.list_results_table_rows(part_id, limit=limit, cursor=cursor),
         )
+
+    @mcp.tool(annotations=_annotations(True))
+    async def read_back_results(
+        env: _Env,
+        plan_id: Annotated[
+            str | None,
+            Field(description="Applied result upload plan ID; its journal gives the record IDs."),
+        ] = None,
+        result_ids: Annotated[
+            list[str] | None,
+            Field(description="V2 assay result IDs, read 200 per request."),
+        ] = None,
+        schema_id: Annotated[
+            str | None,
+            Field(description="Result schema ID. Pass with created_after."),
+        ] = None,
+        created_after: Annotated[
+            str | None,
+            Field(
+                description="RFC 3339 time; results created at or after it. Pass with schema_id."
+            ),
+        ] = None,
+        limit: Annotated[
+            int,
+            Field(description="Records to list. Defaults to 50 and must be from 1 to 100."),
+        ] = 50,
+        cursor: _PageCursor = None,
+    ) -> Envelope[Any]:
+        """Read back results, including pending ones not yet in the entry's table.
+
+        Pass exactly one of plan_id, result_ids, or schema_id with created_after.
+        Each record is marked pending (no entry yet), accepted, or archived. Relay
+        next_step: pending rows need a person to click the plug icon in the results
+        table. cursor applies only to schema_id. Reads only.
+        """
+        return await safe(
+            env,
+            lambda rt: rt.planner.read_back_results(
+                plan_id=plan_id,
+                result_ids=result_ids,
+                schema_id=schema_id,
+                created_after=created_after,
+                limit=limit,
+                cursor=cursor,
+            ),
+        )
+
+    @mcp.tool(annotations=_annotations(True))
+    async def verify_results(
+        env: _Env,
+        plan_id: Annotated[
+            str,
+            Field(description="Applied result upload plan ID from plan_changes in this env."),
+        ],
+        sample: Annotated[
+            int,
+            Field(description="Rows to list per category. Defaults to 20, from 1 to 200."),
+        ] = 20,
+    ) -> Envelope[Any]:
+        """Diff a result upload plan against the records Benchling created.
+
+        Planned fields are compared by system name. Returns counts and up to sample
+        mismatched, missing, and extra rows, plus the rows that still need the
+        plug-icon accept. Reads only.
+        """
+        return await safe(env, lambda rt: rt.planner.verify_results(plan_id, sample=sample))
 
 
 def _register_export_tool(mcp: MCPServer, pool: RuntimePool) -> None:

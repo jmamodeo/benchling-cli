@@ -33,6 +33,8 @@ READ_TOOLS = {
     "get_result",
     "list_result_tables",
     "list_results_table_rows",
+    "read_back_results",
+    "verify_results",
     "get_container",
     "find_containers",
     "list_container_schemas",
@@ -299,6 +301,9 @@ async def test_full_entry_pages_parts_results_and_table_rows(client, fake) -> No
         ("list_entries", {"limit": 101}),
         ("list_results_table_rows", {"part_id": "docpart_rt1", "limit": 0}),
         ("list_results_table_rows", {"part_id": "docpart_rt1", "limit": 101}),
+        ("read_back_results", {"result_ids": ["id1"], "limit": 0}),
+        ("read_back_results", {}),
+        ("verify_results", {"plan_id": "0" * 32, "sample": 0}),
         ("list_schemas", {"limit": 0}),
         ("list_schemas", {"kind": "sample"}),
     ],
@@ -716,6 +721,28 @@ async def test_list_results_table_rows_is_read_only_and_paged(client, fake) -> N
     assert [row["id"] for row in second["items"]] == ["strow_3"]
     assert second["next_token"] is None
     assert fake.writes() == []
+
+
+async def test_read_back_and_verify_results_without_allow_writes(client, pool, fake) -> None:
+    runtime = pool.get("sandbox")
+    planned = await runtime.planner.plan(
+        ENTRY_ID,
+        "results",
+        {
+            "table_id": "strtbl_example",
+            "assay_results": [{"schemaId": "assaysch_abc123", "fields": {"ct": {"value": 3}}}],
+        },
+    )
+    await runtime.planner.apply(planned.id)
+    (result_id,) = fake.complete_upload()
+    writes = len(fake.writes())
+
+    pending = (await call(client, "read_back_results", env="sandbox", plan_id=planned.id))["data"]
+    assert pending["needs_accept"] == [result_id]
+    assert "plug" in pending["next_step"]
+    verified = (await call(client, "verify_results", env="sandbox", plan_id=planned.id))["data"]
+    assert verified["ok"] is True and verified["counts"]["pending"] == 1
+    assert len(fake.writes()) == writes
 
 
 async def test_list_schemas_pages_without_allow_writes(client, fake) -> None:
