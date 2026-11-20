@@ -10,6 +10,15 @@ All notable changes to this project are documented here. The format is based on
 
 - Entry output has a `web_url` field, the entry's link in the Benchling web app, taken from V3 `webUrl` or V2 `webURL` (`null` when Benchling returns none). It is in `entry resolve`, `entry get` (with or without `--full`), `entry list` and `entry bulk-get`, and in the MCP tools `resolve_entry`, `get_entry`, `list_entries` and `get_entries`. `changes apply` and MCP `apply_changes` return `web_url` for an entry created from a template and for a results upload. The pending-results `next_step` from `changes apply`, `results pending --plan` and `results verify` now includes the link, not only the entry ID.
 
+### Changed
+
+- `SKILL.md` no longer forbids an agent from using a browser. The toolkit still uses only the public HTTP API and never drives a browser, but an agent with a browser signed in to the same tenant may use it to view entries and accept pending results. A new "Working alongside the browser" section says when to use each: every read, write, export and check goes through the toolkit, and the browser views, confirms, and clicks the plug icon. It also says the toolkit writes as the app and the browser acts as the signed-in user. It opens the entry from `web_url`, checks pending and accepted rows with `results pending` and `results verify`, and lists what never to do in the browser. Benchling docs are named by title.
+- `SKILL.md` allows `auth login` when the person has given the agent the credentials for that environment, and still forbids it otherwise or with invented credentials.
+
+### Fixed
+
+- The MCP tool list in `SKILL.md` names every tool the server registers. It no longer lists `inspect_entry_template`, which does not exist, and now includes `list_environments`, `get_capabilities`, `find_schema`, `get_template`, `list_templates`, `get_container`, `find_containers`, and `list_container_schemas`.
+
 ## [0.5.0] - 2026-11-20
 
 ### Added
