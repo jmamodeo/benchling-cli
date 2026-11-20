@@ -337,8 +337,10 @@ def _table_row(row: dict[str, Any], columns: list[str]) -> dict[str, Any]:
 def _cell_value(cell: dict[str, Any]) -> Any:
     """Prefer a computed evaluation, otherwise the value that was entered.
 
-    A link or entity reference becomes its id, the same scalar assay-result
-    export writes for that field.
+    An evaluation without a `value` (an unknown typename, or a
+    `*CellEvaluationValue` such as an object link's `id` and `name`) falls back
+    to `inputValue`, as the Benchling docs advise. A link or entity reference
+    becomes its id, the same scalar assay-result export writes for that field.
     """
     evaluation = cell.get("evaluationValue")
     if isinstance(evaluation, dict) and evaluation.get("value") is not None:

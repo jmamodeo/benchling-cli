@@ -8,6 +8,7 @@ All notable changes to this project are documented here. The format is based on
 
 ### Fixed
 
+- Results tables evaluated in the Benchling web app no longer fail `entry get --full`, `entry inspect`, `results rows` and `export --kind results-table` with `Table response contained invalid rows`. A cell's `evaluationValue` is now read leniently: known BenchlingValue types map as before, a `*CellEvaluationValue` such as `ObjectLinkCellEvaluationValue` becomes `{type: "<typename>", id, name, ...}`, and any other typename becomes `{type: "unknown", typename}`. A BenchlingValue with no `value` reads as `null`, and a cell's `errors` list (`errorType`, `message`, `type`) is passed through. `export --kind results-table` uses `inputValue` when the evaluation has no `value`, the fallback the Benchling "Working with Tables" guide describes. `inputValue` stays typed, and the row checks (cells list, `rowIndex`, `submissionStatus`, `ResultRef`, cell count against `columnDefinitions`) still apply; a rejected row or cell now puts `part_id`, `row_index`, `cell_index` and `typename` in the error `details`, never cell values.
 - `benchling entry get --help` and `benchling entry list --help` now mention the `web_url` field, the entry's link in the Benchling web app, as `entry resolve` and `entry bulk-get` already did. The MCP tools that return an entry already described it.
 
 ## [0.5.1] - 2026-11-20

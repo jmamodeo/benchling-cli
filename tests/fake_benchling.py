@@ -91,6 +91,66 @@ def default_results_rows() -> list[dict[str, Any]]:
     ]
 
 
+def evaluated_results_rows() -> list[dict[str, Any]]:
+    """Accepted rows from a web-app-evaluated results table with link columns.
+
+    Cells cover ObjectLinkCellEvaluationValue, an unknown evaluation typename,
+    a BenchlingValue with no `value`, and a cell `errors` list.
+    """
+    return [
+        {
+            "id": "strow_e1",
+            "rowId": "row_e1",
+            "submissionStatus": "SUBMITTED",
+            "result": {"__typename": "ResultRef", "id": "result_e1"},
+            "cells": [
+                {
+                    "inputValue": {"__typename": "ObjectLinkValue", "value": "seq_example1"},
+                    "evaluationValue": {
+                        "__typename": "ObjectLinkCellEvaluationValue",
+                        "id": "seq_example1",
+                        "name": "Example sequence",
+                    },
+                },
+                {
+                    "inputValue": {"__typename": "ObjectLinkValue", "value": "box_example1"},
+                    "evaluationValue": {
+                        "__typename": "ObjectLinkCellEvaluationValue",
+                        "id": "box_example1",
+                        "name": "Example box",
+                    },
+                },
+                {"inputValue": {"__typename": "TextValue", "value": "first"}},
+            ],
+        },
+        {
+            "id": "strow_e2",
+            "rowId": "row_e2",
+            "submissionStatus": "SUBMITTED",
+            "result": {"__typename": "ResultRef", "id": "result_e2"},
+            "cells": [
+                {
+                    "inputValue": {"__typename": "ObjectLinkValue", "value": "seq_example2"},
+                    "evaluationValue": {"__typename": "FutureCellEvaluationValueKind", "x": 1},
+                },
+                {"inputValue": {"__typename": "ObjectLinkValue"}},
+                {
+                    "inputValue": {"__typename": "TextValue"},
+                    "evaluationValue": {"__typename": "TextValue"},
+                    "errors": [
+                        {
+                            "__typename": "CellError",
+                            "errorType": "VALIDATION",
+                            "message": "Field is required",
+                            "type": "CellError",
+                        }
+                    ],
+                },
+            ],
+        },
+    ]
+
+
 def _offset_stamp(value: str) -> str:
     """V2 listing timestamps use a numeric offset. ``Z`` becomes ``+00:00``."""
     if value.endswith("Z"):
@@ -1111,6 +1171,30 @@ class FakeBenchling:
         )
         return "strtbl_plate"
 
+    def add_evaluated_results_table(self, part_id: str = "docpart_rt1") -> str:
+        """A results table evaluated in the web app, with link columns and empty fields.
+
+        Row 0 follows the "Working with Tables" example response for
+        `GET /document-part-results-table/{id}/rows/items`, with synthetic IDs.
+        """
+        self.results_parts[part_id] = {
+            "name": "Evaluated links",
+            "columnDefinitions": [
+                {
+                    "__typename": "SchemaFieldColumnDefinition",
+                    "name": "Sample",
+                    "columnId": "col_s",
+                },
+                {"__typename": "SchemaFieldColumnDefinition", "name": "Box", "columnId": "col_b"},
+                {"__typename": "SchemaFieldColumnDefinition", "name": "Notes", "columnId": "col_n"},
+            ],
+            "rows": evaluated_results_rows(),
+            "resultSchema": {"id": "assaysch_links"},
+            "submissionStatus": "SUBMITTED",
+            "isEvaluated": True,
+        }
+        return part_id
+
     def add_results_table(self, part_id: str = "docpart_rt1") -> str:
         """Install a synthetic results table the rows endpoint can page."""
         rows = default_results_rows()
@@ -1169,11 +1253,15 @@ class FakeBenchling:
                 "selectorId": cell.get("selectorId"),
             }
             evaluated = cell.get("evaluatedValue") or cell.get("evaluationValue")
-            if isinstance(evaluated, dict) and evaluated.get("value") is not None:
+            if isinstance(evaluated, dict) and "__typename" in evaluated:
+                api_cell["evaluationValue"] = deepcopy(evaluated)
+            elif isinstance(evaluated, dict) and evaluated.get("value") is not None:
                 api_cell["evaluationValue"] = {
                     "__typename": "TextValue",
                     "value": evaluated.get("value"),
                 }
+            if "errors" in cell:
+                api_cell["errors"] = deepcopy(cell["errors"])
             cells.append(api_cell)
         api_row: dict[str, Any] = {
             "id": row.get("id") or f"utrow_{index}",
