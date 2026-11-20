@@ -1,6 +1,6 @@
 ---
 name: benchling-toolkit
-description: "Use the benchling CLI and its local MCP server to list, read, and export a Benchling notebook, and to preview a change before applying it. Use when the user asks to list, find, or read entries, containers, schemas, or assay results; read sections or document parts; export a table or results to JSON or CSV; create an entry from a template; or plan and then apply a document, table, field, result, or container change. Credentials come from benchling auth login --env NAME and stay in the OS keychain. The MCP server is read-only unless it was started with --allow-writes ENV. Do not use this for browser automation, or when no environment has been saved with auth login."
+description: "Use the benchling CLI and its local MCP server to list, read, and export a Benchling notebook, and to preview a change before applying it. Use when the user asks to list, find, or read entries, containers, schemas, or assay results; read sections or document parts; export a table or results to JSON or CSV; create an entry from a template; or plan and then apply a document, table, field, result, or container change. Credentials come from benchling auth login --env NAME and stay in the OS keychain. The MCP server is read-only unless it was started with --allow-writes ENV. The toolkit does not drive a browser; pair it with one only for viewing entries and accepting pending results. Do not use this when no environment has been saved with auth login."
 license: Apache-2.0
 compatibility: "Requires the benchling command from benchling-toolkit (Python 3.11+), an OS keychain, and network access to the tenant saved for that environment. The MCP server is local stdio."
 metadata:
@@ -13,7 +13,7 @@ metadata:
 
 Unofficial. Not affiliated with or endorsed by Benchling, Inc.
 
-Use this when an agent should work in a Benchling tenant through the `benchling` command or the local MCP server. The public HTTP API is the only path. Do not automate the browser.
+Use this when an agent should work in a Benchling tenant through the `benchling` command or the local MCP server. The toolkit itself uses only the public HTTP API and never drives a browser. An agent that also has a browser signed in to the same tenant may use it alongside the toolkit, as described in "Working alongside the browser".
 
 ## When to use it
 
@@ -31,7 +31,7 @@ Stop and do not improvise when:
 
 - no environment is saved yet
 - the person has not accepted a specific plan id, and the next step would write to Benchling
-- the task needs the Benchling website rather than the API
+- the task needs the Benchling website and you have no browser signed in to that tenant, or the person has not asked you to act in it
 - the toolkit cannot do what was asked: follow "When the toolkit cannot do it" below
 
 ## Safety defaults
@@ -58,7 +58,7 @@ benchling auth login --env NAME
 
 The client secret is read from a hidden prompt, or from stdin when they pass `--secret-stdin`. It is never a command argument. Login saves nothing until a client-credentials token request succeeds. The tenant URL and client ID go in `environments.json`. The client secret goes in the OS keychain under the service name `benchling-toolkit`, with the environment name as the keychain username.
 
-Do not run `auth login`. Do not ask for the client secret, read it from the environment, or print it. If a command fails because the environment is missing or the keychain has no secret, stop and tell the person to run `benchling auth login --env NAME` in their own terminal.
+Run `auth login` only when the person has given you the credentials for that environment and asked you to save them; pass the secret with `--secret-stdin`, never as an argument. Otherwise do not run it, and never invent a tenant URL, client ID, or secret. Do not ask for the client secret, read it from the environment, or print it. If a command fails because the environment is missing or the keychain has no secret, stop and tell the person to run `benchling auth login --env NAME` in their own terminal.
 
 These commands print no secret:
 
@@ -290,6 +290,24 @@ After a results create, tell the user, naming the entry and every submitted tabl
 Check, do not assume. `results pending --plan PLAN_ID` reads the plan's records back, including pending ones, and marks each `pending` or `accepted`; `needs_accept` lists the rows that still need the plug icon. `results verify PLAN_ID` diffs the pushed records against the plan field by field and reports mismatched, missing, and extra rows. Without a plan, use `results pending --id RESULT_ID` or `results pending --schema SCHEMA_ID --created-after TIME` (V2 has no entry filter, so that can include other entries' results). `results list --entry ENTRY` and `results rows PART_ID` do not show pending results. After acceptance they appear on the entry. Only then plan a results update. A result that is not on the entry is refused at plan time with "Result is not on the selected entry", and nothing is written.
 
 The accept control may insert every pending result that matches the table's schema, not only the ones just pushed. Do not create stray or test results against a table you care about.
+
+## Working alongside the browser
+
+Use the toolkit for every read, write, export and check. Use a browser only to see what a person sees and to do what the public API cannot, chiefly accepting pending results. The toolkit writes as the app; the browser acts as the signed-in user, so both need access to the entry. The signed-in user needs access to the entry, and the app needs access to its folder.
+
+1. Get the entry's link. `benchling --env NAME entry get ENTRY` returns a stable `web_url` field, taken from Benchling's `webUrl` ("the absolute URL of the entry in the Benchling web app", Get Entry by ID on docs.benchling.com). Check that its host is the tenant saved for NAME before you open it. If there is no `web_url`, search the tenant for the display ID.
+2. Before you push results, open the entry and confirm its title, sections and results tables match `entry get` and `entry inspect`.
+3. After `changes apply` for results, run `results pending --plan PLAN_ID`. Every row is `pending`.
+4. Accept them only if the person asked you to; otherwise relay `next_step` to them. Refresh the entry: a page opened before the push does not show the new pending rows. In each submitted results table, hover the plug (integrate) icon in the table toolbar. Its tooltip shows the number of pending rows. If the count is higher than you pushed, stop and ask, because the plug appends every pending result for that table's schema. Click the plug. The rows are appended to the bottom of the table, replacing blank trailing rows. If integrating would take the table past the notebook row maximum, Benchling refuses; split the results across tables. (Uploading Results to Benchling through the API, "Integrating the Results into the Table", and Creating a new Notebook Entry containing Results, on docs.benchling.com.)
+5. Confirm with the toolkit, not just the page:
+   - `results pending --plan PLAN_ID` shows every row `accepted`;
+   - `results verify PLAN_ID` is ok;
+   - `results list --entry ENTRY` and `results rows PART_ID` now return the rows.
+   Only then plan a results update.
+6. After a results update, run `results pending --id RESULT_ID`, then look at the table. If Benchling shows the change as pending, accept it the same way. Do not assume an updated accepted result stays accepted or goes pending again; check.
+7. After document or table writes, open the entry to confirm they render. Table formulas are re-evaluated only when the document is edited in the web app (Working with Tables, on docs.benchling.com), so a computed cell may show its input until then.
+
+In the browser, never sign, archive, delete, share or send for review. Never edit templates, schemas or settings, and never accept results in an entry you were not asked to work in.
 
 ## When the toolkit cannot do it
 
