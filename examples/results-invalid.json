@@ -1,0 +1,7 @@
+{
+  "table_id": "strtbl_plate",
+  "assay_results": [
+    { "schemaId": "assaysch_plate", "fields": { "well": { "value": "A1" }, "absorbance": { "value": "high" } } },
+    { "schemaId": "assaysch_plate", "fields": { "absorbance": { "value": 0.3 } } }
+  ]
+}

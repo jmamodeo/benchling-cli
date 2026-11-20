@@ -1053,6 +1053,45 @@ class FakeBenchling:
             spec.get("rows") or [], call, page_cap=self.results_row_page_size
         )
 
+    def add_plate_reader_table(self) -> str:
+        """Attach the synthetic plate-reader table used by the examples/ results fixtures."""
+        self.field_defs["assaysch_plate"] = [
+            {
+                "id": "assayfield_well",
+                "systemName": "well",
+                "name": "Well",
+                "__typename": "TextFieldDefinition",
+                "isRequired": True,
+                "derivationType": "DIRECT",
+            },
+            {
+                "id": "assayfield_absorbance",
+                "systemName": "absorbance",
+                "name": "Absorbance",
+                "__typename": "FloatFieldDefinition",
+                "isRequired": True,
+                "derivationType": "DIRECT",
+            },
+            {
+                "id": "assayfield_wavelength",
+                "systemName": "wavelength_nm",
+                "name": "Wavelength (nm)",
+                "__typename": "IntegerFieldDefinition",
+                "isRequired": False,
+                "derivationType": "DIRECT",
+            },
+        ]
+        self.extra_result_tables.append(
+            {
+                "type": "results_table",
+                "apiId": "strtbl_plate",
+                "name": "Plate reader",
+                "assayResultSchemaId": "assaysch_plate",
+                "columns": ["well", "absorbance", "wavelength_nm"],
+            }
+        )
+        return "strtbl_plate"
+
     def add_results_table(self, part_id: str = "docpart_rt1") -> str:
         """Install a synthetic results table the rows endpoint can page."""
         rows = default_results_rows()
