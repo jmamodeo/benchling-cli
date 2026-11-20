@@ -10,7 +10,7 @@ All notable changes to this project are documented here. The format is based on
 
 - Results plans can upload several table-specific batches, including different result schemas, while preserving the 500-record cap per table. `changes status --wait --timeout SECONDS` and MCP `get_change_status` can poll each task; failed-task errors with an in-range `index` are linked to that table's input row and local correlation ID, and other error shapes remain visible as unmatched.
 - `changes plan --family entry` previews creation from an entry template in a folder. It reads and validates the V3 template and folder, supports optional schema fields, and applies once with V3 `POST /entry`. The create response's entry ID is returned for inspection; the plan is not reusable after any attempt.
-- Schema listing can filter by an exact, case-sensitive name. Result listing can filter by linked entity, optionally narrowed to a schema field. Results-table row reads now reject invalid row metadata, result references, columns, and cell counts.
+- `schema list` includes entity schemas, and `schema find NAME` returns exactly one matching schema's typed field definitions, required flags, and dropdown options. Result-plan previews validate dropdown and linked-object values without writing; errors identify every invalid row and summarize problem counts.
 
 ### Changed
 

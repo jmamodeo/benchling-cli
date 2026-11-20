@@ -100,16 +100,15 @@ benchling --env NAME entry list --folder lib_example --name "Example entry"
 benchling --env NAME entry list --modified-after 2026-01-01 --cursor NEXT_TOKEN
 benchling --env NAME schema list
 benchling --env NAME schema list --kind result --limit 50
-benchling --env NAME schema list --name "qPCR assay"
+benchling --env NAME schema find "qPCR assay"
 benchling --env NAME container get con_example
 benchling --env NAME container find --barcode VIAL-001
 benchling --env NAME container find --name "Sample vial"
 benchling --env NAME container schema list --limit 50
 benchling --env NAME results list --entry etr_example --page-size 100
-benchling --env NAME results list --entity-id ent_example --entity-field-id tsf_sample
 ```
 
-`entry list` filters are applied by Benchling. `--name` is an exact match, not a substring. `--folder` uses the V2 entry list. `container find` requires exactly one exact `--barcode` or `--name`. `container find` and `container schema list` return one page, default 50 and maximum 100; pass `next_token` back with `--cursor`. Container schema results include their field definitions. `--modified-after` and `--modified-before` take `YYYY-MM-DD` or an RFC3339 timestamp that includes a time zone. `--limit` is 1 to 100 and defaults to 50 on `entry list` and `schema list`. `schema list --kind` is `entry`, `result`, or `run`. Omit `--kind` to list all three. `schema list --name` matches one exact, case-sensitive name. `results list` uses `--page-size` (default 100, maximum 100), plus optional `--schema`, `--entity-id`, `--entity-field-id`, and `--cursor`. The entity-field filter requires `--entity-id`.
+`entry list` filters are applied by Benchling. `--name` is an exact match, not a substring. `--folder` uses the V2 entry list. `container find` requires exactly one exact `--barcode` or `--name`. `container find` and `container schema list` return one page, default 50 and maximum 100; pass `next_token` back with `--cursor`. Container schema results include their field definitions. `--modified-after` and `--modified-before` take `YYYY-MM-DD` or an RFC3339 timestamp that includes a time zone. `--limit` is 1 to 100 and defaults to 50 on `entry list` and `schema list`. `schema list --kind` is `entry`, `entity`, `result`, or `run`. Omit `--kind` to list all four. `schema find NAME` requires an exact, case-sensitive name and returns one schema with field definitions, types, required flags, and dropdown options. If the name is absent or ambiguous, the command returns an error; ambiguity candidates include only IDs and kinds. `results list` uses `--page-size` (default 100, maximum 100), plus optional `--schema` and `--cursor`.
 
 ### Read entries, tables, and results
 
@@ -218,6 +217,7 @@ Fields. Each key is a V3 system name or a field-definition id. Each value is an 
 ```
 
 Result upload. `table_id` is an `strtbl_…` id from `results tables`; each batch may have up to 500 records and can use a different schema. Field keys stay system names. The results land as pending (see "Results land as pending" below). Read each task with `changes status PLAN_ID`, or wait with `changes status PLAN_ID --wait --timeout SECONDS`.
+Preview validates supplied dropdown options and linked-object schemas using read-only calls. Invalid rows are reported with their plan-wide index and included in a validation summary; no result upload occurs.
 
 ```json
 {

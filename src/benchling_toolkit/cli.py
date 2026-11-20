@@ -554,16 +554,29 @@ def table_get(ctx: typer.Context, part_id: str) -> None:
 
 @schema_app.command("get")
 def schema_get(ctx: typer.Context, schema_id: str) -> None:
-    """Get an entry, result, or run schema by ID, including dropdown options."""
+    """Get an entry, entity, result, or run schema by ID, including dropdown options."""
     state: State = ctx.obj
     _execute(state.env, lambda runtime: runtime.service.get_schema(schema_id))
+
+
+@schema_app.command("find")
+def schema_find(
+    ctx: typer.Context,
+    name: str,
+    kind: str | None = typer.Option(
+        None, "--kind", help="entry, entity, result, or run. Omit to search all kinds."
+    ),
+) -> None:
+    """Find a schema by exact, case-sensitive name."""
+    state: State = ctx.obj
+    _execute(state.env, lambda runtime: runtime.service.find_schema(name, kind=kind))
 
 
 @schema_app.command("list")
 def schema_list(
     ctx: typer.Context,
     kind: str | None = typer.Option(
-        None, "--kind", help="entry, result, or run. Omit to list all three."
+        None, "--kind", help="entry, entity, result, or run. Omit to list all four."
     ),
     name: str | None = typer.Option(None, "--name", help="Exact, case-sensitive schema name."),
     limit: int = typer.Option(50, "--limit", min=1, max=100, help="Page size, from 1 to 100."),
@@ -623,10 +636,6 @@ def results_list(
     ctx: typer.Context,
     entry: str | None = typer.Option(None),
     schema_id: str | None = typer.Option(None, "--schema"),
-    entity_id: str | None = typer.Option(None, "--entity-id"),
-    entity_field_id: str | None = typer.Option(
-        None, "--entity-field-id", help="Limit the linked-entity match to this schema field."
-    ),
     page_size: int = typer.Option(100, min=1, max=100),
     cursor: str | None = typer.Option(None),
 ) -> None:
@@ -637,8 +646,6 @@ def results_list(
         lambda runtime: runtime.service.list_results(
             entry=entry,
             schema_id=schema_id,
-            entity_id=entity_id,
-            entity_field_id=entity_field_id,
             page_size=page_size,
             cursor=cursor,
         ),

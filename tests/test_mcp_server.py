@@ -23,6 +23,7 @@ READ_TOOLS = {
     "list_entries",
     "get_schema",
     "list_schemas",
+    "find_schema",
     "get_entry_fields",
     "list_results",
     "get_result",
@@ -467,21 +468,6 @@ async def test_list_results_uses_explicit_cursor_pagination(client, fake) -> Non
     assert filtered["items"] == []
 
 
-async def test_list_results_accepts_entity_filters(client, fake) -> None:
-    await call(
-        client,
-        "list_results",
-        env="sandbox",
-        entity_id="ent_abc123",
-        entity_field_id="tsf_sample",
-    )
-    (call_record,) = [
-        call_record for call_record in fake.calls if call_record.path.endswith("/result/items")
-    ]
-    assert call_record.params["schemaFieldLinkValue.linkedItemIds"] == "ent_abc123"
-    assert call_record.params["schemaFieldLinkValue.schemaFieldIds"] == "tsf_sample"
-
-
 async def test_get_result_returns_record_or_not_found(client) -> None:
     assert (await call(client, "get_result", env="sandbox", result_id="result_2"))["data"][
         "id"
@@ -709,6 +695,22 @@ async def test_list_schemas_pages_without_allow_writes(client, fake) -> None:
 async def test_list_schemas_accepts_an_exact_name(client, fake) -> None:
     data = (await call(client, "list_schemas", env="sandbox", name="Second result schema"))["data"]
     assert [item["id"] for item in data["items"]] == ["assaysch_two"]
+    assert fake.writes() == []
+
+
+async def test_find_schema_returns_typed_fields(client, fake) -> None:
+    data = (
+        await call(
+            client,
+            "find_schema",
+            env="sandbox",
+            name="Schema assaysch_abc123",
+            kind="result",
+        )
+    )["data"]
+    fields = {field["systemName"]: field for field in data["field_definitions"]}
+    assert fields["ct"]["type"] == "INTEGER"
+    assert fields["status"]["dropdown_options"][0]["id"] == "sfso_open"
     assert fake.writes() == []
 
 

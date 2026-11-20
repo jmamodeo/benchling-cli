@@ -166,10 +166,6 @@ def test_results_list_forwards_filters_and_cursor(invoke, fake) -> None:
         ENTRY_ID,
         "--schema",
         "assaysch_abc123",
-        "--entity-id",
-        "ent_abc123",
-        "--entity-field-id",
-        "tsf_sample",
         "--page-size",
         "2",
         "--cursor",
@@ -183,8 +179,6 @@ def test_results_list_forwards_filters_and_cursor(invoke, fake) -> None:
         "nextToken": "1",
         "entry.eq": ENTRY_ID,
         "schema.eq": "assaysch_abc123",
-        "schemaFieldLinkValue.linkedItemIds": "ent_abc123",
-        "schemaFieldLinkValue.schemaFieldIds": "tsf_sample",
     }
 
 
@@ -806,3 +800,13 @@ def test_schema_get_includes_dropdown_options(invoke) -> None:
     assert status["dropdown"]["id"] == "sfs_status"
     assert [option["name"] for option in status["dropdown"]["options"]] == ["Open", "Closed"]
     assert status["dropdown"]["options"][1]["archived"] is True
+
+
+def test_schema_find_returns_typed_field_definitions(invoke, fake) -> None:
+    code, payload, _ = invoke("schema", "find", "Schema assaysch_abc123", "--kind", "result")
+    assert code == 0, payload
+    fields = {field["systemName"]: field for field in payload["data"]["field_definitions"]}
+    assert fields["ct"]["type"] == "INTEGER"
+    assert fields["ct"]["is_required"] is True
+    assert fields["status"]["dropdown_options"][0]["id"] == "sfso_open"
+    assert fake.writes() == []

@@ -104,9 +104,123 @@ async def test_invalid_result_plans_are_rejected(
     assert fake.writes() == []
 
 
-async def test_client_supplied_result_ids_are_unsupported(runtime) -> None:
-    with pytest.raises(UnsupportedError, match="server-assigned"):
+async def test_client_supplied_result_ids_are_rejected_with_the_row_index(runtime) -> None:
+    with pytest.raises(ValidationError, match="server-assigned") as caught:
         await plan(runtime, [record(id="result_mine")])
+    assert caught.value.details["row_problems"][0]["row_index"] == 0
+
+
+async def test_result_plan_validates_dropdown_and_link_values_without_writes(runtime, fake) -> None:
+    planned = await plan(
+        runtime,
+        [
+            record(
+                fields={
+                    "ct": {"value": 12},
+                    "status": {"value": "sfso_open"},
+                    "sample": {"value": "ent_target"},
+                }
+            )
+        ],
+    )
+    assert planned.after["validation_summary"] == {
+        "rows_checked": 1,
+        "rows_with_problems": 0,
+        "counts_by_reason": {},
+    }
+    link_calls = [call for call in fake.calls if call.path.endswith("/custom-entity/ent_target")]
+    assert len(link_calls) == 1
+    assert fake.writes() == []
+
+
+async def test_result_plan_reports_all_bad_rows_by_reason(runtime, fake) -> None:
+    with pytest.raises(ValidationError, match="invalid rows") as caught:
+        await plan(
+            runtime,
+            [
+                record(fields={"ct": {"value": 12}, "status": {"value": "not-an-option"}}),
+                record(fields={"ct": {"value": 12}, "sample": {"value": "ent_wrong_schema"}}),
+                record(fields={"ct": {"value": 12}, "sample": {"value": "ent_wrong_schema"}}),
+            ],
+        )
+    assert [
+        (problem["row_index"], problem["reason"])
+        for problem in caught.value.details["row_problems"]
+    ] == [
+        (0, "invalid_dropdown_value"),
+        (1, "invalid_link_target"),
+        (2, "invalid_link_target"),
+    ]
+    assert caught.value.details["validation_summary"] == {
+        "rows_checked": 3,
+        "rows_with_problems": 3,
+        "counts_by_reason": {"invalid_dropdown_value": 1, "invalid_link_target": 2},
+    }
+    link_calls = [
+        call for call in fake.calls if call.path.endswith("/custom-entity/ent_wrong_schema")
+    ]
+    assert len(link_calls) == 1
+    assert fake.writes() == []
+
+
+async def test_result_validation_caches_link_reads_and_indexes_rows_across_batches(
+    runtime, fake
+) -> None:
+    fake.field_defs["assaysch_other"] = fake.field_defs["assaysch_abc123"]
+    fake.extra_result_tables.append(
+        {
+            "type": "results_table",
+            "apiId": "strtbl_other",
+            "name": "Other results",
+            "assayResultSchemaId": "assaysch_other",
+            "columns": ["ct"],
+        }
+    )
+    with pytest.raises(ValidationError) as caught:
+        await runtime.planner.plan(
+            ENTRY_ID,
+            "results",
+            {
+                "batches": [
+                    {
+                        "table_id": TABLE,
+                        "assay_results": [
+                            record(fields={"ct": {"value": 12}, "sample": {"value": "ent_missing"}})
+                        ],
+                    },
+                    {
+                        "table_id": "strtbl_other",
+                        "assay_results": [
+                            record(
+                                schemaId="assaysch_other",
+                                fields={"ct": {"value": 12}, "sample": {"value": "ent_missing"}},
+                            )
+                        ],
+                    },
+                ]
+            },
+        )
+    assert [problem["row_index"] for problem in caught.value.details["row_problems"]] == [0, 1]
+    link_calls = [call for call in fake.calls if call.path.endswith("/custom-entity/ent_missing")]
+    assert len(link_calls) == 1
+    assert caught.value.details["validation_summary"]["rows_checked"] == 2
+    assert fake.writes() == []
+
+
+async def test_result_plan_rejects_link_field_without_allowed_schema(runtime, fake) -> None:
+    sample_field = next(
+        definition
+        for definition in fake.field_defs["assaysch_abc123"]
+        if definition["systemName"] == "sample"
+    )
+    sample_field.pop("linkDefinition")
+    with pytest.raises(ValidationError) as caught:
+        await plan(
+            runtime,
+            [record(fields={"ct": {"value": 12}, "sample": {"value": "ent_target"}})],
+        )
+    assert caught.value.details["row_problems"][0]["reason"] == "link_definition_unavailable"
+    assert fake.writes() == []
 
 
 async def test_table_must_be_on_the_selected_entry(runtime) -> None:

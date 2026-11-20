@@ -761,14 +761,25 @@ class BenchlingService:
             )
         return {"resolved": resolved, "part": part, "table": table}
 
-    async def get_schema(self, schema_id: str) -> dict[str, Any]:
-        """Return an entry, result, or run schema with its field definitions.
+    async def get_schema(self, schema_id: str, *, kind: object = None) -> dict[str, Any]:
+        """Return a schema and its field definitions.
 
         The collection is chosen from the id prefix: ``assaysch_`` is a result
-        schema, ``runsch_`` is a run schema, and any other id is an entry schema.
-        Dropdown fields include the dropdown and its options.
+        schema, ``runsch_`` is a run schema, ``es_`` is an entity schema, and
+        any other id is an entry schema. Dropdown fields include their options.
         """
-        base = f"/{listing.schema_collection(schema_id)}/{schema_id}"
+        collections = {
+            "entry": "entry-schema",
+            "entity": "entity-schema",
+            "result": "result-schema",
+            "run": "run-schema",
+        }
+        if kind is not None and kind not in collections:
+            raise ValidationError("Schema kind must be entry, entity, result, or run")
+        collection = (
+            collections[str(kind)] if kind is not None else listing.schema_collection(schema_id)
+        )
+        base = f"/{collection}/{quote(schema_id, safe='')}"
         schema = await self.api.request("GET", base)
         fields = [
             item
@@ -777,6 +788,54 @@ class BenchlingService:
             )
         ]
         return {"schema": schema, "field_definitions": await self._with_dropdowns(fields)}
+
+    async def find_schema(self, name: object, *, kind: object = None) -> dict[str, Any]:
+        """Find one exact schema name and return its detailed, typed field definitions."""
+        if not isinstance(name, str) or not name.strip():
+            raise ValidationError("name must be a non-empty string")
+        schema_name = name.strip()
+        if "," in schema_name:
+            raise ValidationError("name must not contain a comma")
+        if kind is not None and (not isinstance(kind, str) or kind not in listing.SCHEMA_KINDS):
+            raise ValidationError(
+                "Schema kind must be entry, entity, result, or run",
+                details={"supported": list(listing.SCHEMA_KINDS)},
+            )
+        matches: list[dict[str, Any]] = []
+        cursor: str | None = None
+        while True:
+            page = await self.list_schemas(
+                kind=kind, name=schema_name, limit=listing.LIST_LIMIT_MAX, cursor=cursor
+            )
+            matches.extend(page["items"])
+            cursor = page["next_token"]
+            if cursor is None:
+                break
+        if not matches:
+            raise NotFoundError(
+                f'No schema named "{schema_name}" was found',
+                details={"name": schema_name, "kind": kind},
+            )
+        candidates = [{"id": item["id"], "kind": item["kind"]} for item in matches]
+        if len(candidates) > 1:
+            labels = ", ".join(f"{item['id']} ({item['kind']})" for item in candidates)
+            raise ValidationError(
+                f'Schema name "{schema_name}" is ambiguous; candidates: {labels}',
+                details={"candidates": candidates},
+            )
+        found = matches[0]
+        detail = await self.get_schema(found["id"], kind=found["kind"])
+        detail["kind"] = found["kind"]
+        detail["field_definitions"] = [
+            {
+                **field,
+                "type": field_definition_type(field),
+                "is_required": bool(field.get("isRequired")),
+                "dropdown_options": (field.get("dropdown") or {}).get("options", []),
+            }
+            for field in detail["field_definitions"]
+        ]
+        return detail
 
     async def get_container(self, container_id: str) -> dict[str, Any]:
         """Return one V2 inventory container by ID."""
@@ -1111,28 +1170,15 @@ class BenchlingService:
         *,
         entry: str | None = None,
         schema_id: str | None = None,
-        entity_id: str | None = None,
-        entity_field_id: str | None = None,
         page_size: int = 100,
         cursor: str | None = None,
     ) -> dict[str, Any]:
-        """Return one page of results, optionally filtered by entry, schema, and linked entity.
+        """Return one page of results, optionally filtered by entry and schema.
 
         page_size must be 1-100 (ValidationError otherwise); next_token is None on the last page.
         """
         if page_size < 1 or page_size > 100:
             raise ValidationError("page_size must be between 1 and 100")
-        entity_filters: dict[str, str] = {}
-        if entity_id is not None:
-            entity_filters["schemaFieldLinkValue.linkedItemIds"] = self._result_filter_text(
-                entity_id, "entity_id"
-            )
-        if entity_field_id is not None:
-            if entity_id is None:
-                raise ValidationError("entity_field_id requires entity_id")
-            entity_filters["schemaFieldLinkValue.schemaFieldIds"] = self._result_filter_text(
-                entity_field_id, "entity_field_id"
-            )
         params: dict[str, Any] = {"pageSize": page_size}
         if cursor:
             params["nextToken"] = cursor
@@ -1140,7 +1186,6 @@ class BenchlingService:
             params["entry.eq"] = (await self.resolve_entry(entry))["entry_id"]
         if schema_id:
             params["schema.eq"] = schema_id
-        params.update(entity_filters)
         payload = await self.api.request("GET", "/result/items", params=params)
         return {
             "items": payload.get("items", []),
@@ -1152,26 +1197,12 @@ class BenchlingService:
         *,
         entry: str | None = None,
         schema_id: str | None = None,
-        entity_id: str | None = None,
-        entity_field_id: str | None = None,
     ) -> dict[str, Any]:
         """Return every assay-result page for these filters.
 
         Pages are followed internally at pageSize 100 until nextToken is absent.
         ``entry`` is resolved once. ``schema_id`` is sent as ``schema.eq`` when given.
-        ``entity_id`` filters linked field values; ``entity_field_id`` narrows that match.
         """
-        entity_filters: dict[str, str] = {}
-        if entity_id is not None:
-            entity_filters["schemaFieldLinkValue.linkedItemIds"] = self._result_filter_text(
-                entity_id, "entity_id"
-            )
-        if entity_field_id is not None:
-            if entity_id is None:
-                raise ValidationError("entity_field_id requires entity_id")
-            entity_filters["schemaFieldLinkValue.schemaFieldIds"] = self._result_filter_text(
-                entity_field_id, "entity_field_id"
-            )
         params: dict[str, Any] = {"pageSize": listing.LIST_LIMIT_MAX}
         resolved: str | None = None
         if entry is not None:
@@ -1179,19 +1210,45 @@ class BenchlingService:
             params["entry.eq"] = resolved
         if schema_id is not None:
             params["schema.eq"] = schema_id
-        params.update(entity_filters)
         items = [item async for item in self.api.paginate("/result/items", params=params)]
         return {"items": items, "entry_id": resolved, "schema_id": schema_id}
-
-    @staticmethod
-    def _result_filter_text(value: object, label: str) -> str:
-        if not isinstance(value, str) or not value.strip() or "," in value:
-            raise ValidationError(f"{label} must be a non-empty ID without commas")
-        return value.strip()
 
     async def get_result(self, result_id: str) -> dict[str, Any]:
         """Fetch a single result by ID."""
         return await self.api.request("GET", f"/result/{result_id}")
+
+    async def get_linked_entity_schema_id(self, entity_id: str) -> str:
+        """Read a linked entity and return its entity schema ID for result-plan validation."""
+        entity_routes = {
+            "ent_": ("custom-entity", "customEntity"),
+            "seq_": ("dna-sequence", "dnaSequence"),
+            "aaseq_": ("aa-sequence", "aaSequence"),
+        }
+        route = next(
+            (value for prefix, value in entity_routes.items() if entity_id.startswith(prefix)),
+            None,
+        )
+        if route is None:
+            raise ValidationError(
+                "Linked entity ID has an unsupported namespace",
+                details={"reason": "unresolvable_link_target", "entity_id": entity_id},
+            )
+        collection, wrapper = route
+        payload = await self.api.request("GET", f"/{collection}/{quote(entity_id, safe='')}")
+        entity = payload.get(wrapper, payload)
+        if not isinstance(entity, dict) or entity.get("id") != entity_id:
+            raise UpstreamError(
+                "Benchling returned an unexpected linked entity",
+                details={"entity_id": entity_id},
+            )
+        schema = entity.get("typedSchema") or entity.get("schema")
+        schema_id = schema.get("id") if isinstance(schema, dict) else None
+        if not isinstance(schema_id, str) or not schema_id:
+            raise UpstreamError(
+                "Linked entity response did not include its schema",
+                details={"entity_id": entity_id},
+            )
+        return schema_id
 
     async def doctor(self) -> dict[str, Any]:
         """Probe V3 and V2 entry endpoints; failures are reported per check rather than raised."""

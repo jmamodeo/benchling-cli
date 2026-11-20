@@ -282,12 +282,11 @@ benchling --env dev table get docpart_table1
 benchling --env dev schema get entsch_example
 benchling --env dev schema list
 benchling --env dev schema list --kind run --limit 50
-benchling --env dev schema list --name "qPCR assay"
+benchling --env dev schema find "qPCR assay"
 benchling --env dev entry fields get etr_abc123
 benchling --env dev entry list --project src_example --modified-after 2026-01-01
 benchling --env dev entry list --folder lib_example --name "Example entry"
 benchling --env dev results list --entry etr_abc123
-benchling --env dev results list --entity-id ent_abc123 --entity-field-id tsf_sample
 benchling --env dev results tables etr_abc123
 benchling --env dev results rows docpart_example --limit 50
 benchling --env dev container get con_example
@@ -302,7 +301,7 @@ benchling --env dev export --kind assay-results --entry etr_abc123 --schema assa
 
 Entry references may be canonical IDs, display IDs, or URLs for the selected tenant. Duplicate section titles must be addressed by part ID.
 
-`entry list` and `schema list` are read-only. They return one page, default 50 and at most 100, plus `next_token`. Pass that token back with `--cursor`. `schema list` reads entry schemas, then result schemas, then run schemas, following every upstream page until the page is full or the lists end. Its optional `--name` is an exact, case-sensitive match. `schema get` adds the options of each dropdown field (`/dropdown/{id}` and `/dropdown/{id}/options/items`). There is no separate dropdown command.
+`entry list` and `schema list` are read-only. They return one page, default 50 and at most 100, plus `next_token`. Pass that token back with `--cursor`. `schema list` reads entry, entity, result, and run schemas, following every upstream page until the page is full or the lists end. Its optional `--name` is an exact, case-sensitive match. `schema find NAME` requires one exact match, optionally limited by `--kind`; no match and ambiguous matches are errors. Ambiguity candidates show only schema IDs and kinds. A successful find includes field types, required flags, and dropdown options. `schema get` adds the options of each dropdown field (`/dropdown/{id}` and `/dropdown/{id}/options/items`). There is no separate dropdown command.
 
 `container get` reads one inventory container. `container find` requires exactly one exact `--barcode` or `--name` filter and returns one page; pass `next_token` back with `--cursor`. `container schema list` returns one page of container schemas with their embedded field definitions.
 

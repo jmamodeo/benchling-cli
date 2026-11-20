@@ -20,9 +20,10 @@ from .errors import UpstreamError, ValidationError
 
 LIST_LIMIT = 50
 LIST_LIMIT_MAX = 100
-SCHEMA_KINDS = ("entry", "result", "run")
+SCHEMA_KINDS = ("entry", "entity", "result", "run")
 SCHEMA_PATHS = {
     "entry": "/entry-schema/items",
+    "entity": "/entity-schema/items",
     "result": "/result-schema/items",
     "run": "/run-schema/items",
 }
@@ -34,6 +35,8 @@ V2_ENTRY_FILTERS = ("folder", "project", "schema", "name", "modified_at")
 
 def schema_collection(schema_id: str) -> str:
     """Return the V3 collection path segment for a schema id prefix."""
+    if schema_id.startswith("es_"):
+        return "entity-schema"
     if schema_id.startswith("assaysch_"):
         return "result-schema"
     if schema_id.startswith("runsch_"):

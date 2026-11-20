@@ -558,7 +558,7 @@ def _register_result_tools(mcp: MCPServer, pool: RuntimePool) -> None:
         env: _Env,
         schema_id: Annotated[
             str,
-            Field(description="Entry, result, or run schema ID."),
+            Field(description="Entry, entity, result, or run schema ID."),
         ],
         field_offset: Annotated[
             int,
@@ -569,7 +569,7 @@ def _register_result_tools(mcp: MCPServer, pool: RuntimePool) -> None:
             Field(description="Maximum number of field definitions to return. Must be at least 1."),
         ] = 250,
     ) -> Envelope[Any]:
-        """Retrieve an entry, result, or run schema and a page of field definitions.
+        """Retrieve a schema and a page of field definitions.
 
         Dropdown fields include the dropdown and its options.
         """
@@ -598,7 +598,9 @@ def _register_result_tools(mcp: MCPServer, pool: RuntimePool) -> None:
         env: _Env,
         kind: Annotated[
             str | None,
-            Field(description="entry, result, or run. Omit to list all three, in that order."),
+            Field(
+                description="entry, entity, result, or run. Omit to list all four, in that order."
+            ),
         ] = None,
         name: Annotated[
             str | None,
@@ -610,11 +612,23 @@ def _register_result_tools(mcp: MCPServer, pool: RuntimePool) -> None:
         ] = 50,
         cursor: _PageCursor = None,
     ) -> Envelope[Any]:
-        """List schemas, optionally by exact name. Follow next_token to see the rest."""
+        """List entry, entity, result, or run schemas. Follow next_token to see the rest."""
         return await safe(
             env,
             lambda rt: rt.service.list_schemas(kind=kind, name=name, limit=limit, cursor=cursor),
         )
+
+    @mcp.tool(annotations=_annotations(True))
+    async def find_schema(
+        env: _Env,
+        name: Annotated[str, Field(description="Exact, case-sensitive schema name.")],
+        kind: Annotated[
+            str | None,
+            Field(description="entry, entity, result, or run. Omit to search all kinds."),
+        ] = None,
+    ) -> Envelope[Any]:
+        """Find one schema by exact name and return its field definitions and options."""
+        return await safe(env, lambda rt: rt.service.find_schema(name, kind=kind))
 
     @mcp.tool(annotations=_annotations(True))
     async def get_entry_fields(env: _Env, reference: _EntryRef) -> Envelope[Any]:
@@ -634,14 +648,6 @@ def _register_result_tools(mcp: MCPServer, pool: RuntimePool) -> None:
             str | None,
             Field(description="Result schema ID. Omit to include every result schema."),
         ] = None,
-        entity_id: Annotated[
-            str | None,
-            Field(description="Linked Benchling entity ID to filter result field values."),
-        ] = None,
-        entity_field_id: Annotated[
-            str | None,
-            Field(description="Optional schema field ID restricting the entity match."),
-        ] = None,
         page_size: Annotated[
             int,
             Field(description="Number of result records to return in this page."),
@@ -654,8 +660,6 @@ def _register_result_tools(mcp: MCPServer, pool: RuntimePool) -> None:
             lambda rt: rt.service.list_results(
                 entry=entry,
                 schema_id=schema_id,
-                entity_id=entity_id,
-                entity_field_id=entity_field_id,
                 page_size=page_size,
                 cursor=cursor,
             ),
