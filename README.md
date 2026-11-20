@@ -517,7 +517,12 @@ Drafting does not contact Benchling or GitHub. The MCP tool is draft-only: the p
 
 [ARCHITECTURE.md](ARCHITECTURE.md) is the plan, apply, and journal sequence. The [threat model](docs/threat-model.md) covers credentials, stale or replayed plans, write scoping, and agent misuse, including the limits of those controls.
 
-[`SKILL.md`](SKILL.md) is the Agent Skills file for this repository. Its frontmatter keeps `name`, `description`, `license`, `compatibility`, and a `metadata` map of strings (`summary`, `version`, `docs_url`). Tags, keywords, and use cases are lists in [`agensi/listing.yaml`](agensi/listing.yaml). The pip package installs it as `share/benchling-toolkit/SKILL.md` under the environment prefix (`sys.prefix`), next to the JSON schemas and contracts.
+[`SKILL.md`](SKILL.md) is the Agent Skills file for this repository. Its frontmatter keeps `name`, `description`, `license`, `compatibility`, and a `metadata` map of strings (`summary`, `version`, `docs_url`). Tags, keywords, and use cases are lists in [`agensi/listing.yaml`](agensi/listing.yaml). The pip package installs it as `share/benchling-toolkit/SKILL.md` under the environment prefix (`sys.prefix`), next to the JSON schemas and contracts. Use `benchling skill path` to print the installed file's absolute path and `benchling skill show` to print its contents. Both look under `sys.prefix`, `sys.base_prefix`, and the user install scheme, then fall back to the repository's `SKILL.md` for editable and development installs. If the file is not found, they print a `not_found` envelope. They never contact Benchling. The MCP server also serves the file as the read-only resource `skill://benchling-toolkit/SKILL.md`.
+
+```console
+benchling skill path
+benchling skill show
+```
 
 ```mermaid
 flowchart TD

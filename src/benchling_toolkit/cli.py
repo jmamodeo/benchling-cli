@@ -36,6 +36,7 @@ from .keychain import Keychain, bind_login_fix
 from .models import Envelope, Environment, PlanFamily
 from .redact import redact_text
 from .runtime import Runtime
+from .skill import find_skill_md
 
 app = typer.Typer(
     name="benchling",
@@ -58,6 +59,7 @@ container_app = typer.Typer(help="Read and search inventory containers.")
 container_schema_app = typer.Typer(help="List container schemas.")
 changes_app = typer.Typer(help="Preview and explicitly apply safe changes.")
 mcp_app = typer.Typer(help="Run the local MCP server.")
+skill_app = typer.Typer(help="Locate and print the SKILL.md installed with this package.")
 issue_app = typer.Typer(
     help="Draft a bug report or feature request for this toolkit. Drafts are local by default."
 )
@@ -78,6 +80,7 @@ container_app.add_typer(container_schema_app, name="schema")
 app.add_typer(changes_app, name="changes")
 app.add_typer(mcp_app, name="mcp")
 app.add_typer(issue_app, name="issue")
+app.add_typer(skill_app, name="skill")
 
 
 class State:
@@ -1209,6 +1212,30 @@ def issue_draft(
         _emit(Envelope.failure(exc))
         raise typer.Exit(int(exc.exit_code)) from None
     _emit(Envelope.success(draft, repository=REPOSITORY))
+
+
+def _skill_path() -> Path:
+    try:
+        return find_skill_md()
+    except BenchlingAgentError as exc:
+        _emit(Envelope.failure(exc))
+        raise typer.Exit(int(exc.exit_code)) from None
+
+
+@skill_app.command("path")
+def skill_path() -> None:
+    """Print the absolute path of the installed SKILL.md as plain text.
+
+    Looks in share/benchling-toolkit under the install prefixes, then in the source
+    checkout. A missing file prints a not_found envelope. Read-only and offline.
+    """
+    typer.echo(str(_skill_path()))
+
+
+@skill_app.command("show")
+def skill_show() -> None:
+    """Print the contents of the installed SKILL.md as Markdown. Read-only and offline."""
+    typer.echo(_skill_path().read_text(encoding="utf-8"), nl=False)
 
 
 def _write_stderr_envelope(envelope: Envelope[Any]) -> None:

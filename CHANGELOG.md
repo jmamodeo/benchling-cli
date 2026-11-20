@@ -9,6 +9,9 @@ All notable changes to this project are documented here. The format is based on
 ### Added
 
 - The pip package ships `SKILL.md`. It is installed as `share/benchling-toolkit/SKILL.md` under the environment prefix, next to the JSON schemas and contracts, so an agent can read the skill without a clone of the repository.
+- `benchling skill path` prints the absolute path of the installed `SKILL.md`, and `benchling skill show` prints its contents. They look under `sys.prefix`, `sys.base_prefix`, and the user install scheme, then fall back to the repository's `SKILL.md` for editable and development installs. A missing file is a `not_found` envelope. Both are read-only and never contact Benchling.
+- The MCP server serves `SKILL.md` as the read-only resource `skill://benchling-toolkit/SKILL.md` (`text/markdown`).
+- CI builds the wheel and checks that it contains `SKILL.md` with the same bytes as the repository copy (`pytest -m wheel`). It also installs the wheel and checks that `benchling skill path` and `benchling skill show` return that file.
 
 ## [0.5.1] - 2026-11-20
 

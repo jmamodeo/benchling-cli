@@ -336,6 +336,17 @@ benchling issue draft --spec issue.json --file
 
 `issue.json` holds the fields above. `--cite-url` and `--cite-quote` can be repeated instead of `citations`, and every other field has a flag; run `benchling issue draft --help` for the list. The MCP tool `issue_draft` is draft-only and never files.
 
+## Reading this skill from an install
+
+`pip install benchling-toolkit` installs this file as `share/benchling-toolkit/SKILL.md` under the environment prefix. These commands find it, or the repository copy in a source checkout, and never contact Benchling. `skill path` prints the absolute path and `skill show` prints the Markdown. If the file is missing, they print a `not_found` envelope:
+
+```console
+benchling skill path
+benchling skill show
+```
+
+The MCP server serves the same file as the read-only resource `skill://benchling-toolkit/SKILL.md`.
+
 ## MCP server
 
 If the benchling MCP tools are already connected, call them with the same environment name. Do not put a client secret in the client config. The server reads the OS keychain.
