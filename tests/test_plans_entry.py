@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from fake_benchling import entry_web_url
 
 from benchling_toolkit.errors import (
     ConflictError,
@@ -169,3 +170,12 @@ async def test_entry_create_without_response_id_is_not_retried(runtime, fake) ->
     with pytest.raises(ConflictError):
         await runtime.planner.apply(planned.id)
     assert len(fake.writes()) == 1
+
+
+async def test_entry_create_apply_returns_web_url(runtime) -> None:
+    planned = await runtime.planner.plan(None, "entry", REQUEST)
+    result = await runtime.planner.apply(planned.id)
+    url = entry_web_url("etr_created1")
+    assert result["web_url"] == url
+    assert result["journal"]["result"]["web_url"] == url
+    assert (await runtime.service.resolve_entry("etr_created1"))["web_url"] == url

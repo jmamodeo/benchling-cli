@@ -177,6 +177,17 @@ def _next_token(payload: dict[str, Any]) -> str | None:
     return token
 
 
+def entry_web_url(item: object) -> str | None:
+    """The entry's Benchling web-app link: V3 ``webUrl`` or V2 ``webURL``, else None."""
+    if not isinstance(item, dict):
+        return None
+    for key in ("webUrl", "webURL"):
+        value = item.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
 def entry_summary(item: dict[str, Any]) -> dict[str, Any]:
     """One entry row, the same shape from a V3 item or a V2 entry."""
     schema = item.get("typedSchema") or item.get("schema")
@@ -204,6 +215,7 @@ def entry_summary(item: dict[str, Any]) -> dict[str, Any]:
         "schema_id": schema_id,
         "project_id": project_id,
         "folder_id": folder_id,
+        "web_url": entry_web_url(item),
     }
 
 

@@ -36,7 +36,23 @@ PENDING_RESULTS_WARNING = (
 )
 
 
-def pending_results_next_step(plan: ChangePlan, table_ids: set[str] | None = None) -> str | None:
+def plan_entry_web_url(plan: ChangePlan) -> str | None:
+    """The entry's web-app link recorded with a results upload plan's tables, if any."""
+    before = plan.before or {}
+    tables = before.get("tables")
+    candidates = tables if isinstance(tables, list) else [before]
+    for item in candidates:
+        table = item.get("table") if isinstance(item, dict) else None
+        if isinstance(table, dict):
+            url = table.get("entry_web_url")
+            if isinstance(url, str) and url:
+                return url
+    return None
+
+
+def pending_results_next_step(
+    plan: ChangePlan, table_ids: set[str] | None = None, *, web_url: str | None = None
+) -> str | None:
     """Tell the user how to accept pending results, or None when the plan created none."""
     if plan.family.value != "results" or plan.after.get("state") != "pending_integration":
         return None
@@ -59,8 +75,10 @@ def pending_results_next_step(plan: ChangePlan, table_ids: set[str] | None = Non
         return None
     name = ", ".join(names)
     noun = "tables" if len(names) > 1 else "table"
+    url = web_url or plan_entry_web_url(plan)
+    where = f"entry {plan.entry_id} at {url}" if url else f"entry {plan.entry_id}"
     return (
-        f'Results are pending. Open entry {plan.entry_id}, go to the result {noun} "{name}", '
+        f'Results are pending. Open {where}, go to the result {noun} "{name}", '
         "and click the plug (integrate) icon in each table's toolbar to accept the pending results. "
         "Until you do, they do not appear in the table and cannot be updated with this "
         "toolkit, because an update needs a result that is on the entry. Refresh the page "
@@ -467,6 +485,7 @@ class ResultsPlanning(ResultUpdatePlanning):
             }
         submitted: list[dict[str, Any]] = []
         failures: list[dict[str, Any]] = []
+        web_url = plan_entry_web_url(plan)
         uncertain = False
         first_error: BenchlingAgentError | None = None
         for batch_index, batch in enumerate(batches):
@@ -478,6 +497,7 @@ class ResultsPlanning(ResultUpdatePlanning):
                         "create a new preview"
                     )
                 table = await self.service.get_result_table(entry_id, table_id)
+                web_url = table.get("entry_web_url") or web_url
                 self._expect(
                     table.get("schema_id"),
                     expected[table_id]["schema_id"],
@@ -591,6 +611,7 @@ class ResultsPlanning(ResultUpdatePlanning):
         result = {
             "batches": submitted,
             "state": "submission_pending",
+            "web_url": web_url,
         }
         if uploaded:
             result["blobs"] = list(uploaded.values())

@@ -75,18 +75,23 @@ def state_counts(items: list[dict[str, Any]]) -> dict[str, int]:
 
 
 def pending_next_step(
-    pending: int, *, entry_id: str | None = None, table_names: list[str] | None = None
+    pending: int,
+    *,
+    entry_id: str | None = None,
+    table_names: list[str] | None = None,
+    web_url: str | None = None,
 ) -> str | None:
     """Tell the user how to accept pending results, or None when nothing is pending."""
     if pending <= 0:
         return None
     noun = "result is" if pending == 1 else "results are"
+    entry = f"entry {entry_id} at {web_url}" if entry_id and web_url else f"entry {entry_id}"
     if entry_id and table_names:
         tables = "tables" if len(table_names) > 1 else "table"
         names = ", ".join(f'"{name}"' for name in table_names)
-        where = f"entry {entry_id}, go to the result {tables} {names},"
+        where = f"{entry}, go to the result {tables} {names},"
     elif entry_id:
-        where = f"entry {entry_id}, go to its results table,"
+        where = f"{entry}, go to its results table,"
     else:
         where = "the entry the results were uploaded to, go to its results table,"
     return (

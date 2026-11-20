@@ -6,7 +6,7 @@ import json
 
 import pytest
 from conftest import runtime_for
-from fake_benchling import ENTRY_ID
+from fake_benchling import ENTRY_ID, entry_web_url
 from typer.testing import CliRunner
 
 from benchling_toolkit import cli
@@ -44,7 +44,12 @@ async def test_pending_by_plan_reads_task_ids_and_writes_nothing(runtime, fake) 
 
     data = await runtime.planner.read_back_results(plan_id=planned.id)
 
-    assert data["source"] == {"mode": "plan", "plan_id": planned.id, "entry_id": ENTRY_ID}
+    assert data["source"] == {
+        "mode": "plan",
+        "plan_id": planned.id,
+        "entry_id": ENTRY_ID,
+        "web_url": entry_web_url(ENTRY_ID),
+    }
     assert data["counts"] == {
         "read": 2,
         "pending": 2,
@@ -57,7 +62,7 @@ async def test_pending_by_plan_reads_task_ids_and_writes_nothing(runtime, fake) 
     assert data["needs_accept"] == ids
     assert data["batches"][0]["task_status"] == "SUCCEEDED"
     assert "plug" in data["next_step"] and '"Assay results"' in data["next_step"]
-    assert ENTRY_ID in data["next_step"]
+    assert f"entry {ENTRY_ID} at {entry_web_url(ENTRY_ID)}," in data["next_step"]
     assert journal_text(runtime, planned.id) == before
     assert len(fake.writes()) == writes
     (call,) = bulk_get_calls(fake)
@@ -501,3 +506,20 @@ def test_readback_helpers_handle_sparse_records() -> None:
     assert readback.values_equal([1, 2], [1, 2]) is True
     assert "go to its results table" in readback.pending_next_step(2, entry_id=ENTRY_ID)
     assert readback.pending_next_step(0) is None
+
+
+async def test_verify_links_the_entry_in_next_step(runtime, fake) -> None:
+    planned = await applied_plan(runtime, fake, [record(1)])
+    fake.complete_upload()
+    data = await runtime.planner.verify_results(planned.id)
+    url = entry_web_url(ENTRY_ID)
+    assert data["web_url"] == url
+    assert f"entry {ENTRY_ID} at {url}," in data["next_step"]
+
+
+def test_pending_next_step_links_the_entry_when_a_web_url_is_known() -> None:
+    url = "https://your-tenant-dev.benchling.com/benchling/f/lib_abc123-n/etr_abc123-s/edit"
+    step = readback.pending_next_step(1, entry_id=ENTRY_ID, web_url=url)
+    assert step is not None and f"entry {ENTRY_ID} at {url}," in step
+    assert " at " not in (readback.pending_next_step(1, entry_id=ENTRY_ID) or "")
+    assert url not in (readback.pending_next_step(1, web_url=url) or "")

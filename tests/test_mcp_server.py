@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 from conftest import runtime_for
-from fake_benchling import ENTRY_ID, TABLE_PART, TEXT_PART
+from fake_benchling import ENTRY_ID, TABLE_PART, TEXT_PART, entry_web_url
 from mcp import Client
 
 from benchling_toolkit.errors import AuthenticationError, ValidationError
@@ -162,6 +162,7 @@ async def test_entry_creation_preview_stays_read_only_until_enabled_apply(
         plan_id=planned["data"]["id"],
     )
     assert applied["data"]["journal"]["result"]["entry_id"] == "etr_created1"
+    assert applied["data"]["web_url"] == entry_web_url("etr_created1")
     assert len(fake.writes()) == 1
 
 
@@ -1155,3 +1156,15 @@ async def test_apply_changes_for_results_returns_the_next_step(writer, fake) -> 
         timeout=1,
     )
     assert status["data"]["result_state"] == "pending_integration"
+
+
+async def test_entry_tools_return_web_url(client) -> None:
+    url = entry_web_url(ENTRY_ID)
+    resolved = (await call(client, "resolve_entry", env="sandbox", reference=ENTRY_ID))["data"]
+    entry = (await call(client, "get_entry", env="sandbox", reference=ENTRY_ID))["data"]
+    full = (await call(client, "get_entry", env="sandbox", reference=ENTRY_ID, full=True))["data"]
+    listed = (await call(client, "list_entries", env="sandbox"))["data"]
+    bulk = (await call(client, "get_entries", env="sandbox", entry_ids=[ENTRY_ID]))["data"]
+    assert resolved["web_url"] == entry["web_url"] == full["web_url"] == url
+    assert listed["items"][0]["web_url"] == url
+    assert bulk["items"][0]["web_url"] == url

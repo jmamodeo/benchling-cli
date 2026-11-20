@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from fake_benchling import ENTRY_ID
+from fake_benchling import ENTRY_ID, entry_web_url
 
 from benchling_toolkit.errors import (
     ConflictError,
@@ -470,3 +470,31 @@ async def test_non_results_apply_has_no_next_step(runtime) -> None:
     )
     applied = await runtime.planner.apply(planned.id)
     assert "next_step" not in applied
+
+
+async def test_results_apply_returns_web_url_and_links_it_in_next_step(runtime) -> None:
+    planned = await plan(runtime, [record()])
+    url = entry_web_url(ENTRY_ID)
+    assert planned.before["tables"][0]["table"]["entry_web_url"] == url
+    applied = await runtime.planner.apply(planned.id)
+    assert applied["web_url"] == url
+    assert applied["journal"]["result"]["web_url"] == url
+    assert f"Open entry {ENTRY_ID} at {url}," in applied["next_step"]
+
+
+async def test_results_next_step_falls_back_to_the_id_without_web_url(runtime, fake) -> None:
+    fake.omit_entry_web_url = True
+    planned = await plan(runtime, [record()])
+    applied = await runtime.planner.apply(planned.id)
+    assert applied["web_url"] is None
+    assert f"Open entry {ENTRY_ID}, go to" in applied["next_step"]
+
+
+async def test_non_entry_apply_has_no_web_url(runtime) -> None:
+    planned = await runtime.planner.plan(
+        ENTRY_ID,
+        "table",
+        {"operation": "append_rows", "table_part_id": "docpart_table1", "rows": [["D", "4"]]},
+    )
+    applied = await runtime.planner.apply(planned.id)
+    assert "web_url" not in applied
