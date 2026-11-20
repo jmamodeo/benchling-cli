@@ -41,6 +41,8 @@ app = typer.Typer(
 auth_app = typer.Typer(help="Log in, log out, and inspect saved environments.")
 entry_app = typer.Typer(help="Resolve, list, fetch, and inspect entries.")
 entry_fields_app = typer.Typer(help="Read entry schema fields.")
+template_app = typer.Typer(help="List and inspect entry templates.")
+folder_app = typer.Typer(help="Read notebook folders.")
 section_app = typer.Typer(help="Read entry sections.")
 part_app = typer.Typer(help="Read document parts.")
 table_app = typer.Typer(help="Read unstructured tables.")
@@ -57,6 +59,8 @@ issue_app = typer.Typer(
 app.add_typer(auth_app, name="auth")
 app.add_typer(entry_app, name="entry")
 entry_app.add_typer(entry_fields_app, name="fields")
+app.add_typer(template_app, name="template")
+app.add_typer(folder_app, name="folder")
 app.add_typer(section_app, name="section")
 app.add_typer(part_app, name="part")
 app.add_typer(table_app, name="table")
@@ -476,11 +480,61 @@ def entry_get(
     _execute(state.env, lambda runtime: runtime.service.get_entry(reference, full=full))
 
 
+@entry_app.command("bulk-get")
+def entry_bulk_get(
+    ctx: typer.Context,
+    entry_ids: list[str] | None = typer.Option(
+        None, "--id", help="Entry ID. Repeat to request multiple entries."
+    ),
+    display_ids: list[str] | None = typer.Option(
+        None, "--display-id", help="Entry display ID. Repeat to request multiple entries."
+    ),
+) -> None:
+    """Fetch multiple entries by ID or display ID."""
+    state: State = ctx.obj
+    _execute(
+        state.env,
+        lambda runtime: runtime.service.get_entries(
+            entry_ids=entry_ids,
+            display_ids=display_ids,
+        ),
+    )
+
+
 @entry_app.command("inspect")
 def entry_inspect(ctx: typer.Context, reference: str) -> None:
     """Summarize an entry's structure (sections, parts, tables, schemas) without full content."""
     state: State = ctx.obj
     _execute(state.env, lambda runtime: runtime.service.inspect_entry(reference))
+
+
+@template_app.command("get")
+def template_get(ctx: typer.Context, template_id: str) -> None:
+    """Get an entry template and summarize its structure."""
+    state: State = ctx.obj
+    _execute(state.env, lambda runtime: runtime.service.get_template(template_id))
+
+
+@template_app.command("list")
+def template_list(
+    ctx: typer.Context,
+    name: str | None = typer.Option(None, "--name", help="Exact entry-template name."),
+    limit: int = typer.Option(50, "--limit", min=1, max=100, help="Page size, from 1 to 100."),
+    cursor: str | None = typer.Option(None, "--cursor", help="next_token from the previous page."),
+) -> None:
+    """List one page of entry templates."""
+    state: State = ctx.obj
+    _execute(
+        state.env,
+        lambda runtime: runtime.service.list_templates(name=name, limit=limit, cursor=cursor),
+    )
+
+
+@folder_app.command("get")
+def folder_get(ctx: typer.Context, folder_id: str) -> None:
+    """Get a folder by ID."""
+    state: State = ctx.obj
+    _execute(state.env, lambda runtime: runtime.service.get_folder(folder_id))
 
 
 @entry_app.command("list")

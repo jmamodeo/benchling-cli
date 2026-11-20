@@ -275,7 +275,11 @@ Every command prints a versioned JSON envelope. Diagnostics go to stderr.
 ```console
 benchling --env dev entry resolve EXP-0001
 benchling --env dev entry get etr_abc123 --full
+benchling --env dev entry bulk-get --id etr_abc123 --id etr_other
 benchling --env dev entry inspect etr_abc123
+benchling --env dev template get etpl_example
+benchling --env dev template list --name "Example template"
+benchling --env dev folder get lib_example
 benchling --env dev section get etr_abc123 docpart_section1
 benchling --env dev part get etr_abc123 docpart_text1
 benchling --env dev table get docpart_table1
@@ -300,6 +304,8 @@ benchling --env dev export --kind assay-results --entry etr_abc123 --schema assa
 ```
 
 Entry references may be canonical IDs, display IDs, or URLs for the selected tenant. Duplicate section titles must be addressed by part ID.
+
+`entry bulk-get` fetches multiple entries by repeated `--id` or `--display-id` options (specify exactly one kind), chunking requests at 100 IDs. `template list` returns one page; pass `next_token` back with `--cursor`, and optionally filter by exact `--name`. `template get` summarizes the template structure, including note types, sections, result schemas, table names, and short text previews. It reads V2 `GET /entry-templates/{id}` because V3 `EntryTemplate.Get` returns metadata only. Entry creation planning still reads V3 template metadata to validate the template and its active state. `folder get` reads one folder. These lookups are read-only.
 
 `entry list` and `schema list` are read-only. They return one page, default 50 and at most 100, plus `next_token`. Pass that token back with `--cursor`. `schema list` reads entry, entity, result, and run schemas, following every upstream page until the page is full or the lists end. Its optional `--name` is an exact, case-sensitive match. `schema find NAME` requires one exact match, optionally limited by `--kind`; no match and ambiguous matches are errors. Ambiguity candidates show only schema IDs and kinds. A successful find includes field types, required flags, and dropdown options. `schema get` adds the options of each dropdown field (`/dropdown/{id}` and `/dropdown/{id}/options/items`). There is no separate dropdown command.
 
@@ -358,7 +364,7 @@ benchling --env dev changes status PLAN_ID
 benchling --env dev changes status PLAN_ID --wait --timeout 300
 ```
 
-An entry specification uses `entry_template_id`, `folder_id`, and `name`, and may include `schema_fields` when the template has a schema. Preview reads the template and folder, refuses missing or archived resources, and shows their names and IDs. Apply creates the entry once and returns its ID; use that ID with `entry inspect` or `results tables`. The V3 `Entry.Create` route supports `entryTemplateId` to instantiate a template ([Benchling API docs](https://docs.benchling.com/docs/api/benchling-api/entry/create)); template and folder reads use [EntryTemplate.Get](https://docs.benchling.com/docs/api/benchling-api/entry-template/get) and [Folder.Get](https://docs.benchling.com/docs/api/benchling-api/folder/get).
+An entry specification uses `entry_template_id`, `folder_id`, and `name`, and may include `schema_fields` when the template has a schema. Preview reads V3 template metadata and folder data, refuses missing or archived resources, and shows their names and IDs. Use `template get` for the template's note structure; V3 `EntryTemplate.Get` returns metadata only. Apply creates the entry once and returns its ID; use that ID with `entry inspect` or `results tables`. The V3 `Entry.Create` route supports `entryTemplateId` to instantiate a template ([Benchling API docs](https://docs.benchling.com/docs/api/benchling-api/entry/create)); template and folder reads use [EntryTemplate.Get](https://docs.benchling.com/docs/api/benchling-api/entry-template/get) and [Folder.Get](https://docs.benchling.com/docs/api/benchling-api/folder/get).
 Container creation and transfer use the same local preview and explicit apply lifecycle. Container plans do not take `--entry`:
 
 ```console

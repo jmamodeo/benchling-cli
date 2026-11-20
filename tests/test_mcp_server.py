@@ -17,6 +17,10 @@ READ_TOOLS = {
     "resolve_entry",
     "get_entry",
     "inspect_entry",
+    "get_entries",
+    "get_folder",
+    "get_template",
+    "list_templates",
     "get_section",
     "get_part",
     "get_table",
@@ -321,6 +325,44 @@ async def test_inspect_entry_summarizes_structure(client) -> None:
         "type": "TextDocumentContent",
         "summary": data["parts"][1]["summary"],
     }
+
+
+async def test_read_only_lookup_tools_get_entries_folder_and_template(client, fake) -> None:
+    fake.entry_templates["etpl_two"] = {
+        "id": "etpl_two",
+        "name": "Second template",
+        "modifiedAt": "2026-02-01T00:00:00Z",
+    }
+    entries = await call(
+        client,
+        "get_entries",
+        env="sandbox",
+        entry_ids=[ENTRY_ID, "etr_list2"],
+    )
+    assert [item["id"] for item in entries["data"]["items"]] == [ENTRY_ID, "etr_list2"]
+    folder = await call(client, "get_folder", env="sandbox", folder_id="lib_abc123")
+    template = await call(client, "get_template", env="sandbox", template_id="etpl_abc123")
+    template_page = await call(
+        client,
+        "list_templates",
+        env="sandbox",
+        name="Synthetic template",
+        limit=10,
+    )
+    first_page = await call(client, "list_templates", env="sandbox", limit=1)
+    second_page = await call(
+        client,
+        "list_templates",
+        env="sandbox",
+        limit=1,
+        cursor=first_page["data"]["next_token"],
+    )
+    assert folder["data"]["name"] == "Synthetic folder"
+    assert template["data"]["structure"]["results_table_schema_ids"] == ["assaysch_abc123"]
+    assert template_page["data"]["items"][0]["id"] == "etpl_abc123"
+    assert first_page["data"]["next_token"] == "1"
+    assert second_page["data"]["items"][0]["id"] == "etpl_two"
+    assert fake.writes() == []
 
 
 async def test_get_section_by_title_or_part_id_with_paging(client, fake) -> None:
