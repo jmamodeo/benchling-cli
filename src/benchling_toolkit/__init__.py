@@ -3,4 +3,4 @@
 from .models import Envelope
 
 __all__ = ["Envelope"]
-__version__ = "0.4.1"
+__version__ = "0.5.0"

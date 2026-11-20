@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-20
+
 ### Added
 
 - Result attachment fields can take a local file. In a results upload, an attachment field value of `{"file": PATH}` (optional `blob_type` `RAW_FILE` or `VISUALIZATION`, optional `mime_type`) is hashed at `changes plan`; in a CSV update, an attachment cell `file:PATH` does the same, relative to the CSV's folder. The preview lists each file's base name, size, SHA-256, MD5, MIME type and blob type, never its path or contents. `changes apply` reads each file again, refuses it with a conflict if its size or SHA-256 changed, uploads it as a V2 blob (`POST /blobs` up to 10,000,000 bytes, otherwise multipart in 10 MiB parts with an abort if any step fails), journals the blob ID, and then sends the result write with the blob ID. Uploads are never retried. Files over 100 MiB, more than 1 GiB in one plan, empty files, non-regular files, and files inside the toolkit state directory are refused.
@@ -211,7 +213,8 @@ All notable changes to this project are documented here. The format is based on
 - Versioned JSON envelope, stable exit codes, and published JSON schemas.
 - Operating-system trust-store TLS verification.
 
-[Unreleased]: https://github.com/jmamodeo/benchling-toolkit/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/jmamodeo/benchling-toolkit/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/jmamodeo/benchling-toolkit/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/jmamodeo/benchling-toolkit/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/jmamodeo/benchling-toolkit/compare/v0.2.0...v0.4.0
 [0.2.0]: https://github.com/jmamodeo/benchling-toolkit/compare/v0.1.2...v0.2.0
