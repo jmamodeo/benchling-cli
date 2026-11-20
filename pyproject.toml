@@ -75,6 +75,7 @@ where = ["src"]
 benchling_toolkit = ["py.typed"]
 
 [tool.setuptools.data-files]
+"share/benchling-toolkit" = ["SKILL.md"]
 "share/benchling-toolkit/schemas" = ["schemas/*.json"]
 "share/benchling-toolkit/contracts" = ["contracts/*.json"]
 

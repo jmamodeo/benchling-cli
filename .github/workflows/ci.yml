@@ -51,3 +51,4 @@ jobs:
           uv venv --python 3.12 /tmp/wheel-venv
           uv pip install --python /tmp/wheel-venv/bin/python dist/*.whl
           /tmp/wheel-venv/bin/benchling --version
+          test -s /tmp/wheel-venv/share/benchling-toolkit/SKILL.md

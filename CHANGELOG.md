@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- The pip package ships `SKILL.md`. It is installed as `share/benchling-toolkit/SKILL.md` under the environment prefix, next to the JSON schemas and contracts, so an agent can read the skill without a clone of the repository.
+
 ## [0.5.1] - 2026-11-20
 
 ### Added

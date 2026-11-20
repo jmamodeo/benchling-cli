@@ -517,7 +517,7 @@ Drafting does not contact Benchling or GitHub. The MCP tool is draft-only: the p
 
 [ARCHITECTURE.md](ARCHITECTURE.md) is the plan, apply, and journal sequence. The [threat model](docs/threat-model.md) covers credentials, stale or replayed plans, write scoping, and agent misuse, including the limits of those controls.
 
-[`SKILL.md`](SKILL.md) is the Agent Skills file for this repository. Its frontmatter keeps `name`, `description`, `license`, `compatibility`, and a `metadata` map of strings (`summary`, `version`, `docs_url`). Tags, keywords, and use cases are lists in [`agensi/listing.yaml`](agensi/listing.yaml).
+[`SKILL.md`](SKILL.md) is the Agent Skills file for this repository. Its frontmatter keeps `name`, `description`, `license`, `compatibility`, and a `metadata` map of strings (`summary`, `version`, `docs_url`). Tags, keywords, and use cases are lists in [`agensi/listing.yaml`](agensi/listing.yaml). The pip package installs it as `share/benchling-toolkit/SKILL.md` under the environment prefix (`sys.prefix`), next to the JSON schemas and contracts.
 
 ```mermaid
 flowchart TD
