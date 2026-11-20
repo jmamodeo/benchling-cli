@@ -33,7 +33,7 @@ body:
     attributes:
       label: benchling-toolkit version
       description: Output of `benchling --version`.
-      placeholder: benchling-toolkit 0.5.0
+      placeholder: benchling-toolkit 0.5.1
     validations:
       required: true
   - type: input
