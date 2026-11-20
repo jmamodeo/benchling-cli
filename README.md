@@ -14,7 +14,7 @@ Safe, auditable tools for AI agents working in Benchling.
 An electronic lab notebook is a scientific record, so letting an AI agent write to one directly is hard to trust. `benchling-toolkit` is a toolkit of safe, auditable tools that AI agents use to work with a [Benchling](https://www.benchling.com) tenant: a JSON-first CLI and a local [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server that is read-only by default. Every change is first previewed as an immutable, checksummed plan that records what will change and the version preconditions it depends on. A separate, explicit step applies it: that step re-checks the preconditions, refuses stale or already-used plans, and records each stage in a local execution journal. The MCP server cannot apply writes unless an operator opts a specific environment in with `--allow-writes`.
 
 - Public Benchling API only; it never automates the browser.
-- Five change families: document text, unstructured tables, entry fields, assay results, and containers.
+- Six change families: template-based entry creation, document text, unstructured tables, entry fields, assay results, and containers.
 - Several environments at once. Each one is saved with `benchling auth login`; the client secret stays in the OS keychain.
 - One versioned JSON envelope and stable exit codes for both interfaces.
 
@@ -323,7 +323,7 @@ A results-table or unstructured-table cell is flattened the same way. A link or 
 
 ### Preview and apply changes
 
-A change specification covers one entry or a container mutation family. Previewing only reads Benchling and creates a local immutable plan:
+A change specification covers one existing-entry mutation, one new-entry creation, or one container mutation. Previewing only reads Benchling and creates a local immutable plan:
 
 ```console
 benchling --env dev changes plan \
@@ -339,11 +339,25 @@ benchling --env dev changes plan \
   --map Ct=Ct \
   --map Note=Note
 
+benchling --env dev changes plan \
+  --family entry \
+  --spec - <<'JSON'
+{
+  "entry_template_id": "etpl_abc123",
+  "folder_id": "lib_abc123",
+  "name": "Fresh experiment",
+  "schema_fields": {
+    "temperature": { "value": 21 }
+  }
+}
+JSON
+
 benchling --env dev changes apply PLAN_ID
 benchling --env dev changes status PLAN_ID
 benchling --env dev changes status PLAN_ID --wait --timeout 300
 ```
 
+An entry specification uses `entry_template_id`, `folder_id`, and `name`, and may include `schema_fields` when the template has a schema. Preview reads the template and folder, refuses missing or archived resources, and shows their names and IDs. Apply creates the entry once and returns its ID; use that ID with `entry inspect` or `results tables`. The V3 `Entry.Create` route supports `entryTemplateId` to instantiate a template ([Benchling API docs](https://docs.benchling.com/docs/api/benchling-api/entry/create)); template and folder reads use [EntryTemplate.Get](https://docs.benchling.com/docs/api/benchling-api/entry-template/get) and [Folder.Get](https://docs.benchling.com/docs/api/benchling-api/folder/get).
 Container creation and transfer use the same local preview and explicit apply lifecycle. Container plans do not take `--entry`:
 
 ```console
@@ -377,8 +391,9 @@ Example transfer specification:
 }
 ```
 
-Supported specifications are documented in [schemas/change-spec.schema.json](schemas/change-spec.schema.json). The five families are:
+Supported specifications are documented in [schemas/change-spec.schema.json](schemas/change-spec.schema.json). The six families are:
 
+- `entry`: create an entry from a template in a folder; optional schema fields are validated against the template's schema and sent by field-definition ID;
 - `document`: insert, delete, move, or replace a text part;
 - `table`: set selected cells or append rows on an unstructured table;
 - `fields`: update fields already present on the entry's assigned schema;
@@ -403,6 +418,7 @@ Use `batches` in a results specification to push multiple tables in one plan:
 ```
 
 Apply submits each table separately and journals each task. A rejected batch does not stop later batches; inspect the partial journal before making a fresh plan, and never retry automatically. `changes status` checks every task once by default. Add `--wait --timeout SECONDS` to poll until all tasks are terminal or the timeout expires. A failed task's documented error `index` is mapped to that batch's zero-based row index and local correlation ID. Errors without an in-range index remain under `unmatched_row_errors` alongside the raw error object.
+Entry creation is also single-use. A plan with a successful or uncertain create attempt cannot be applied again; a new plan and apply can still create another entry.
 
 ## MCP server
 

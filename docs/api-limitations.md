@@ -2,6 +2,7 @@
 
 These limits are based on the public Benchling documentation and OpenAPI contracts. The document, unstructured-table, and entry-field portions were rechecked against the V3 spec captured on 2026-11-19.
 
+- Entry creation uses documented V3 `Entry.Create` (`POST /api/v3/entry`), whose `CreateEntryInput` includes `entryTemplateId`, `folderId`, `name`, and `schemaFields`. The V3 API contract also has `GET /entry-template/{entry_template_id}` and `GET /folder/{folder_id}`; plans read these resources and reject missing or archived resources before any write. The create response is expected to be an `Entry` with an `id`, as specified by the contract. This path has not been live-verified. Preview does not lock or reserve the template/folder: they may change or become inaccessible after planning, in which case Benchling can reject apply. Creation is never retried, and the plan is spent on any attempt. After creation, use the returned ID with `entry inspect` or `results tables`; the entry's results-table IDs are read from the created entry.
 - The V3 Document API is beta. This client sends `EARLY-ACCESS: true` and uses the unified `/api/v3` routes.
 - Entry content is an ordered, flat list. Sections are derived from section markers; they are not independent nested resources.
 - Unstructured-table reads return `rows` as a URL. This client pages `.../rows/items` at `pageSize` 100, the maximum the API accepts. `set_cells` sends `update_table_cells` and `append_rows` sends `insert_table_rows` on `PATCH /entry/{id}`. There is no full-table replace.

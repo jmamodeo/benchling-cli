@@ -56,6 +56,26 @@ async def multi_table_plan(runtime, fake):
 
 
 @pytest.mark.parametrize(
+    ("arguments", "message"),
+    [
+        ({"wait": "yes"}, "wait must be a boolean"),
+        ({"timeout": True}, "timeout must be greater than 0"),
+        ({"timeout": 0}, "timeout must be greater than 0"),
+        ({"timeout": 3601}, "timeout must be greater than 0"),
+        ({"timeout": "soon"}, "timeout must be greater than 0"),
+    ],
+)
+async def test_status_rejects_invalid_wait_arguments(runtime, arguments, message) -> None:
+    with pytest.raises(ValidationError, match=message):
+        await runtime.planner.status("plan_abc123", **arguments)
+
+
+async def test_result_plan_requires_entry_reference(runtime) -> None:
+    with pytest.raises(ValidationError, match="Entry reference is required"):
+        await runtime.planner.plan(None, "results", {})
+
+
+@pytest.mark.parametrize(
     ("table_id", "records", "expected"),
     [
         ("tbl_wrong", [record()], "explicit V2 result table ID"),
@@ -215,7 +235,7 @@ async def test_status_waits_for_every_table_and_maps_documented_error_indices(
             "error": {"message": "table-level error"},
             "reason": "Task error has no usable input row index",
             "table_id": "strtbl_other",
-        }
+        },
     ]
 
 

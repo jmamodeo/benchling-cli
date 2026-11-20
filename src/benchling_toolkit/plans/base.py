@@ -56,7 +56,7 @@ class PlannerBase:
 
     @staticmethod
     def _entry_id(plan: ChangePlan) -> str:
-        """Require an entry target when applying an entry-family plan."""
+        """Return the existing entry ID, rejecting a missing plan target."""
         if not plan.entry_id:
             raise ValidationError("Entry change plan has no entry ID")
         return plan.entry_id

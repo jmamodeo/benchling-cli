@@ -32,6 +32,14 @@ _EntryRef = Annotated[
     str,
     Field(description="Entry ID, display ID, or same-tenant entry URL."),
 ]
+_OptionalEntryRef = Annotated[
+    str | None,
+    Field(
+        description=(
+            "Entry ID, display ID, or same-tenant entry URL. Omit for entry or container plans."
+        )
+    ),
+]
 _PageCursor = Annotated[
     str | None,
     Field(description="next_token from the previous page. Omit it to read the first page."),
@@ -785,15 +793,16 @@ def _register_change_tools(
         env: _Env,
         family: Annotated[
             PlanFamily,
-            Field(description=("Change family: document, table, fields, results, or containers.")),
+            Field(
+                description=(
+                    "Change family: entry, document, table, fields, results, or containers."
+                )
+            ),
         ],
         specification: _ChangeSpecification,
-        entry: Annotated[
-            _EntryRef | None,
-            Field(description="Entry ID, display ID, or URL; omit only for containers."),
-        ] = None,
+        entry: _OptionalEntryRef = None,
     ) -> Envelope[Any]:
-        """Create an immutable local preview for one entry or container mutation.
+        """Create an immutable local preview for an entry or container change.
 
         The specification is checked against the typed change schema before any
         remote read. An invalid specification is a validation_error envelope and
@@ -804,7 +813,9 @@ def _register_change_tools(
         with apply_changes; created results land pending until accepted in each table.
         Container plans support operation "create" with schema_id, or "transfer"
         with source_container_id, destination_container_id, and destination_contents.
-        Other families require entry.
+        Entry plans omit entry and pass entry_template_id, folder_id, and name;
+        optional schema_fields are checked against the template schema. Other
+        entry families require entry. Apply the preview later with apply_changes.
         """
 
         async def call(rt: Runtime) -> Any:
@@ -823,9 +834,9 @@ def _register_change_tools(
     ) -> Envelope[Any]:
         """Explicitly apply a previously previewed plan when writes are enabled for env.
 
-        After a results upload the response has next_step: tell the user to open the
-        named entry and results table and click the plug icon to accept the pending
-        results. They are not in the table, and cannot be updated, until then.
+        Entry creation returns the new entry ID for later inspection. After a
+        results upload, relay next_step to have the person accept the pending
+        results in the named table.
         """
 
         async def call(rt: Runtime) -> dict[str, Any]:
@@ -855,9 +866,7 @@ def _register_change_tools(
         ] = 300.0,
     ) -> Envelope[Any]:
         """Read a plan journal and task status; optionally wait for result tasks."""
-        return await safe(
-            env, lambda rt: rt.planner.status(plan_id, wait=wait, timeout=timeout)
-        )
+        return await safe(env, lambda rt: rt.planner.status(plan_id, wait=wait, timeout=timeout))
 
 
 class _CitationInput(BaseModel):

@@ -788,7 +788,7 @@ def _plan_request(
 def changes_plan(
     ctx: typer.Context,
     entry: str | None = typer.Option(
-        None, help="Entry ID, display ID, or URL. Omit for container plans."
+        None, "--entry", help="Entry ID, display ID, or URL. Omit for entry or container plans."
     ),
     family: PlanFamily = typer.Option(..., case_sensitive=False),
     spec: str | None = typer.Option(None, "--spec", help="JSON file path, or '-' for stdin."),
@@ -816,6 +816,10 @@ def changes_plan(
     """
     state: State = ctx.obj
     try:
+        if family == PlanFamily.ENTRY and entry is not None:
+            raise ValidationError("Entry creation plans must not specify --entry")
+        if family not in (PlanFamily.ENTRY, PlanFamily.CONTAINERS) and entry is None:
+            raise ValidationError("This change family requires --entry")
         request = _plan_request(family, spec, csv_path, id_column, column_map)
     except BenchlingAgentError as exc:
         _emit(Envelope.failure(exc))
@@ -837,7 +841,9 @@ def changes_apply(ctx: typer.Context, plan_id: str) -> None:
 def changes_status(
     ctx: typer.Context,
     plan_id: str,
-    wait: bool = typer.Option(False, "--wait", help="Poll result tasks until completion or timeout."),
+    wait: bool = typer.Option(
+        False, "--wait", help="Poll result tasks until completion or timeout."
+    ),
     timeout: float = typer.Option(
         300.0, "--timeout", min=0.1, max=3600, help="Maximum wait, in seconds (0.1-3600)."
     ),

@@ -27,6 +27,7 @@ from ..models import (
 )
 from .containers import ContainerPlanning
 from .document import DocumentPlanning
+from .entry import EntryPlanning
 from .fields import FieldsPlanning
 from .repository import checksum_for, json_diff
 from .result_update import request_is_result_update
@@ -53,7 +54,12 @@ def _failure_details(exc: BenchlingAgentError) -> dict[str, Any]:
 
 
 class ChangePlanner(
-    DocumentPlanning, TablePlanning, FieldsPlanning, ResultsPlanning, ContainerPlanning
+    EntryPlanning,
+    DocumentPlanning,
+    TablePlanning,
+    FieldsPlanning,
+    ResultsPlanning,
+    ContainerPlanning,
 ):
     """Creates change plans and applies them under a per-plan file lock."""
 
@@ -79,7 +85,14 @@ class ChangePlanner(
                 "CSV result updates require the results family",
                 details={"family": family.value},
             )
-        if family == PlanFamily.CONTAINERS:
+        if family == PlanFamily.ENTRY:
+            if reference is not None:
+                raise ValidationError("Entry creation plans must not specify --entry")
+            entry_id = None
+            before, after, preconditions, guarantees, warnings = await self._plan_entry_create(
+                request
+            )
+        elif family == PlanFamily.CONTAINERS:
             parts = await self._plan_containers(request)
             before, after, preconditions, guarantees, warnings = parts
             entry_id = None
@@ -157,6 +170,8 @@ class ChangePlanner(
 
     async def _run_family_apply(self, plan: ChangePlan, journal: ChangeJournal) -> dict[str, Any]:
         """Dispatch to the apply routine for the plan's family."""
+        if plan.family == PlanFamily.ENTRY:
+            return await self._apply_entry_create(plan, journal)
         appliers = {
             PlanFamily.DOCUMENT: self._apply_document,
             PlanFamily.TABLE: self._apply_table,
@@ -321,9 +336,7 @@ class ChangePlanner(
             results = []
             updates = []
             for task in tasks:
-                task_result = await self._poll_result_task(
-                    task, wait=wait, deadline=deadline
-                )
+                task_result = await self._poll_result_task(task, wait=wait, deadline=deadline)
                 results.append(task_result)
                 if "remote_task" in task_result:
                     updates.append(task_result)
@@ -484,16 +497,24 @@ class ChangePlanner(
             }
             return result
         records = (result.get("remote_task", {}).get("response") or {}).get("assayResults", [])
-        result["record_ids"] = [
-            record.get("id")
-            for record in records
-            if isinstance(record, dict) and record.get("id")
-        ] if isinstance(records, list) else []
-        result["record_v3_ids"] = [
-            record.get("v3Id")
-            for record in records
-            if isinstance(record, dict) and record.get("v3Id")
-        ] if isinstance(records, list) else []
+        result["record_ids"] = (
+            [
+                record.get("id")
+                for record in records
+                if isinstance(record, dict) and record.get("id")
+            ]
+            if isinstance(records, list)
+            else []
+        )
+        result["record_v3_ids"] = (
+            [
+                record.get("v3Id")
+                for record in records
+                if isinstance(record, dict) and record.get("v3Id")
+            ]
+            if isinstance(records, list)
+            else []
+        )
         if result.get("task_status") == "FAILED":
             row_errors, unmatched_errors = self._map_result_errors(
                 result["remote_task"].get("errors"),
@@ -519,17 +540,14 @@ class ChangePlanner(
         unmatched = []
         for error in entries:
             index = error.get("index") if isinstance(error, dict) else None
-            if (
-                isinstance(index, int)
-                and not isinstance(index, bool)
-                and 0 <= index < len(ids)
-            ):
+            if isinstance(index, int) and not isinstance(index, bool) and 0 <= index < len(ids):
                 mapped.append(
                     {
                         "table_id": None,
                         "row_index": index,
                         "plan_row_index": plan_row_offset + index
-                        if isinstance(plan_row_offset, int) and not isinstance(plan_row_offset, bool)
+                        if isinstance(plan_row_offset, int)
+                        and not isinstance(plan_row_offset, bool)
                         else index,
                         "client_record_id": ids[index],
                         "error": error,
@@ -550,12 +568,8 @@ class ChangePlanner(
         unmatched: list[dict[str, Any]] = []
         for result in results:
             table_id = result.get("table_id")
-            rows.extend(
-                {**error, "table_id": table_id}
-                for error in result.get("row_errors", [])
-            )
+            rows.extend({**error, "table_id": table_id} for error in result.get("row_errors", []))
             unmatched.extend(
-                {**error, "table_id": table_id}
-                for error in result.get("unmatched_errors", [])
+                {**error, "table_id": table_id} for error in result.get("unmatched_errors", [])
             )
         return {"row_errors": rows, "unmatched_row_errors": unmatched}

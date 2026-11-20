@@ -26,9 +26,7 @@ PENDING_RESULTS_WARNING = (
 )
 
 
-def pending_results_next_step(
-    plan: ChangePlan, table_ids: set[str] | None = None
-) -> str | None:
+def pending_results_next_step(plan: ChangePlan, table_ids: set[str] | None = None) -> str | None:
     """Tell the user how to accept pending results, or None when the plan created none."""
     if plan.family.value != "results" or plan.after.get("state") != "pending_integration":
         return None
@@ -37,8 +35,7 @@ def pending_results_next_step(
         names = [
             str((item.get("table") or {}).get("name") or item.get("table_id"))
             for item in tables
-            if isinstance(item, dict)
-            and (table_ids is None or item.get("table_id") in table_ids)
+            if isinstance(item, dict) and (table_ids is None or item.get("table_id") in table_ids)
         ]
     else:
         table = (plan.before or {}).get("table") or {}
@@ -253,6 +250,7 @@ class ResultsPlanning(ResultUpdatePlanning):
         return warnings
 
     async def _apply_results(self, plan: ChangePlan, journal: ChangeJournal) -> dict[str, Any]:
+        entry_id = self._entry_id(plan)
         if plan.preconditions.get("operation") == "update":
             return await self._apply_result_updates(plan, journal)
         batches = plan.after.get("batches")
@@ -278,7 +276,6 @@ class ResultsPlanning(ResultUpdatePlanning):
                     "schema_fields": plan.preconditions.get("result_schema_fields"),
                 }
             }
-        entry_id = self._entry_id(plan)
         submitted: list[dict[str, Any]] = []
         failures: list[dict[str, Any]] = []
         uncertain = False

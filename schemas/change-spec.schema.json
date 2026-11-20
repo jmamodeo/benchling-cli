@@ -13,6 +13,22 @@
   },
   "oneOf": [
     {
+      "title": "Create entry from template",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entry_template_id", "folder_id", "name"],
+      "properties": {
+        "entry_template_id": { "type": "string", "minLength": 1 },
+        "folder_id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "schema_fields": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": { "$ref": "#/$defs/fieldValueInput" }
+        }
+      }
+    },
+    {
       "title": "Document change",
       "oneOf": [
         {
