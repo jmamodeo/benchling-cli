@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
+import base64
+import json
+
 import pytest
 from fake_benchling import ENTRY_ID, Call
 
 from benchling_toolkit.errors import UpstreamError, ValidationError
-from benchling_toolkit.listing import dropdown_id_of, entry_summary, utc_timestamp
+from benchling_toolkit.listing import (
+    _decode_cursor,
+    dropdown_id_of,
+    entry_summary,
+    schema_collection,
+    utc_timestamp,
+)
 
 
 def _params(fake, suffix: str) -> list[dict[str, str]]:
@@ -325,6 +334,19 @@ async def test_schema_list_includes_entity_schemas(runtime, fake) -> None:
         call.path == "/api/v3/entity-schema/es_target/field-definitions/items"
         for call in fake.calls
     )
+
+
+def test_schema_collection_maps_entity_schema_ids() -> None:
+    assert schema_collection("es_target") == "entity-schema"
+
+
+def test_schema_cursor_with_empty_upstream_token_decodes_as_first_page() -> None:
+    payload = (
+        base64.urlsafe_b64encode(json.dumps({"kind": "entry", "token": ""}).encode())
+        .decode()
+        .rstrip("=")
+    )
+    assert _decode_cursor(payload, ("entry",)) == (0, None)
 
 
 async def test_schema_list_filters_by_exact_name_across_requested_kinds(runtime, fake) -> None:

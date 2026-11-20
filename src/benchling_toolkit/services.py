@@ -82,6 +82,8 @@ KNOWN_PART_TYPES = {
 }
 
 TABLE_ROW_PAGE_SIZE = 100
+ENTRY_BULK_GET_LIMIT = 100
+TEMPLATE_TEXT_PREVIEW_LIMIT = 160
 
 _BENCHLING_VALUE_TYPES = {
     "TextValue": "text_value",
@@ -506,6 +508,165 @@ class BenchlingService:
                     },
                 )
         raise AssertionError("unreachable")
+
+    async def get_entries(
+        self,
+        *,
+        entry_ids: object = None,
+        display_ids: object = None,
+    ) -> dict[str, Any]:
+        """Fetch entries by canonical IDs or display IDs using the V2 bulk-get endpoint."""
+        requested_ids = self._bulk_lookup_ids(entry_ids, "entry_ids")
+        requested_display_ids = self._bulk_lookup_ids(display_ids, "display_ids")
+        if (requested_ids is None) == (requested_display_ids is None):
+            raise ValidationError("Specify exactly one of entry_ids or display_ids")
+        requested = requested_ids if requested_ids is not None else requested_display_ids or []
+        parameter = "entryIds" if requested_ids is not None else "displayIds"
+        entries: list[dict[str, Any]] = []
+        for offset in range(0, len(requested), ENTRY_BULK_GET_LIMIT):
+            batch = requested[offset : offset + ENTRY_BULK_GET_LIMIT]
+            payload = await self.api.request(
+                "GET",
+                "/entries:bulk-get",
+                version=2,
+                params={parameter: ",".join(batch)},
+            )
+            response_entries = payload.get("entries")
+            if not isinstance(response_entries, list) or any(
+                not isinstance(item, dict) for item in response_entries
+            ):
+                raise UpstreamError("Benchling returned an unexpected bulk entry response")
+            entries.extend(response_entries)
+        return {"items": entries, "count": len(entries)}
+
+    @staticmethod
+    def _bulk_lookup_ids(value: object, label: str) -> list[str] | None:
+        """Validate one repeated CLI/MCP list before joining it for V2."""
+        if value is None:
+            return None
+        if isinstance(value, str) or not isinstance(value, (list, tuple)):
+            raise ValidationError(f"{label} must be a non-empty list of strings")
+        values = [BenchlingService._container_reference(item, label) for item in value]
+        if not values:
+            raise ValidationError(f"{label} must be a non-empty list of strings")
+        if any("," in item for item in values):
+            raise ValidationError(f"{label} items must not contain commas")
+        return values
+
+    async def get_folder(self, folder_id: str) -> dict[str, Any]:
+        """Return one V3 folder by ID."""
+        folder_id = self._container_reference(folder_id, "folder_id")
+        folder = await self.api.request("GET", f"/folder/{quote(folder_id, safe='')}")
+        if not isinstance(folder, dict) or not folder.get("id"):
+            raise UpstreamError("Benchling returned an unexpected folder response")
+        return folder
+
+    async def get_template(self, template_id: str) -> dict[str, Any]:
+        """Return entry-template metadata and a compact summary of its V2 note structure."""
+        template_id = self._container_reference(template_id, "template_id")
+        payload = await self.api.request(
+            "GET", f"/entry-templates/{quote(template_id, safe='')}", version=2
+        )
+        template = self._v2_object(payload, "entryTemplate")
+        return {
+            "template_id": template["id"],
+            "name": template.get("name"),
+            "schema_id": (template.get("schema") or {}).get("id")
+            if isinstance(template.get("schema"), dict)
+            else None,
+            "modified_at": template.get("modifiedAt"),
+            "structure_source": "V2 is used because V3 EntryTemplate.Get returns metadata only",
+            "structure": self._summarize_template(template),
+        }
+
+    @staticmethod
+    def _summarize_template(template: dict[str, Any]) -> dict[str, Any]:
+        days = template.get("days") or []
+        if not isinstance(days, list) or any(not isinstance(day, dict) for day in days):
+            raise UpstreamError("Benchling returned an unexpected entry template structure")
+        note_types: list[str] = []
+        results_table_schema_ids: list[str] = []
+        table_names: list[str] = []
+        section_titles: list[str] = []
+        text_previews: list[dict[str, str]] = []
+        text_types = {"text", "code", "text_box"}
+        text_block_count = 0
+        for day in days:
+            title = day.get("title")
+            if isinstance(title, str) and title:
+                section_titles.append(title)
+            notes = day.get("notes") or []
+            if not isinstance(notes, list) or any(not isinstance(note, dict) for note in notes):
+                raise UpstreamError("Benchling returned an unexpected entry template structure")
+            for note in notes:
+                note_type = note.get("type")
+                if not isinstance(note_type, str) or not note_type:
+                    raise UpstreamError("Benchling returned an entry template note without a type")
+                note_types.append(note_type)
+                if note_type == "results_table":
+                    schema_id = note.get("assayResultSchemaId")
+                    if isinstance(schema_id, str) and schema_id:
+                        results_table_schema_ids.append(schema_id)
+                table_name = note.get("name")
+                if not isinstance(table_name, str) or not table_name:
+                    table = note.get("table")
+                    table_name = table.get("name") if isinstance(table, dict) else None
+                if isinstance(table_name, str) and table_name:
+                    table_names.append(table_name)
+                text = note.get("text")
+                if note_type in text_types:
+                    text_block_count += 1
+                    if isinstance(text, str) and text.strip():
+                        normalized = " ".join(text.split())
+                        preview = normalized[:TEMPLATE_TEXT_PREVIEW_LIMIT]
+                        if len(normalized) > TEMPLATE_TEXT_PREVIEW_LIMIT:
+                            preview += "…"
+                        text_previews.append({"type": note_type, "preview": preview})
+        return {
+            "note_types": note_types,
+            "results_table_schema_ids": results_table_schema_ids,
+            "table_names": table_names,
+            "section_titles": section_titles,
+            "text_block_count": text_block_count,
+            "text_previews": text_previews,
+        }
+
+    async def list_templates(
+        self,
+        *,
+        name: object = None,
+        limit: object = listing.LIST_LIMIT,
+        cursor: object = None,
+    ) -> dict[str, Any]:
+        """Return one page of entry templates, optionally filtered by exact name."""
+        page_size = listing.check_limit(limit)
+        if name is not None and (not isinstance(name, str) or not name.strip()):
+            raise ValidationError("name must be a non-empty string")
+        if cursor is not None and (not isinstance(cursor, str) or not cursor):
+            raise ValidationError("cursor must be a non-empty string")
+        params: dict[str, Any] = {"pageSize": page_size}
+        if name is not None:
+            params["name"] = name.strip()
+        if cursor is not None:
+            params["nextToken"] = cursor
+        payload = await self.api.request("GET", "/entry-templates", version=2, params=params)
+        templates = payload.get("entryTemplates")
+        if not isinstance(templates, list) or any(not isinstance(item, dict) for item in templates):
+            raise UpstreamError("Benchling returned an unexpected entry template list")
+        next_token = payload.get("nextToken")
+        if next_token is not None and not isinstance(next_token, str):
+            raise UpstreamError("Benchling returned an invalid entry template pagination token")
+        return {
+            "items": [
+                {
+                    "id": item.get("id"),
+                    "name": item.get("name"),
+                    "modified_at": item.get("modifiedAt"),
+                }
+                for item in templates
+            ],
+            "next_token": next_token or None,
+        }
 
     async def inspect_entry(self, reference: str) -> dict[str, Any]:
         """Summarize a full entry snapshot: sections, part summaries, table sizes and completeness."""

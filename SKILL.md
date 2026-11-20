@@ -20,6 +20,7 @@ Use this when an agent should work in a Benchling tenant through the `benchling`
 Use this skill when the person asks to:
 
 - list entries, containers, container schemas, schemas, or assay results
+- bulk-get entries by ID or display ID, read a folder, or inspect an entry template
 - read an entry, a section, a document part, an unstructured table, entry fields, or results-table rows
 - get a container by ID or find containers by barcode or name
 - export a table or assay results to a local JSON or CSV file
@@ -110,6 +111,8 @@ benchling --env NAME results list --entry etr_example --page-size 100
 
 `entry list` filters are applied by Benchling. `--name` is an exact match, not a substring. `--folder` uses the V2 entry list. `container find` requires exactly one exact `--barcode` or `--name`. `container find` and `container schema list` return one page, default 50 and maximum 100; pass `next_token` back with `--cursor`. Container schema results include their field definitions. `--modified-after` and `--modified-before` take `YYYY-MM-DD` or an RFC3339 timestamp that includes a time zone. `--limit` is 1 to 100 and defaults to 50 on `entry list` and `schema list`. `schema list --kind` is `entry`, `entity`, `result`, or `run`. Omit `--kind` to list all four. `schema find NAME` requires an exact, case-sensitive name and returns one schema with field definitions, types, required flags, and dropdown options. If the name is absent or ambiguous, the command returns an error; ambiguity candidates include only IDs and kinds. `results list` uses `--page-size` (default 100, maximum 100), plus optional `--schema` and `--cursor`.
 
+`entry bulk-get` uses either repeated `--id` or repeated `--display-id` options, not both, and chunks requests at the V2 limit of 100 IDs. `template list` returns one page; pass `next_token` back with `--cursor` and optionally filter by exact `--name`. `template get` summarizes note types in order, results-table schemas, table names, section titles, and text previews. It reads V2 `GET /entry-templates/{id}` because V3 `EntryTemplate.Get` returns metadata only. `folder get` reads one folder by ID.
+
 ### Read entries, tables, and results
 
 Start with `inspect` for structure. Use `entry get --full` when you need the content. For a large table, export it instead of pulling every row into context.
@@ -118,6 +121,11 @@ Start with `inspect` for structure. Use `entry get --full` when you need the con
 benchling --env NAME entry resolve EXP-0001
 benchling --env NAME entry inspect etr_example
 benchling --env NAME entry get etr_example --full
+benchling --env NAME entry bulk-get --id etr_example --id etr_other
+benchling --env NAME entry bulk-get --display-id EXP-0001 --display-id EXP-0002
+benchling --env NAME template get etpl_example
+benchling --env NAME template list --name "Example template"
+benchling --env NAME folder get lib_example
 benchling --env NAME entry fields get etr_example
 benchling --env NAME section get etr_example docpart_section1
 benchling --env NAME part get etr_example docpart_text1
@@ -300,4 +308,4 @@ benchling mcp serve --allow-writes ENV
 
 Do not add `--allow-writes` unless the person asked to allow writes for that environment. `export` takes `kind`, `path`, `format`, and optional `part_id`, `entry`, and `schema_id`. It returns the same summary as the CLI and writes a local file only. `apply_changes` for entry creation returns the new entry ID; for results uploads it returns `next_step`: relay it to the user so they can accept pending results. `plan_changes` takes `env`, an optional `entry`, `family` (`entry`, `document`, `table`, `fields`, `results`, or `containers`), and `specification` (the same JSON shapes as `--spec`, including table-specific result `batches`). Omit `entry` for entry and container plans. `get_change_status` accepts `wait` and `timeout` to poll result tasks and does not need `--allow-writes`.
 
-Tools for this workflow: `list_entries`, `list_schemas`, `resolve_entry`, `inspect_entry`, `get_entry`, `get_entry_fields`, `get_section`, `get_part`, `get_table`, `get_schema`, `list_results`, `get_result`, `list_result_tables`, `list_results_table_rows`, `export`, `plan_changes`, `apply_changes`, `get_change_status`, `issue_draft`. `list_environments` and `issue_draft` take no environment.
+Tools for this workflow: `list_entries`, `list_schemas`, `resolve_entry`, `inspect_entry`, `get_entry`, `get_entries`, `get_folder`, `inspect_entry_template`, `get_entry_fields`, `get_section`, `get_part`, `get_table`, `get_schema`, `list_results`, `get_result`, `list_result_tables`, `list_results_table_rows`, `export`, `plan_changes`, `apply_changes`, `get_change_status`, `issue_draft`. `list_environments` and `issue_draft` take no environment.
