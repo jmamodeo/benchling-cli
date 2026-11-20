@@ -19,7 +19,7 @@ def parse(value):
 def test_schema_inlines_every_supported_shape() -> None:
     encoded = json.dumps(CHANGE_SPECIFICATION_SCHEMA)
     assert "$ref" not in encoded
-    assert len(CHANGE_SPECIFICATION_SCHEMA["anyOf"]) == 12
+    assert len(CHANGE_SPECIFICATION_SCHEMA["anyOf"]) == 13
     for token in (
         "entry_template_id",
         "folder_id",
@@ -33,6 +33,7 @@ def test_schema_inlines_every_supported_shape() -> None:
         "schema_fields",
         "table_id",
         "assay_results",
+        "batches",
         "csv_path",
         "id_column",
         "column_map",
@@ -128,6 +129,25 @@ def test_inline_records_and_csv_updates_round_trip() -> None:
     assert record["projectId"] is None
     assert record["fields"] == {"ct": {"value": False}}
     assert "id" not in record
+    multi_table = parse(
+        {
+            "batches": [
+                {
+                    "table_id": "strtbl_example",
+                    "assay_results": [
+                        {"schemaId": "assaysch_abc123", "fields": {"ct": {"value": 12}}}
+                    ],
+                },
+                {
+                    "table_id": "strtbl_other",
+                    "assay_results": [
+                        {"schemaId": "assaysch_other", "fields": {"ct": {"value": 8}}}
+                    ],
+                },
+            ]
+        }
+    )
+    assert len(multi_table["batches"]) == 2
     updated = parse(
         {
             "operation": "update",
