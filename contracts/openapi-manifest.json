@@ -41,6 +41,7 @@
       "snapshot": "contracts/benchling-v2-openapi.yaml",
       "routes_used": [
         "/entries",
+        "/entries:bulk-get",
         "/entries/{entry_id}",
         "/assay-results:bulk-create",
         "/projects/{project_id}",

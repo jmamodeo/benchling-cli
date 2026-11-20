@@ -818,6 +818,29 @@ class FakeBenchling:
             entries, call, self._limited_page(call, self.entry_page_size), key="entries"
         )
 
+    def _bulk_get_entries(self, call: Call) -> tuple[int, dict[str, Any]]:
+        rows = self._entry_catalog()
+        if call.params.get("entryIds"):
+            wanted = call.params["entryIds"].split(",")
+            rows = [row for row in rows if row["id"] in wanted]
+        if call.params.get("displayIds"):
+            wanted = call.params["displayIds"].split(",")
+            rows = [row for row in rows if row["displayId"] in wanted]
+        return 200, {
+            "entries": [
+                {
+                    "id": row["id"],
+                    "name": row["name"],
+                    "displayId": row["displayId"],
+                    "modifiedAt": _offset_stamp(str(row["modifiedAt"])),
+                    "schemaId": row["schemaId"],
+                    "projectId": row["projectId"],
+                    "folderId": row["folderId"],
+                }
+                for row in rows
+            ]
+        }
+
     def _page(
         self, items: list[Any], call: Call, size: int | None, key: str = "items"
     ) -> tuple[int, dict[str, Any]]:
@@ -1228,6 +1251,7 @@ ROUTES: list[tuple[str, str]] = [
     (r"/entry-template/(\w+)", "GET v3|get_entry_template"),
     (r"/folder/(\w+)", "GET v3|get_folder_v3"),
     (r"/entry", "POST v3|create_entry"),
+    (r"/entries:bulk-get", "GET v2|bulk_get_entries"),
     (r"/entries", "GET v2|list_entries_v2"),
     (r"/entry/(etr_\w+)", "GET v3|get_entry"),
     (r"/entry/(etr_\w+)", "PATCH v3|patch_entry"),

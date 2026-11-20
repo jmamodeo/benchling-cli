@@ -17,6 +17,9 @@ READ_TOOLS = {
     "resolve_entry",
     "get_entry",
     "inspect_entry",
+    "get_entries",
+    "get_folder",
+    "inspect_entry_template",
     "get_section",
     "get_part",
     "get_table",
@@ -320,6 +323,26 @@ async def test_inspect_entry_summarizes_structure(client) -> None:
         "type": "TextDocumentContent",
         "summary": data["parts"][1]["summary"],
     }
+
+
+async def test_read_only_lookup_tools_get_entries_folder_and_template(client, fake) -> None:
+    entries = await call(
+        client,
+        "get_entries",
+        env="sandbox",
+        entry_ids=[ENTRY_ID, "etr_list2"],
+    )
+    assert [item["id"] for item in entries["data"]["items"]] == [ENTRY_ID, "etr_list2"]
+    folder = await call(client, "get_folder", env="sandbox", folder_id="lib_abc123")
+    template = await call(
+        client,
+        "inspect_entry_template",
+        env="sandbox",
+        template_id="etpl_abc123",
+    )
+    assert folder["data"]["name"] == "Synthetic folder"
+    assert template["data"]["schema"]["id"] == "entsch_abc123"
+    assert fake.writes() == []
 
 
 async def test_get_section_by_title_or_part_id_with_paging(client, fake) -> None:

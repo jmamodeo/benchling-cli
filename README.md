@@ -275,7 +275,10 @@ Every command prints a versioned JSON envelope. Diagnostics go to stderr.
 ```console
 benchling --env dev entry resolve EXP-0001
 benchling --env dev entry get etr_abc123 --full
+benchling --env dev entry bulk-get --id etr_abc123 --id etr_other
 benchling --env dev entry inspect etr_abc123
+benchling --env dev entry template inspect etpl_example
+benchling --env dev folder get lib_example
 benchling --env dev section get etr_abc123 docpart_section1
 benchling --env dev part get etr_abc123 docpart_text1
 benchling --env dev table get docpart_table1
@@ -299,6 +302,8 @@ benchling --env dev export --kind assay-results --entry etr_abc123 --schema assa
 ```
 
 Entry references may be canonical IDs, display IDs, or URLs for the selected tenant. Duplicate section titles must be addressed by part ID.
+
+`entry bulk-get` fetches multiple entries by repeated `--id` or `--display-id` options (specify exactly one kind). `folder get` reads one folder, and `entry template inspect` reads one entry template. These lookups are read-only.
 
 `entry list` and `schema list` are read-only. They return one page, default 50 and at most 100, plus `next_token`. Pass that token back with `--cursor`. `schema list` reads entry schemas, then result schemas, then run schemas, following every upstream page until the page is full or the lists end. `schema get` adds the options of each dropdown field (`/dropdown/{id}` and `/dropdown/{id}/options/items`). There is no separate dropdown command.
 

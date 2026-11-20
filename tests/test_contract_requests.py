@@ -255,6 +255,7 @@ def _allowed_for(method: str, path: str) -> set[str] | None:
 
 async def test_list_query_parameters_stay_inside_the_vendored_allow_list(runtime, fake) -> None:
     """Entry, schema, and results-row lists may send only the recorded parameters."""
+    await runtime.service.get_entries(entry_ids=["etr_abc123"])
     await runtime.service.list_entries(
         project="src_abc123",
         schema_id="entsch_abc123",
@@ -295,6 +296,9 @@ async def test_list_query_parameters_stay_inside_the_vendored_allow_list(runtime
         assert set(call.params) <= allowed_params, (call.method, call.path, call.params)
         checked.append(call)
     assert checked
+    bulk_get = [call for call in fake.calls if call.path.endswith("/entries:bulk-get")]
+    assert len(bulk_get) == 1
+    assert set(bulk_get[0].params) <= {"entryIds", "displayIds"}
     v3_entry_lists = [call for call in fake.calls if call.path.endswith("/entry/items")]
     assert v3_entry_lists
     assert all("folderId" not in call.params for call in v3_entry_lists)

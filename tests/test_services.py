@@ -102,6 +102,73 @@ async def test_resolve_strips_whitespace_and_canonicalizes(runtime) -> None:
     assert resolved["name"] == "Synthetic experiment"
 
 
+@pytest.mark.parametrize(
+    ("lookup", "expected_param"),
+    [
+        ({"entry_ids": [ENTRY_ID, "etr_list2"]}, {"entryIds": f"{ENTRY_ID},etr_list2"}),
+        ({"display_ids": ["EXP-1", "EXP-2"]}, {"displayIds": "EXP-1,EXP-2"}),
+    ],
+)
+async def test_bulk_get_entries_uses_v2_ids_or_display_ids(runtime, fake, lookup, expected_param):
+    result = await runtime.service.get_entries(**lookup)
+    assert [item["id"] for item in result["items"]] == [ENTRY_ID, "etr_list2"]
+    assert result["count"] == 2
+    (call,) = [item for item in fake.calls if item.path.endswith("/entries:bulk-get")]
+    assert call.params == expected_param
+    assert call.path == "/api/v2/entries:bulk-get"
+
+
+@pytest.mark.parametrize(
+    "lookup",
+    [
+        {},
+        {"entry_ids": [], "display_ids": None},
+        {"entry_ids": [ENTRY_ID], "display_ids": ["EXP-1"]},
+        {"entry_ids": ENTRY_ID},
+        {"entry_ids": ["etr_abc,etr_other"]},
+        {"entry_ids": [""]},
+    ],
+)
+async def test_bulk_get_entries_rejects_invalid_selectors_before_request(runtime, fake, lookup):
+    with pytest.raises(ValidationError):
+        await runtime.service.get_entries(**lookup)
+    assert not any(call.path.endswith("/entries:bulk-get") for call in fake.calls)
+
+
+async def test_bulk_get_entries_rejects_malformed_response(runtime, fake):
+    fake.payload_overrides.append(("/entries:bulk-get", 200, {"entries": "invalid"}))
+    with pytest.raises(UpstreamError, match="bulk entry response"):
+        await runtime.service.get_entries(entry_ids=[ENTRY_ID])
+
+
+async def test_get_folder_and_entry_template_use_v3_lookups(runtime, fake):
+    folder = await runtime.service.get_folder("lib_abc123")
+    template = await runtime.service.get_entry_template("etpl_abc123")
+    assert folder["name"] == "Synthetic folder"
+    assert template["schema"]["id"] == "entsch_abc123"
+    assert [call.path for call in fake.calls if "/folder/" in call.path] == [
+        "/api/v3/folder/lib_abc123"
+    ]
+    assert [call.path for call in fake.calls if "/entry-template/" in call.path] == [
+        "/api/v3/entry-template/etpl_abc123"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("path", "method", "resource_id"),
+    [
+        ("/folder/lib_abc123", "get_folder", "lib_abc123"),
+        ("/entry-template/etpl_abc123", "get_entry_template", "etpl_abc123"),
+    ],
+)
+async def test_resource_lookups_reject_malformed_responses(
+    runtime, fake, path, method, resource_id
+):
+    fake.payload_overrides.append((path, 200, {"name": "missing ID"}))
+    with pytest.raises(UpstreamError, match="unexpected"):
+        await getattr(runtime.service, method)(resource_id)
+
+
 async def test_canonical_id_that_does_not_exist_is_not_found(runtime) -> None:
     with pytest.raises(NotFoundError):
         await runtime.service.resolve_entry("etr_missing")

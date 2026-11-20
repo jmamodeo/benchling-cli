@@ -470,6 +470,58 @@ class BenchlingService:
                 )
         raise AssertionError("unreachable")
 
+    async def get_entries(
+        self,
+        *,
+        entry_ids: object = None,
+        display_ids: object = None,
+    ) -> dict[str, Any]:
+        """Fetch entries by canonical IDs or display IDs using the V2 bulk-get endpoint."""
+        requested_ids = self._bulk_lookup_ids(entry_ids, "entry_ids")
+        requested_display_ids = self._bulk_lookup_ids(display_ids, "display_ids")
+        if (requested_ids is None) == (requested_display_ids is None):
+            raise ValidationError("Specify exactly one of entry_ids or display_ids")
+        params = (
+            {"entryIds": ",".join(requested_ids)}
+            if requested_ids is not None
+            else {"displayIds": ",".join(requested_display_ids or [])}
+        )
+        payload = await self.api.request("GET", "/entries:bulk-get", version=2, params=params)
+        entries = payload.get("entries")
+        if not isinstance(entries, list) or any(not isinstance(item, dict) for item in entries):
+            raise UpstreamError("Benchling returned an unexpected bulk entry response")
+        return {"items": entries, "count": len(entries)}
+
+    @staticmethod
+    def _bulk_lookup_ids(value: object, label: str) -> list[str] | None:
+        """Validate one repeated CLI/MCP list before joining it for V2."""
+        if value is None:
+            return None
+        if isinstance(value, str) or not isinstance(value, (list, tuple)):
+            raise ValidationError(f"{label} must be a non-empty list of strings")
+        values = [BenchlingService._container_reference(item, label) for item in value]
+        if not values:
+            raise ValidationError(f"{label} must be a non-empty list of strings")
+        if any("," in item for item in values):
+            raise ValidationError(f"{label} items must not contain commas")
+        return values
+
+    async def get_folder(self, folder_id: str) -> dict[str, Any]:
+        """Return one V3 folder by ID."""
+        folder_id = self._container_reference(folder_id, "folder_id")
+        folder = await self.api.request("GET", f"/folder/{quote(folder_id, safe='')}")
+        if not isinstance(folder, dict) or not folder.get("id"):
+            raise UpstreamError("Benchling returned an unexpected folder response")
+        return folder
+
+    async def get_entry_template(self, template_id: str) -> dict[str, Any]:
+        """Return one V3 entry template by ID."""
+        template_id = self._container_reference(template_id, "template_id")
+        template = await self.api.request("GET", f"/entry-template/{quote(template_id, safe='')}")
+        if not isinstance(template, dict) or not template.get("id"):
+            raise UpstreamError("Benchling returned an unexpected entry template response")
+        return template
+
     async def inspect_entry(self, reference: str) -> dict[str, Any]:
         """Summarize a full entry snapshot: sections, part summaries, table sizes and completeness."""
         snapshot = await self.get_entry(reference, full=True)
