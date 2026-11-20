@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+
+- The MCP tool list in `SKILL.md` names every tool the server registers. It no longer lists `inspect_entry_template`, which does not exist, and now includes `list_environments`, `get_capabilities`, `find_schema`, `get_template`, `list_templates`, `get_container`, `find_containers`, and `list_container_schemas`.
+
 ## [0.5.0] - 2026-11-20
 
 ### Added

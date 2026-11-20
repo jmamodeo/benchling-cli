@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import re
+from pathlib import Path
 
 import pytest
 from conftest import runtime_for
@@ -96,6 +98,14 @@ async def test_tools_are_annotated_by_whether_they_can_write(client) -> None:
     assert tools["issue_draft"].annotations.read_only_hint is True
     for name in set(tools) - {"list_environments", "issue_draft"}:
         assert "env" in tools[name].input_schema["required"], name
+
+
+async def test_skill_md_lists_every_mcp_tool(client) -> None:
+    skill = (Path(__file__).resolve().parents[1] / "SKILL.md").read_text(encoding="utf-8")
+    line = next(row for row in skill.splitlines() if row.startswith("Tools for this workflow:"))
+    documented = set(re.findall(r"`(\w+)`", line.split(".", 1)[0]))
+    tools = {tool.name for tool in (await client.list_tools()).tools}
+    assert documented == tools
 
 
 async def test_get_blob_reads_metadata_without_writes(client, fake) -> None:
