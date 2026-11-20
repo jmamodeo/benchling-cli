@@ -203,3 +203,72 @@ async def test_full_results_table_read_rejects_a_mismatched_cell_count(runtime, 
     )
     with pytest.raises(UpstreamError, match="invalid rows"):
         await runtime.service.get_results_table_part(PART)
+
+
+def _evaluated_row(evaluation: object) -> dict:
+    return {
+        "id": "strow_eval",
+        "submissionStatus": "UNSUBMITTED",
+        "cells": [
+            {
+                "__typename": "StructuredTableCell",
+                "inputValue": {"__typename": "TextValue", "value": "=A1*2"},
+                "evaluationValue": evaluation,
+                "errors": [],
+            }
+        ],
+    }
+
+
+@pytest.mark.parametrize(
+    ("evaluation", "expected"),
+    [
+        (
+            {"__typename": "DecimalValue", "value": "2.5", "numericValue": 2.5},
+            {"type": "decimal_value", "value": "2.5", "numericValue": 2.5},
+        ),
+        ({"__typename": "DecimalValue", "value": None}, {"type": "decimal_value", "value": None}),
+        ({"__typename": "IntegerValue"}, {"type": "integer_value", "value": None}),
+        ({"__typename": "v3.TextValue", "value": "ok"}, {"type": "text_value", "value": "ok"}),
+        ({"type": "integer_value", "value": 4}, {"type": "integer_value", "value": 4}),
+    ],
+)
+async def test_results_rows_read_evaluated_cells(runtime, fake, evaluation, expected) -> None:
+    fake.add_results_table()
+    fake.payload_overrides.append(
+        (ROWS_PATH, 200, {"items": [_evaluated_row(evaluation)], "nextToken": ""})
+    )
+    page = await runtime.service.list_results_table_rows(PART)
+    (cell,) = page["items"][0]["cells"]
+    assert cell["inputValue"] == {"type": "text_value", "value": "=A1*2"}
+    assert cell["evaluationValue"] == expected
+
+
+@pytest.mark.parametrize(
+    "evaluation",
+    ["2.5", {"value": "2.5"}, {"__typename": "FormulaValue", "value": "2.5"}],
+)
+async def test_results_rows_reject_an_evaluation_that_is_not_a_value(
+    runtime, fake, evaluation
+) -> None:
+    fake.add_results_table()
+    fake.payload_overrides.append(
+        (ROWS_PATH, 200, {"items": [_evaluated_row(evaluation)], "nextToken": ""})
+    )
+    with pytest.raises(UpstreamError, match="invalid rows"):
+        await runtime.service.list_results_table_rows(PART)
+
+
+async def test_full_results_table_read_accepts_evaluated_cells(runtime, fake) -> None:
+    fake.add_results_table()
+    fake.results_parts[PART]["rows"] = fake.results_parts[PART]["rows"][:1]
+    fake.payload_overrides.append(
+        (
+            ROWS_PATH,
+            200,
+            {"items": [_evaluated_row({"__typename": "IntegerValue"})], "nextToken": ""},
+        )
+    )
+    table = await runtime.service.get_results_table_part(PART)
+    (row,) = table["content"]["rows"]
+    assert row["cells"][0]["evaluationValue"] == {"type": "integer_value", "value": None}

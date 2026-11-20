@@ -9,6 +9,7 @@ All notable changes to this project are documented here. The format is based on
 ### Fixed
 
 - `benchling entry get --help` and `benchling entry list --help` now mention the `web_url` field, the entry's link in the Benchling web app, as `entry resolve` and `entry bulk-get` already did. The MCP tools that return an entry already described it.
+- Reading results-table rows (`results rows`, MCP `list_results_table_rows`, `entry get --full`, and `export --kind results-table`) no longer fails with "Table response contained invalid rows" on evaluated cells. A cell's `evaluationValue` without a `value` is read as `null`. A namespaced `__typename` (such as `v3.DecimalValue`) or a value already in `{type, value}` form is also accepted. An evaluation that is not a known value type is still an error.
 
 ## [0.5.1] - 2026-11-20
 

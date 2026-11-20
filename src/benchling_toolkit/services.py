@@ -256,17 +256,38 @@ def rows_items_path(base_url: str, part_id: str, rows_url: Any, *, collection: s
     return path
 
 
-def normalize_benchling_value(value: Any, *, require_text: bool) -> dict[str, Any]:
-    """Map a Benchling value object (`__typename` plus `value`) onto `{type, value}`."""
+def _benchling_value_kind(value: dict[str, Any]) -> str | None:
+    """The `{type}` name for a value object, from a plain or namespaced `__typename`.
+
+    A value already in `{type, value}` form keeps its type.
+    """
+    typename = value.get("__typename")
+    if isinstance(typename, str):
+        return _BENCHLING_VALUE_TYPES.get(typename.split(".")[-1])
+    kind = value.get("type")
+    if isinstance(kind, str) and kind in _BENCHLING_VALUE_TYPES.values():
+        return kind
+    return None
+
+
+def normalize_benchling_value(
+    value: Any, *, require_text: bool, require_value: bool = True
+) -> dict[str, Any]:
+    """Map a Benchling value object (`__typename` plus `value`) onto `{type, value}`.
+
+    ``require_value=False`` reads an absent `value` as null. Evaluated cells use
+    it: an `evaluationValue` with nothing computed may omit `value`.
+    """
     if not isinstance(value, dict):
         raise UpstreamError("Table response contained invalid rows")
-    typename = value.get("__typename")
-    kind = _BENCHLING_VALUE_TYPES.get(typename) if isinstance(typename, str) else None
+    kind = _benchling_value_kind(value)
     if kind is None or (require_text and kind != "text_value"):
         raise UpstreamError("Table response contained invalid rows")
-    if "value" not in value or (require_text and not isinstance(value.get("value"), str)):
+    if ("value" not in value and require_value) or (
+        require_text and not isinstance(value.get("value"), str)
+    ):
         raise UpstreamError("Table response contained invalid rows")
-    normalized: dict[str, Any] = {"type": kind, "value": value["value"]}
+    normalized: dict[str, Any] = {"type": kind, "value": value.get("value")}
     if kind == "text_and_url_value" and "url" in value:
         normalized["url"] = value["url"]
     if kind == "decimal_value" and "numericValue" in value:
@@ -287,7 +308,9 @@ def normalize_table_cell(cell: Any, *, require_text: bool) -> dict[str, Any]:
         raise UpstreamError("Table response contained invalid rows")
     evaluation = cell.get("evaluationValue")
     if evaluation is not None:
-        normalized["evaluationValue"] = normalize_benchling_value(evaluation, require_text=False)
+        normalized["evaluationValue"] = normalize_benchling_value(
+            evaluation, require_text=False, require_value=False
+        )
     for key in ("format", "mergeRange", "mergeRangeParent", "selectorId"):
         if cell.get(key) is not None:
             normalized[key] = cell[key]
