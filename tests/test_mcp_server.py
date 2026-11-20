@@ -1168,3 +1168,9 @@ async def test_entry_tools_return_web_url(client) -> None:
     assert resolved["web_url"] == entry["web_url"] == full["web_url"] == url
     assert listed["items"][0]["web_url"] == url
     assert bulk["items"][0]["web_url"] == url
+
+
+async def test_entry_read_tools_describe_web_url(client) -> None:
+    tools = {tool.name: tool for tool in (await client.list_tools()).tools}
+    for name in ("resolve_entry", "get_entry", "list_entries", "get_entries"):
+        assert "web_url" in (tools[name].description or ""), name

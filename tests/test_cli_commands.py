@@ -854,3 +854,9 @@ def test_entry_commands_return_web_url(invoke) -> None:
     assert resolved["web_url"] == entry["web_url"] == url
     assert listed["items"][0]["web_url"] == url
     assert bulk["items"][0]["web_url"] == url
+
+
+def test_entry_read_help_mentions_web_url() -> None:
+    for command in ("get", "list", "resolve", "bulk-get"):
+        help_text = plain_stdout(["entry", command, "--help"])
+        assert "web_url" in help_text, command

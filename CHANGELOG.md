@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+
+- `benchling entry get --help` and `benchling entry list --help` now mention the `web_url` field, the entry's link in the Benchling web app, as `entry resolve` and `entry bulk-get` already did. The MCP tools that return an entry already described it.
+
 ## [0.5.1] - 2026-11-20
 
 ### Added
