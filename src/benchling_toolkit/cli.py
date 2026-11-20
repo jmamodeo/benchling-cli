@@ -541,7 +541,10 @@ def entry_get(
     reference: str,
     full: bool = typer.Option(False, help="Retrieve all available structured content."),
 ) -> None:
-    """Fetch an entry snapshot; --full retrieves all available structured content."""
+    """Fetch an entry snapshot; --full retrieves all available structured content.
+
+    The output includes web_url, the entry's Benchling web-app link, or null if none.
+    """
     state: State = ctx.obj
     _execute(state.env, lambda runtime: runtime.service.get_entry(reference, full=full))
 
@@ -627,7 +630,10 @@ def entry_list(
     limit: int = typer.Option(50, "--limit", min=1, max=100, help="Page size, from 1 to 100."),
     cursor: str | None = typer.Option(None, "--cursor", help="next_token from the previous page."),
 ) -> None:
-    """List entries. A folder filter is applied by V2; the other filters are server-side too."""
+    """List entries. A folder filter is applied by V2; the other filters are server-side too.
+
+    Each row includes web_url, the entry's Benchling web-app link, or null if none.
+    """
     state: State = ctx.obj
     _execute(
         state.env,

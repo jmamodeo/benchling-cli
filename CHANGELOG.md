@@ -13,6 +13,10 @@ All notable changes to this project are documented here. The format is based on
 - The MCP server serves `SKILL.md` as the read-only resource `skill://benchling-toolkit/SKILL.md` (`text/markdown`).
 - CI builds the wheel and checks that it contains `SKILL.md` with the same bytes as the repository copy (`pytest -m wheel`). It also installs the wheel and checks that `benchling skill path` and `benchling skill show` return that file.
 
+### Fixed
+
+- `benchling entry get --help` and `benchling entry list --help` now mention the `web_url` field, the entry's link in the Benchling web app, as `entry resolve` and `entry bulk-get` already did. The MCP tools that return an entry already described it.
+
 ## [0.5.1] - 2026-11-20
 
 ### Added
