@@ -81,7 +81,7 @@ def test_frontmatter_follows_the_agent_skills_spec() -> None:
     assert "benchling auth login --env NAME" in description
     assert "--allow-writes ENV" in description
 
-    assert meta["license"] == "MIT"
+    assert meta["license"] == "Apache-2.0"
     compatibility = meta["compatibility"]
     assert isinstance(compatibility, str)
     assert len(compatibility) <= 500

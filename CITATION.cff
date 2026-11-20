@@ -15,7 +15,7 @@ authors:
     given-names: John
 url: "https://github.com/jmamodeo/benchling-toolkit"
 repository-code: "https://github.com/jmamodeo/benchling-toolkit"
-license: MIT
+license: Apache-2.0
 keywords:
   - benchling
   - eln

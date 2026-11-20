@@ -66,7 +66,7 @@ Never include tokens, client secrets, real tenant URLs, real entry or record IDs
 
 ## Licensing
 
-Contributions are licensed under the project's [MIT License](LICENSE). No DCO sign-off or CLA is required.
+Contributions are licensed under the project's [Apache License 2.0](LICENSE): inbound equals outbound, so by submitting a contribution you license it to the project and its users under the same terms (see section 5 of the license). No DCO sign-off or CLA is required.
 
 ## Conduct
 

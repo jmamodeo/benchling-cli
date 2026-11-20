@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+
+- Relicensed under the Apache License 2.0, with a `NOTICE` file. Versions up to and including 0.4.1 remain available under the MIT License.
+
 ## [0.4.1] - 2026-11-19
 
 ### Added
