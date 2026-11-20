@@ -5,7 +5,7 @@ Safe, auditable tools for AI agents working in Benchling.
 [![CI](https://github.com/jmamodeo/benchling-toolkit/actions/workflows/ci.yml/badge.svg)](https://github.com/jmamodeo/benchling-toolkit/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
-[![Coverage](https://img.shields.io/badge/coverage-97%25-brightgreen)](https://github.com/jmamodeo/benchling-toolkit/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/badge/coverage-96%25-brightgreen)](https://github.com/jmamodeo/benchling-toolkit/actions/workflows/ci.yml)
 
 > **Unofficial; not affiliated with or endorsed by Benchling, Inc.** Benchling is a trademark of Benchling, Inc.
 
@@ -282,6 +282,7 @@ benchling --env dev table get docpart_table1
 benchling --env dev schema get entsch_example
 benchling --env dev schema list
 benchling --env dev schema list --kind run --limit 50
+benchling --env dev schema find "qPCR assay"
 benchling --env dev entry fields get etr_abc123
 benchling --env dev entry list --project src_example --modified-after 2026-01-01
 benchling --env dev entry list --folder lib_example --name "Example entry"
@@ -300,7 +301,7 @@ benchling --env dev export --kind assay-results --entry etr_abc123 --schema assa
 
 Entry references may be canonical IDs, display IDs, or URLs for the selected tenant. Duplicate section titles must be addressed by part ID.
 
-`entry list` and `schema list` are read-only. They return one page, default 50 and at most 100, plus `next_token`. Pass that token back with `--cursor`. `schema list` reads entry schemas, then result schemas, then run schemas, following every upstream page until the page is full or the lists end. `schema get` adds the options of each dropdown field (`/dropdown/{id}` and `/dropdown/{id}/options/items`). There is no separate dropdown command.
+`entry list` and `schema list` are read-only. They return one page, default 50 and at most 100, plus `next_token`. Pass that token back with `--cursor`. `schema list` reads entry, entity, result, and run schemas, following every upstream page until the page is full or the lists end. Its optional `--name` is an exact, case-sensitive match. `schema find NAME` requires one exact match, optionally limited by `--kind`; no match and ambiguous matches are errors. Ambiguity candidates show only schema IDs and kinds. A successful find includes field types, required flags, and dropdown options. `schema get` adds the options of each dropdown field (`/dropdown/{id}` and `/dropdown/{id}/options/items`). There is no separate dropdown command.
 
 `container get` reads one inventory container. `container find` requires exactly one exact `--barcode` or `--name` filter and returns one page; pass `next_token` back with `--cursor`. `container schema list` returns one page of container schemas with their embedded field definitions.
 
@@ -313,7 +314,7 @@ Every `entry list` filter is applied by Benchling. `routing.client_side` is alwa
 
 `results rows PART_ID` reads one page of a results table. It is read-only. The page size defaults to 50 and stops at 100. Pass `next_token` back with `--cursor`. The call is `GET /document-part-results-table/{id}/rows/items` with `pageSize` and `nextToken`. The part is read first, and its `rows` URL must be that path on this tenant. Cells use the same shape as `entry get --full`. `row_count` is the count on the part. `entry get --full` still reads every row of the part.
 
-`benchling export` writes an unstructured table (`--kind table`), a results table (`--kind results-table`), or assay results (`--kind assay-results`) to a JSON or CSV file. `--format` is `json` or `csv`. `table` and `results-table` require `--part`. `assay-results` accepts `--entry` and `--schema`, the same filters as `results list`. The command reads every page itself: unstructured-table and results-table rows at `pageSize` 100, and assay results from `GET /result/items` at `pageSize` 100. The printed envelope is a summary only: `row_count`, `columns`, `path`, and `checksum` (SHA-256 of the file bytes). The rows stay in the file, so a large table does not enter an agent's context. A cell is the evaluation when Benchling returned one, otherwise the input. Duplicate column names get a `__2` suffix. An existing file is left unchanged unless `--overwrite` is set. Nothing is written to Benchling. The MCP tool `export` uses the same summary.
+`benchling export` writes an unstructured table (`--kind table`), a results table (`--kind results-table`), or assay results (`--kind assay-results`) to a JSON or CSV file. `--format` is `json` or `csv`. `table` and `results-table` require `--part`. `assay-results` accepts `--entry` and `--schema`. The command reads every page itself: unstructured-table and results-table rows at `pageSize` 100, and assay results from `GET /result/items` at `pageSize` 100. The printed envelope is a summary only: `row_count`, `columns`, `path`, and `checksum` (SHA-256 of the file bytes). The rows stay in the file, so a large table does not enter an agent's context. A cell is the evaluation when Benchling returned one, otherwise the input. Duplicate column names get a `__2` suffix. An existing file is left unchanged unless `--overwrite` is set. Nothing is written to Benchling. The MCP tool `export` uses the same summary.
 
 `--part` takes a `v3_document_part` id (`docpart_…`) from `entry inspect` (the `tables` part ids). `results tables ENTRY` returns a different id: `table_id` is a `v2_structured_table` id (`strtbl_…`, `id_namespace` `v2_structured_table`). Pass that id with `--kind results-table --entry ENTRY` (the same entry). The export reads the entry's document parts and uses the matching results-table part. When no part matches, it reads assay results for that entry and the table's result schema. `--kind table` does not accept a `strtbl_…` id. That is a validation error naming `v3_document_part`. A `strtbl_…` id with no `--entry` is the same kind of error.
 

@@ -277,7 +277,7 @@ async def test_schema_list_walks_every_kind_and_every_upstream_page(runtime, fak
         page = await runtime.service.list_schemas(limit=3, cursor=cursor)
         pages += 1
         seen.extend(item["id"] for item in page["items"])
-        assert page["kinds"] == ["entry", "result", "run"]
+        assert page["kinds"] == ["entry", "entity", "result", "run"]
         cursor = page["next_token"]
         if cursor is None:
             break
@@ -288,6 +288,7 @@ async def test_schema_list_walks_every_kind_and_every_upstream_page(runtime, fak
         "entsch_three",
         "entsch_four",
         "entsch_choice",
+        "es_target",
         "assaysch_abc123",
         "assaysch_two",
         "assaysch_three",
@@ -311,11 +312,74 @@ async def test_schema_list_kind_and_cursor_stay_on_one_collection(runtime, fake)
     assert _params(fake, "/result-schema/items") == []
 
 
+async def test_schema_list_includes_entity_schemas(runtime, fake) -> None:
+    page = await runtime.service.list_schemas(kind="entity")
+    assert [item["id"] for item in page["items"]] == ["es_target"]
+    assert page["kinds"] == ["entity"]
+    assert [call.path for call in fake.calls if call.path.endswith("/items")] == [
+        "/api/v3/entity-schema/items"
+    ]
+    found = await runtime.service.find_schema("Target entity schema", kind="entity")
+    assert found["kind"] == "entity"
+    assert any(
+        call.path == "/api/v3/entity-schema/es_target/field-definitions/items"
+        for call in fake.calls
+    )
+
+
+async def test_schema_list_filters_by_exact_name_across_requested_kinds(runtime, fake) -> None:
+    page = await runtime.service.list_schemas(name="Second result schema")
+    assert page["items"] == [
+        {
+            "id": "assaysch_two",
+            "name": "Second result schema",
+            "kind": "result",
+            "modified_at": "2026-02-02T00:00:00Z",
+        }
+    ]
+    assert _params(fake, "/entry-schema/items")[0] == {
+        "pageSize": "50",
+        "name.anyOf.caseSensitive": "Second result schema",
+    }
+
+
+async def test_find_schema_returns_field_types_required_flags_and_dropdown_options(
+    runtime, fake
+) -> None:
+    data = await runtime.service.find_schema("Schema assaysch_abc123", kind="result")
+    fields = {field["systemName"]: field for field in data["field_definitions"]}
+    assert data["kind"] == "result"
+    assert fields["ct"]["type"] == "INTEGER"
+    assert fields["ct"]["is_required"] is True
+    assert fields["status"]["type"] == "DROPDOWN"
+    assert fields["status"]["dropdown_options"][0]["id"] == "sfso_open"
+    assert fake.writes() == []
+
+
+async def test_find_schema_not_found_and_ambiguous_candidates(runtime, fake) -> None:
+    from benchling_toolkit.errors import NotFoundError
+
+    with pytest.raises(NotFoundError, match="No schema named"):
+        await runtime.service.find_schema("No such schema")
+    with pytest.raises(NotFoundError, match="No schema named"):
+        await runtime.service.find_schema("second entry schema")
+    fake.schema_catalog["entity"].append({"id": "es_duplicate", "name": "Second entry schema"})
+    with pytest.raises(ValidationError, match="is ambiguous") as caught:
+        await runtime.service.find_schema("Second entry schema")
+    assert caught.value.details["candidates"] == [
+        {"id": "entsch_two", "kind": "entry"},
+        {"id": "es_duplicate", "kind": "entity"},
+    ]
+    assert all(set(candidate) == {"id", "kind"} for candidate in caught.value.details["candidates"])
+
+
 @pytest.mark.parametrize(
     "kwargs",
     [
         {"kind": "sample"},
         {"kind": ""},
+        {"name": ""},
+        {"name": "Result, schema"},
         {"limit": 0},
         {"cursor": "%%%"},
         {"cursor": ""},
