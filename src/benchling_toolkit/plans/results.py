@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from copy import deepcopy
+from pathlib import Path
 from typing import Any
 
 from ..errors import (
@@ -18,8 +19,15 @@ from ..models import (
     ChangeJournal,
     ChangePlan,
 )
-from ..services import field_definition_type
+from ..services import field_definition_type, is_attachment_field
 from .base import PlanParts, write_event_details
+from .blobs import (
+    UPLOAD_WARNINGS,
+    FileStager,
+    discard_refs,
+    plan_upload_refs,
+    stage_field_values,
+)
 from .result_update import ResultUpdatePlanning, request_is_result_update
 
 PENDING_RESULTS_WARNING = (
@@ -71,6 +79,16 @@ class ResultsPlanning(ResultUpdatePlanning):
             if any(key in request for key in ("assay_results", "batches")):
                 raise ValidationError("A result update does not use table or upload fields")
             return await self._plan_result_updates(entry_id, request)
+        stager = FileStager(self.repository.config, Path.cwd())
+        try:
+            return await self._plan_result_uploads(entry_id, request, stager)
+        except BaseException:
+            stager.discard()
+            raise
+
+    async def _plan_result_uploads(
+        self, entry_id: str, request: dict[str, Any], stager: FileStager
+    ) -> PlanParts:
         if "batches" in request:
             if "table_id" in request or "assay_results" in request:
                 raise ValidationError("Pass batches or table_id and assay_results, not both")
@@ -120,6 +138,7 @@ class ResultsPlanning(ResultUpdatePlanning):
                 definitions,
                 linked_schema_cache=linked_schema_cache,
                 plan_row_offset=plan_row_offset,
+                stager=stager,
             )
             row_problems.extend(problems)
             planned_batches.append(
@@ -200,15 +219,20 @@ class ResultsPlanning(ResultUpdatePlanning):
                 }
             )
         warnings = self._result_plan_warnings(all_records)
+        guarantees = [
+            "verified entry-to-table and table-to-schema relationships",
+            "local correlation UUIDs and persisted task IDs for reconciliation",
+            "no automatic write retry",
+        ]
+        if stager.uploads:
+            after["uploads"] = stager.uploads
+            warnings.extend(UPLOAD_WARNINGS)
+            guarantees.append("each local file's size and SHA-256 are checked again before upload")
         return (
             before,
             after,
             preconditions,
-            [
-                "verified entry-to-table and table-to-schema relationships",
-                "local correlation UUIDs and persisted task IDs for reconciliation",
-                "no automatic write retry",
-            ],
+            guarantees,
             warnings,
         )
 
@@ -221,6 +245,7 @@ class ResultsPlanning(ResultUpdatePlanning):
         *,
         linked_schema_cache: dict[str, str | None],
         plan_row_offset: int,
+        stager: FileStager | None = None,
     ) -> tuple[list[Any], list[str], dict[str, dict[str, Any]], list[dict[str, Any]]]:
         """Validate and normalize records; returns them with correlation IDs and referenced projects."""
         planned: list[Any] = []
@@ -245,8 +270,20 @@ class ResultsPlanning(ResultUpdatePlanning):
                             "actual_schema_id": record["schemaId"],
                         },
                     )
+                if stager is not None:
+                    stage_field_values(
+                        raw_record["fields"],
+                        definitions,
+                        stager,
+                        table_id=table_id,
+                        row_index=plan_row_offset + row_index,
+                    )
+                    record["fields"] = deepcopy(raw_record["fields"])
                 normalized, _ = self._normalize_schema_field_updates(
-                    record["fields"], definitions, require_all_required=True
+                    record["fields"],
+                    definitions,
+                    require_all_required=True,
+                    local_files=stager is not None,
                 )
                 await self._validate_result_field_constraints(
                     normalized, definitions, linked_schema_cache
@@ -300,7 +337,7 @@ class ResultsPlanning(ResultUpdatePlanning):
             if not isinstance(system_name, str) or system_name not in fields:
                 continue
             value = fields[system_name].get("value")
-            if value is None:
+            if value is None or is_attachment_field(definition):
                 continue
             values = value if isinstance(value, list) else [value]
             field_type = field_definition_type(definition)
@@ -392,9 +429,19 @@ class ResultsPlanning(ResultUpdatePlanning):
         return warnings
 
     async def _apply_results(self, plan: ChangePlan, journal: ChangeJournal) -> dict[str, Any]:
+        refs = plan_upload_refs(plan)
+        try:
+            if plan.preconditions.get("operation") == "update":
+                return await self._apply_result_updates(plan, journal, refs)
+            return await self._apply_result_uploads(plan, journal, refs)
+        finally:
+            discard_refs(self.repository.config, sorted(refs))
+
+    async def _apply_result_uploads(
+        self, plan: ChangePlan, journal: ChangeJournal, refs: set[str]
+    ) -> dict[str, Any]:
         entry_id = self._entry_id(plan)
-        if plan.preconditions.get("operation") == "update":
-            return await self._apply_result_updates(plan, journal)
+        uploaded: dict[str, dict[str, Any]] = {}
         batches = plan.after.get("batches")
         if not isinstance(batches, list):
             batches = [
@@ -442,11 +489,22 @@ class ResultsPlanning(ResultUpdatePlanning):
                     expected[table_id].get("schema_fields"),
                     "result schema fields",
                 )
+                records = batch["records"]
+                if refs:
+                    records = [
+                        {
+                            **record,
+                            "fields": await self._link_local_files(
+                                record["fields"], refs, journal, uploaded
+                            ),
+                        }
+                        for record in records
+                    ]
                 response = await self.api.request(
                     "POST",
                     "/assay-results:bulk-create",
                     version=2,
-                    json={"tableId": table_id, "assayResults": batch["records"]},
+                    json={"tableId": table_id, "assayResults": records},
                 )
             except PartialCompletionError as exc:
                 uncertain = True
@@ -534,6 +592,8 @@ class ResultsPlanning(ResultUpdatePlanning):
             "batches": submitted,
             "state": "submission_pending",
         }
+        if uploaded:
+            result["blobs"] = list(uploaded.values())
         if len(submitted) == 1:
             result.update(
                 {

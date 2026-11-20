@@ -42,6 +42,14 @@ class ConfigStore:
         """Directory holding lock files."""
         return self.root / "locks"
 
+    @property
+    def uploads_dir(self) -> Path:
+        """Directory holding the local file references of planned blob uploads.
+
+        It is created on first use by the blob planner, not by ``ensure``.
+        """
+        return self.root / "uploads"
+
     def ensure(self) -> None:
         """Create all directories owner-only (0700); chmod failures are ignored."""
         for directory in (

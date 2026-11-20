@@ -27,14 +27,16 @@ from ..errors import (
 from ..export import _definition_is_link, _field_pairs
 from ..models import ChangeJournal, ChangePlan
 from ..redact import redact_text
-from ..services import field_definition_type
+from ..services import field_definition_type, is_attachment_field
 from .base import PlanParts, write_event_details
+from .blobs import UPLOAD_WARNINGS, BlobUploads, FileStager, stage_field_values
 from .fields import FieldNormalization
 
 MAX_RESULT_UPDATES = 500
 _MAX_REPORTED_ERRORS = 50
 _FLOAT = re.compile(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?\Z")
 _INTEGER = re.compile(r"[+-]?\d+\Z")
+FILE_PREFIX = "file:"
 
 
 def request_is_result_update(request: dict[str, Any]) -> bool:
@@ -44,7 +46,7 @@ def request_is_result_update(request: dict[str, Any]) -> bool:
     return any(key in request for key in ("csv_path", "id_column", "column_map"))
 
 
-class ResultUpdatePlanning(FieldNormalization):
+class ResultUpdatePlanning(FieldNormalization, BlobUploads):
     """Planning and applying of updates to existing result records."""
 
     async def _plan_result_updates(self, entry_id: str, request: dict[str, Any]) -> PlanParts:
@@ -53,6 +55,24 @@ class ResultUpdatePlanning(FieldNormalization):
         Raises ValidationError when the mapping or a row is unusable. Nothing is written.
         """
         path, id_column, column_map = _update_request(request)
+        stager = FileStager(self.repository.config, path.resolve().parent)
+        try:
+            return await self._plan_csv_updates(
+                entry_id, request, path, id_column, column_map, stager
+            )
+        except BaseException:
+            stager.discard()
+            raise
+
+    async def _plan_csv_updates(
+        self,
+        entry_id: str,
+        request: dict[str, Any],
+        path: Path,
+        id_column: str,
+        column_map: dict[str, str],
+        stager: FileStager,
+    ) -> PlanParts:
         headers, rows, problems = _read_csv(path)
         _check_headers(headers, id_column, column_map)
         if len(rows) > MAX_RESULT_UPDATES:
@@ -66,7 +86,7 @@ class ResultUpdatePlanning(FieldNormalization):
             entry_id, records, rows, id_column, column_map, problems
         )
         changes, unchanged = self._row_changes(
-            entry_id, rows, id_column, records, bindings, problems
+            entry_id, rows, id_column, records, bindings, problems, stager
         )
         _raise_problems(problems)
         if not changes:
@@ -84,19 +104,25 @@ class ResultUpdatePlanning(FieldNormalization):
         before_rows = [_preview_before(change) for change in changes]
         after_rows = [_preview_after(change) for change in changes]
         warnings = _update_warnings(headers, id_column, column_map, unchanged)
+        after: dict[str, Any] = {"operation": "update", "results": after_rows}
+        guarantees = [
+            "modifiedAt of each result is checked before any PATCH",
+            "mapped columns are sent as field-definition ids",
+            "no automatic write retry",
+        ]
+        if stager.uploads:
+            after["uploads"] = stager.uploads
+            warnings.extend(UPLOAD_WARNINGS)
+            guarantees.append("each local file's size and SHA-256 are checked again before upload")
         return (
             {"operation": "update", "results": before_rows},
-            {"operation": "update", "results": after_rows},
+            after,
             {
                 "operation": "update",
                 "entry_id": entry_id,
                 "results": [_precondition(change) for change in changes],
             },
-            [
-                "modifiedAt of each result is checked before any PATCH",
-                "mapped columns are sent as field-definition ids",
-                "no automatic write retry",
-            ],
+            guarantees,
             warnings,
         )
 
@@ -174,6 +200,7 @@ class ResultUpdatePlanning(FieldNormalization):
         records: dict[str, dict[str, Any]],
         bindings: dict[str, _Binding | None],
         problems: list[dict[str, Any]],
+        stager: FileStager | None = None,
     ) -> tuple[list[dict[str, Any]], list[str]]:
         """Parse each mapped cell. Unchanged cells are omitted from the plan."""
         changes: list[dict[str, Any]] = []
@@ -195,7 +222,7 @@ class ResultUpdatePlanning(FieldNormalization):
             binding = bindings.get(schema_id or "")
             if binding is None:
                 continue
-            change = self._one_row(number, result_id, record, binding, cells, problems)
+            change = self._one_row(number, result_id, record, binding, cells, problems, stager)
             if change is None:
                 continue
             if not change["fields"]:
@@ -212,6 +239,7 @@ class ResultUpdatePlanning(FieldNormalization):
         binding: _Binding,
         cells: dict[str, str],
         problems: list[dict[str, Any]],
+        stager: FileStager | None = None,
     ) -> dict[str, Any] | None:
         """Return the fields that differ, or None when this row has a cell error."""
         pairs = _field_pairs(record, binding.names, binding.link_flags)
@@ -222,10 +250,16 @@ class ResultUpdatePlanning(FieldNormalization):
         for column, definition in binding.columns:
             try:
                 parsed = _parse_cell(definition, cells.get(column, ""), column=column)
+                supplied = {str(definition["id"]): {"value": parsed}}
+                if stager is not None:
+                    stage_field_values(
+                        supplied, binding.definitions, stager, result_id=result_id, row=number
+                    )
                 normalized, _targets = self._normalize_schema_field_updates(
-                    {str(definition["id"]): {"value": parsed}},
+                    supplied,
                     binding.definitions,
                     address_by="field_definition_id",
+                    local_files=stager is not None,
                 )
             except BenchlingAgentError as exc:
                 row_errors += 1
@@ -272,23 +306,30 @@ class ResultUpdatePlanning(FieldNormalization):
         }
 
     async def _apply_result_updates(
-        self, plan: ChangePlan, journal: ChangeJournal
+        self, plan: ChangePlan, journal: ChangeJournal, refs: set[str] | None = None
     ) -> dict[str, Any]:
-        """Re-check every result, then PATCH. A stale version writes nothing."""
+        """Re-check every result, then upload its files and PATCH. A stale version writes nothing."""
         planned = _planned_updates(plan)
         for item in planned:
             await self._recheck(item)
         updated: list[dict[str, Any]] = []
+        uploaded: dict[str, dict[str, Any]] = {}
         for item in planned:
+            schema_fields = item["schema_fields"]
+            if refs:
+                schema_fields = await self._link_local_files(schema_fields, refs, journal, uploaded)
             response = await self.api.request(
                 "PATCH",
                 f"/result/{item['id']}",
-                json={"schemaFields": item["schema_fields"]},
+                json={"schemaFields": schema_fields},
             )
             recorded = write_event_details(response, result_id=item["id"])
             self._event(journal, "update_result", "succeeded", recorded)
             updated.append({"id": item["id"], "http_status": recorded.get("http_status")})
-        return {"updated": updated, "state": "updated"}
+        result: dict[str, Any] = {"updated": updated, "state": "updated"}
+        if uploaded:
+            result["blobs"] = list(uploaded.values())
+        return result
 
     async def _recheck(self, item: dict[str, Any]) -> dict[str, Any]:
         """Refuse the plan when this result's version or mapped values moved."""
@@ -634,6 +675,16 @@ def _parse_cell(definition: dict[str, Any], cell: str, *, column: str) -> Any:
     cell, so callers compare those two before treating null as a clear.
     """
     is_multi = bool(definition.get("isMulti"))
+    if is_attachment_field(definition):
+        text = cell.strip()
+        if text == "":
+            return None
+        if is_multi:
+            items = _parse_json_array(text, column=column)
+            if not all(isinstance(item, str) for item in items):
+                raise ValidationError(f"Column {column} must be a JSON array of strings")
+            return [_attachment_cell(item) for item in items]
+        return _attachment_cell(text)
     field_type = field_definition_type(definition)
     raw = cell if field_type in {"TEXT", "LONG_TEXT"} and not is_multi else cell.strip()
     if raw == "":
@@ -666,6 +717,13 @@ def _parse_cell(definition: dict[str, Any], cell: str, *, column: str) -> Any:
     if field_type in {"LINK", "DROPDOWN"}:
         return raw
     raise ValidationError(f"Column {column} has a field type that cannot be updated")
+
+
+def _attachment_cell(text: str) -> Any:
+    """A ``file:PATH`` cell asks for a local upload; any other text is a blob ID."""
+    if text.startswith(FILE_PREFIX):
+        return {"file": text[len(FILE_PREFIX) :]}
+    return text
 
 
 def _parse_json_array(raw: str, *, column: str) -> list[Any]:

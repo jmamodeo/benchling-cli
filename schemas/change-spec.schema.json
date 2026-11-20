@@ -153,7 +153,8 @@
               "projectId": { "type": ["string", "null"] },
               "fields": {
                 "type": "object",
-                "additionalProperties": { "$ref": "#/$defs/fieldValueInput" }
+                "additionalProperties": { "$ref": "#/$defs/fieldValueInput" },
+                "description": "Result fields. On an attachment field, a value of {\"file\": PATH} (optional blob_type RAW_FILE or VISUALIZATION, optional mime_type) uploads that local file as a blob at apply and links its blob ID. A relative PATH is resolved against the current directory."
               }
             }
           }
@@ -188,7 +189,8 @@
                     "projectId": { "type": ["string", "null"] },
                     "fields": {
                       "type": "object",
-                      "additionalProperties": { "$ref": "#/$defs/fieldValueInput" }
+                      "additionalProperties": { "$ref": "#/$defs/fieldValueInput" },
+                      "description": "Result fields. On an attachment field, a value of {\"file\": PATH} (optional blob_type RAW_FILE or VISUALIZATION, optional mime_type) uploads that local file as a blob at apply and links its blob ID. A relative PATH is resolved against the current directory."
                     }
                   }
                 }
@@ -219,7 +221,7 @@
           "type": "object",
           "minProperties": 1,
           "additionalProperties": { "type": "string", "minLength": 1 },
-          "description": "CSV header to a field display name, system name, or field-definition id. The plan resolves each one to a field-definition id and does not send the display name."
+          "description": "CSV header to a field display name, system name, or field-definition id. The plan resolves each one to a field-definition id and does not send the display name. In an attachment column, a cell file:PATH uploads that local file (PATH relative to the CSV's folder) and any other text is a blob ID."
         }
       }
     },

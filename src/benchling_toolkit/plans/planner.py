@@ -600,7 +600,7 @@ class ChangePlanner(
         """
         sample = self._readback_limit(sample, "sample", 200)
         plan, journal = self._readback_plan(plan_id)
-        batches = readback.planned_batches(plan)
+        batches = readback.planned_batches(plan, readback.uploaded_blob_ids(journal))
         submitted = {
             batch["batch_index"]: batch for batch in await self._submitted_batches(journal)
         }

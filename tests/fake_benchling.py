@@ -6,6 +6,8 @@ planner code runs unmodified. All identifiers and URLs are synthetic.
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import re
 from copy import deepcopy
@@ -498,6 +500,7 @@ class FakeBenchling:
         self.bulk_response: dict[str, Any] = {"taskId": "task_abc123"}
         self.bulk_responses: list[dict[str, Any]] = []
         self.result_updates: list[dict[str, Any]] = []
+        self.blobs: dict[str, dict[str, Any]] = {}
         self.assay_results: list[dict[str, Any]] = []
         self.assay_result_page_size: int | None = None
         self.linked_entities = {
@@ -1298,6 +1301,84 @@ class FakeBenchling:
             return 202, self.bulk_responses.pop(0)
         return 202, dict(self.bulk_response)
 
+    # ---- blobs -------------------------------------------------------
+    def _new_blob(self, body: dict[str, Any]) -> dict[str, Any]:
+        blob_id = f"00000000-0000-4000-8000-{len(self.blobs) + 1:012d}"
+        blob = {
+            "id": blob_id,
+            "name": body.get("name"),
+            "type": body.get("type"),
+            "mimeType": body.get("mimeType", "application/octet-stream"),
+            "uploadStatus": "IN_PROGRESS",
+            "data": b"",
+            "parts": {},
+        }
+        self.blobs[blob_id] = blob
+        return blob
+
+    @staticmethod
+    def _blob_view(blob: dict[str, Any]) -> dict[str, Any]:
+        return {key: blob[key] for key in ("id", "name", "type", "mimeType", "uploadStatus")}
+
+    @staticmethod
+    def _decoded(body: dict[str, Any]) -> bytes | None:
+        data = base64.b64decode(body.get("data64", ""), validate=True)
+        if hashlib.md5(data, usedforsecurity=False).hexdigest() != body.get("md5"):
+            return None
+        return data
+
+    def _create_blob(self, call: Call) -> tuple[int, dict[str, Any]]:
+        data = self._decoded(call.body)
+        if data is None:
+            return 400, {"error": {"message": "md5 does not match data64"}}
+        blob = self._new_blob(call.body)
+        blob["data"] = data
+        blob["uploadStatus"] = "COMPLETE"
+        return 200, self._blob_view(blob)
+
+    def _get_blob(self, call: Call, blob_id: str) -> tuple[int, dict[str, Any]]:
+        blob = self.blobs.get(blob_id)
+        if blob is None:
+            return 404, {"error": {"message": "blob not found"}}
+        return 200, self._blob_view(blob)
+
+    def _start_blob(self, call: Call) -> tuple[int, dict[str, Any]]:
+        return 200, self._blob_view(self._new_blob(call.body))
+
+    def _blob_part(self, call: Call, blob_id: str) -> tuple[int, dict[str, Any]]:
+        blob = self.blobs.get(blob_id)
+        if blob is None or blob["uploadStatus"] != "IN_PROGRESS":
+            return 400, {"error": {"message": "blob is not accepting parts"}}
+        data = self._decoded(call.body)
+        if data is None:
+            return 400, {"error": {"message": "md5 does not match data64"}}
+        number = call.body["partNumber"]
+        blob["parts"][number] = data
+        etag = '"' + hashlib.md5(data, usedforsecurity=False).hexdigest() + '"'
+        return 200, {"partNumber": number, "eTag": etag}
+
+    def _complete_blob(self, call: Call, blob_id: str) -> tuple[int, dict[str, Any]]:
+        blob = self.blobs.get(blob_id)
+        if blob is None or blob["uploadStatus"] != "IN_PROGRESS":
+            return 400, {"error": {"message": "blob is not in progress"}}
+        chunks = []
+        for part in sorted(call.body.get("parts", []), key=lambda item: item["partNumber"]):
+            data = blob["parts"].get(part["partNumber"])
+            expected = '"' + hashlib.md5(data or b"", usedforsecurity=False).hexdigest() + '"'
+            if data is None or part.get("eTag") != expected:
+                return 400, {"error": {"message": "unknown part or eTag"}}
+            chunks.append(data)
+        blob["data"] = b"".join(chunks)
+        blob["uploadStatus"] = "COMPLETE"
+        return 200, self._blob_view(blob)
+
+    def _abort_blob(self, call: Call, blob_id: str) -> tuple[int, dict[str, Any]]:
+        blob = self.blobs.get(blob_id)
+        if blob is None:
+            return 404, {"error": {"message": "blob not found"}}
+        blob["uploadStatus"] = "ABORTED"
+        return 200, {}
+
     def complete_upload(
         self, task_id: str = "task_abc123", *, payload_index: int = -1
     ) -> list[str]:
@@ -1448,6 +1529,12 @@ ROUTES: list[tuple[str, str]] = [
     (r"/projects/(\w+)", "GET v2|get_project"),
     (r"/tasks/(\w+)", "GET v2|get_task"),
     (r"/assay-results:bulk-create", "POST v2|bulk_create"),
+    (r"/blobs", "POST v2|create_blob"),
+    (r"/blobs:start-multipart-upload", "POST v2|start_blob"),
+    (r"/blobs/([\w-]+)", "GET v2|get_blob"),
+    (r"/blobs/([\w-]+)/parts", "POST v2|blob_part"),
+    (r"/blobs/([\w-]+):complete-upload", "POST v2|complete_blob"),
+    (r"/blobs/([\w-]+):abort-upload", "POST v2|abort_blob"),
     (r"/assay-results:bulk-get", "GET v2|bulk_get_assay_results"),
     (r"/assay-results", "GET v2|list_assay_results_v2"),
 ]

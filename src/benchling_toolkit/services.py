@@ -385,6 +385,19 @@ def field_definition_type(definition: dict[str, Any]) -> str:
     return "UNKNOWN"
 
 
+_ATTACHMENT_TYPENAMES = {"AttachmentLinkFieldDefinition", "BlobLinkFieldDefinition"}
+_ATTACHMENT_TYPES = {"ATTACHMENT_LINK", "BLOB_LINK"}
+
+
+def is_attachment_field(definition: dict[str, Any]) -> bool:
+    """True for a field whose value is the ID of an uploaded blob (attachment)."""
+    explicit = definition.get("type")
+    if explicit:
+        return str(explicit).upper() in _ATTACHMENT_TYPES
+    typename = str(definition.get("__typename") or "").split(".")[-1]
+    return typename in _ATTACHMENT_TYPENAMES
+
+
 def build_sections(parts: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Group a flat part list into sections; each records its index range and child part IDs.
 
@@ -1446,6 +1459,12 @@ class BenchlingService:
     async def get_result(self, result_id: str) -> dict[str, Any]:
         """Fetch a single result by ID."""
         return await self.api.request("GET", f"/result/{result_id}")
+
+    async def get_blob(self, blob_id: str) -> dict[str, Any]:
+        """Read one blob's metadata (name, type, MIME type, upload status). No download."""
+        if not isinstance(blob_id, str) or not blob_id.strip():
+            raise ValidationError("Blob ID must be a non-empty string")
+        return await self.api.request("GET", f"/blobs/{quote(blob_id.strip(), safe='')}", version=2)
 
     async def get_linked_entity_schema_id(self, entity_id: str) -> str:
         """Read a linked entity and return its entity schema ID for result-plan validation."""

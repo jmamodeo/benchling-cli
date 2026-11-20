@@ -243,7 +243,9 @@ class AssayResultRecord(BaseModel):
     fields: dict[str, FieldValueInput] = Field(
         description=(
             "Result fields. Keys are V3 system names or field-definition IDs. Each value "
-            "is an object with a single value property."
+            "is an object with a single value property. On an attachment field, the value "
+            'may be {"file": PATH} (optional blob_type RAW_FILE or VISUALIZATION, optional '
+            "mime_type) to upload that local file as a blob at apply and link its blob ID."
         )
     )
 
@@ -320,7 +322,8 @@ class ResultCsvUpdate(BaseModel):
         min_length=1,
         description=(
             "CSV header to a field display name, system name, or field-definition id. "
-            "The plan resolves each one to a field-definition id."
+            "The plan resolves each one to a field-definition id. In an attachment column, "
+            "a cell file:PATH uploads that local file (relative to the CSV's folder)."
         ),
     )
 

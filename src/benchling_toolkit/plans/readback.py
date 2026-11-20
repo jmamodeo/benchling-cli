@@ -9,7 +9,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..models import ChangePlan
+from ..models import ChangeJournal, ChangePlan
+from .blobs import local_file_descriptor
 
 PENDING = "pending"
 ACCEPTED = "accepted"
@@ -138,8 +139,57 @@ def field_mismatches(
     return problems
 
 
-def planned_batches(plan: ChangePlan) -> list[dict[str, Any]]:
-    """The planned result batches with table, schema, records and plan row offset."""
+def uploaded_blob_ids(journal: ChangeJournal) -> dict[str, str]:
+    """Blob ID per planned local-file ref, from the journal's successful uploads."""
+    uploaded: dict[str, str] = {}
+    for event in journal.events:
+        if event.stage != "upload_blob" or event.status != "succeeded":
+            continue
+        ref, blob_id = event.details.get("ref"), event.details.get("blob_id")
+        if isinstance(ref, str) and isinstance(blob_id, str):
+            uploaded[ref] = blob_id
+    return uploaded
+
+
+def _with_blob_ids(value: Any, blob_ids: dict[str, str]) -> Any:
+    """Replace planned local-file descriptors that were uploaded with their blob IDs."""
+    if isinstance(value, list):
+        return [_with_blob_ids(item, blob_ids) for item in value]
+    descriptor = local_file_descriptor(value)
+    if descriptor is not None and descriptor["ref"] in blob_ids:
+        return blob_ids[descriptor["ref"]]
+    return value
+
+
+def _records_with_blob_ids(records: list[Any], blob_ids: dict[str, str]) -> list[Any]:
+    out: list[Any] = []
+    for record in records:
+        fields = record.get("fields") if isinstance(record, dict) else None
+        if not isinstance(fields, dict):
+            out.append(record)
+            continue
+        out.append(
+            {
+                **record,
+                "fields": {
+                    name: {**spec, "value": _with_blob_ids(spec.get("value"), blob_ids)}
+                    if isinstance(spec, dict) and "value" in spec
+                    else _with_blob_ids(spec, blob_ids)
+                    for name, spec in fields.items()
+                },
+            }
+        )
+    return out
+
+
+def planned_batches(
+    plan: ChangePlan, blob_ids: dict[str, str] | None = None
+) -> list[dict[str, Any]]:
+    """The planned result batches with table, schema, records and plan row offset.
+
+    ``blob_ids`` maps planned local-file refs to the blob IDs apply uploaded, so an
+    attachment field is compared by the blob ID Benchling holds, not by the file.
+    """
     after = plan.after or {}
     batches = after.get("batches")
     if not isinstance(batches, list):
@@ -159,7 +209,10 @@ def planned_batches(plan: ChangePlan) -> list[dict[str, Any]]:
         if not isinstance(batch, dict):
             continue
         table = batch.get("table") if isinstance(batch.get("table"), dict) else {}
-        records = batch.get("records") if isinstance(batch.get("records"), list) else []
+        raw_records = batch.get("records")
+        records: list[Any] = raw_records if isinstance(raw_records, list) else []
+        if blob_ids:
+            records = _records_with_blob_ids(records, blob_ids)
         planned.append(
             {
                 "table_id": batch.get("table_id"),

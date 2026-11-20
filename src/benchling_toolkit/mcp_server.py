@@ -50,8 +50,9 @@ _ChangeSpecification = Annotated[
         description=(
             "Typed change for family. Document and table changes set operation. "
             "Field changes set schema_fields. Result uploads set table_id and "
-            "assay_results. Result updates set operation to update and pass "
-            "csv_path, id_column, and column_map."
+            'assay_results; an attachment field value may be {"file": PATH} to '
+            "upload a local file as a blob at apply. Result updates set operation to "
+            "update and pass csv_path, id_column, and column_map."
         )
     ),
     WithJsonSchema(CHANGE_SPECIFICATION_SCHEMA),
@@ -736,6 +737,17 @@ def _register_result_tools(mcp: MCPServer, pool: RuntimePool) -> None:
         return await safe(env, lambda rt: rt.service.get_result(result_id))
 
     @mcp.tool(annotations=_annotations(True))
+    async def get_blob(
+        env: _Env,
+        blob_id: Annotated[
+            str,
+            Field(description="Blob ID, the value an attachment result field holds."),
+        ],
+    ) -> Envelope[Any]:
+        """Read one blob's metadata (name, type, MIME type, upload status). Nothing is downloaded."""
+        return await safe(env, lambda rt: rt.service.get_blob(blob_id))
+
+    @mcp.tool(annotations=_annotations(True))
     async def list_result_tables(
         env: _Env,
         reference: _EntryRef,
@@ -960,6 +972,10 @@ def _register_change_tools(
         assay_results, or batches containing table_id and assay_results for each
         table. Each table may contain up to 500 records. Apply the preview later
         with apply_changes; created results land pending until accepted in each table.
+        On a result attachment field, a value of {"file": PATH} (or a CSV cell
+        file:PATH) uploads that local file as a blob at apply and links its blob ID.
+        The preview shows the file's base name, size, SHA-256 and MD5, never its
+        path or contents. Files over 100 MiB are refused.
         Container plans support operation "create" with schema_id, or "transfer"
         with source_container_id, destination_container_id, and destination_contents.
         Entry plans omit entry and pass entry_template_id, folder_id, and name;
@@ -988,7 +1004,8 @@ def _register_change_tools(
 
         Entry creation returns the new entry ID for later inspection. After a
         results upload, relay next_step to have the person accept the pending
-        results in the named table.
+        results in the named table. Planned local files are uploaded as blobs
+        first, once each with no retry; their blob IDs are in the journal.
         """
 
         async def call(rt: Runtime) -> dict[str, Any]:
