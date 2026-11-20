@@ -147,7 +147,7 @@ class DocumentPlanning(PlannerBase):
         return before, after
 
     async def _apply_document(self, plan: ChangePlan, journal: ChangeJournal) -> dict[str, Any]:
-        entry_id = self._plan_entry_id(plan)
+        entry_id = self._entry_id(plan)
         current = await self.api.request("GET", f"/entry/{entry_id}")
         version = entry_version(current)
         self._expect(version, plan.preconditions["entry_version"], "entry version")
@@ -182,7 +182,7 @@ class DocumentPlanning(PlannerBase):
         self, plan: ChangePlan, journal: ChangeJournal, version: str
     ) -> dict[str, Any]:
         """Replace text by inserting the new part, then deleting the original (two requests)."""
-        entry_id = self._plan_entry_id(plan)
+        entry_id = self._entry_id(plan)
         target = plan.request["part_id"]
         insertion = {
             "operationType": "insert",

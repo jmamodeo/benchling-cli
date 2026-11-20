@@ -54,10 +54,11 @@ class PlannerBase:
                 details={"expected": expected, "actual": actual},
             )
 
-    def _plan_entry_id(self, plan: ChangePlan) -> str:
+    @staticmethod
+    def _entry_id(plan: ChangePlan) -> str:
         """Return the existing entry ID, rejecting a missing plan target."""
         if not plan.entry_id:
-            raise ValidationError("This plan does not reference an existing entry")
+            raise ValidationError("Entry change plan has no entry ID")
         return plan.entry_id
 
     def _event(

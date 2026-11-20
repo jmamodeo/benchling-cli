@@ -34,7 +34,11 @@ _EntryRef = Annotated[
 ]
 _OptionalEntryRef = Annotated[
     str | None,
-    Field(description="Entry ID, display ID, or same-tenant entry URL. Omit for entry creation."),
+    Field(
+        description=(
+            "Entry ID, display ID, or same-tenant entry URL. Omit for entry or container plans."
+        )
+    ),
 ]
 _PageCursor = Annotated[
     str | None,
@@ -153,6 +157,7 @@ def build_mcp_server(
 
     _register_environment_tools(mcp, pool, writable_envs)
     _register_entry_tools(mcp, pool)
+    _register_container_tools(mcp, pool)
     _register_result_tools(mcp, pool)
     _register_export_tool(mcp, pool)
     _register_change_tools(mcp, pool, writable_envs)
@@ -500,6 +505,50 @@ def _register_entry_tools(mcp: MCPServer, pool: RuntimePool) -> None:
         return await safe(env, call)
 
 
+def _register_container_tools(mcp: MCPServer, pool: RuntimePool) -> None:
+    """Register read-only container and container-schema discovery tools."""
+    safe = _make_safe(pool)
+
+    @mcp.tool(annotations=_annotations(True))
+    async def get_container(
+        env: _Env,
+        container_id: Annotated[str, Field(description="Inventory container ID.")],
+    ) -> Envelope[Any]:
+        """Get an inventory container by ID."""
+        return await safe(env, lambda rt: rt.service.get_container(container_id))
+
+    @mcp.tool(annotations=_annotations(True))
+    async def find_containers(
+        env: _Env,
+        barcode: Annotated[str | None, Field(description="Exact container barcode.")] = None,
+        name: Annotated[str | None, Field(description="Exact container name.")] = None,
+        limit: Annotated[
+            int, Field(description="Page size. Defaults to 50 and must be from 1 to 100.")
+        ] = 50,
+        cursor: _PageCursor = None,
+    ) -> Envelope[Any]:
+        """Find one page of containers by exact barcode or exact name."""
+        return await safe(
+            env,
+            lambda rt: rt.service.find_containers(
+                barcode=barcode, name=name, limit=limit, cursor=cursor
+            ),
+        )
+
+    @mcp.tool(annotations=_annotations(True))
+    async def list_container_schemas(
+        env: _Env,
+        limit: Annotated[
+            int, Field(description="Page size. Defaults to 50 and must be from 1 to 100.")
+        ] = 50,
+        cursor: _PageCursor = None,
+    ) -> Envelope[Any]:
+        """List one page of container schemas, including embedded field definitions."""
+        return await safe(
+            env, lambda rt: rt.service.list_container_schemas(limit=limit, cursor=cursor)
+        )
+
+
 def _register_result_tools(mcp: MCPServer, pool: RuntimePool) -> None:
     """Register the schema and result read tools."""
     safe = _make_safe(pool)
@@ -744,19 +793,22 @@ def _register_change_tools(
         env: _Env,
         family: Annotated[
             PlanFamily,
-            Field(description="Change family: entry, document, table, fields, or results."),
+            Field(
+                description=(
+                    "Change family: entry, document, table, fields, results, or containers."
+                )
+            ),
         ],
         specification: _ChangeSpecification,
         entry: _OptionalEntryRef = None,
     ) -> Envelope[Any]:
-        """Create an immutable local preview for an entry mutation or entry creation.
+        """Create an immutable local preview for an entry or container change.
 
         The specification is checked against the typed change schema before any
-        remote read. For family "entry", omit entry and pass entry_template_id,
-        folder_id, and name; optional schema_fields are checked against the
-        template schema. An invalid specification is a validation_error envelope
-        and nothing is written. Result updates pass operation "update", csv_path,
-        id_column, and column_map. Apply the preview later with apply_changes.
+        remote read. Entry plans omit entry and pass entry_template_id, folder_id,
+        and name; optional schema_fields are checked against the template schema.
+        Container plans support create and transfer operations. Other families
+        require entry. Apply the preview later with apply_changes.
         """
 
         async def call(rt: Runtime) -> Any:

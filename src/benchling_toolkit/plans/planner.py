@@ -11,6 +11,7 @@ from typing import Any, NoReturn
 from filelock import FileLock
 from filelock import Timeout as FileLockTimeout
 
+from ..change_spec import parse_change_specification
 from ..errors import (
     BenchlingAgentError,
     ConflictError,
@@ -24,6 +25,7 @@ from ..models import (
     PlanFamily,
     PlanStatus,
 )
+from .containers import ContainerPlanning
 from .document import DocumentPlanning
 from .entry import EntryPlanning
 from .fields import FieldsPlanning
@@ -52,7 +54,12 @@ def _failure_details(exc: BenchlingAgentError) -> dict[str, Any]:
 
 
 class ChangePlanner(
-    EntryPlanning, DocumentPlanning, TablePlanning, FieldsPlanning, ResultsPlanning
+    EntryPlanning,
+    DocumentPlanning,
+    TablePlanning,
+    FieldsPlanning,
+    ResultsPlanning,
+    ContainerPlanning,
 ):
     """Creates change plans and applies them under a per-plan file lock."""
 
@@ -71,6 +78,8 @@ class ChangePlanner(
                 details={"family": str(family), "supported": [item.value for item in PlanFamily]},
             ) from exc
         request = deepcopy(request)
+        if family == PlanFamily.CONTAINERS:
+            request = parse_change_specification(request)
         if family != PlanFamily.RESULTS and request_is_result_update(request):
             raise ValidationError(
                 "CSV result updates require the results family",
@@ -83,9 +92,13 @@ class ChangePlanner(
             before, after, preconditions, guarantees, warnings = await self._plan_entry_create(
                 request
             )
+        elif family == PlanFamily.CONTAINERS:
+            parts = await self._plan_containers(request)
+            before, after, preconditions, guarantees, warnings = parts
+            entry_id = None
         else:
-            if reference is None:
-                raise ValidationError("This change family requires an entry reference")
+            if not isinstance(reference, str) or not reference.strip():
+                raise ValidationError("Entry reference is required for this change family")
             resolved = await self.service.resolve_entry(reference)
             entry_id = resolved["entry_id"]
             planners = {
@@ -164,6 +177,7 @@ class ChangePlanner(
             PlanFamily.TABLE: self._apply_table,
             PlanFamily.FIELDS: self._apply_fields,
             PlanFamily.RESULTS: self._apply_results,
+            PlanFamily.CONTAINERS: self._apply_containers,
         }
         return await appliers[plan.family](plan, journal)
 

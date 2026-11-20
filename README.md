@@ -3,7 +3,7 @@
 Safe, auditable tools for AI agents working in Benchling.
 
 [![CI](https://github.com/jmamodeo/benchling-toolkit/actions/workflows/ci.yml/badge.svg)](https://github.com/jmamodeo/benchling-toolkit/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
 [![Coverage](https://img.shields.io/badge/coverage-97%25-brightgreen)](https://github.com/jmamodeo/benchling-toolkit/actions/workflows/ci.yml)
 
@@ -14,7 +14,7 @@ Safe, auditable tools for AI agents working in Benchling.
 An electronic lab notebook is a scientific record, so letting an AI agent write to one directly is hard to trust. `benchling-toolkit` is a toolkit of safe, auditable tools that AI agents use to work with a [Benchling](https://www.benchling.com) tenant: a JSON-first CLI and a local [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server that is read-only by default. Every change is first previewed as an immutable, checksummed plan that records what will change and the version preconditions it depends on. A separate, explicit step applies it: that step re-checks the preconditions, refuses stale or already-used plans, and records each stage in a local execution journal. The MCP server cannot apply writes unless an operator opts a specific environment in with `--allow-writes`.
 
 - Public Benchling API only; it never automates the browser.
-- Five plan families: template-based entry creation, document text, unstructured tables, entry fields, and assay results.
+- Six change families: template-based entry creation, document text, unstructured tables, entry fields, assay results, and containers.
 - Several environments at once. Each one is saved with `benchling auth login`; the client secret stays in the OS keychain.
 - One versioned JSON envelope and stable exit codes for both interfaces.
 
@@ -288,6 +288,10 @@ benchling --env dev entry list --folder lib_example --name "Example entry"
 benchling --env dev results list --entry etr_abc123
 benchling --env dev results tables etr_abc123
 benchling --env dev results rows docpart_example --limit 50
+benchling --env dev container get con_example
+benchling --env dev container find --barcode VIAL-001
+benchling --env dev container find --name "Sample vial"
+benchling --env dev container schema list --limit 50
 benchling --env dev export --kind table --part docpart_table1 --format csv --output measurements.csv
 benchling --env dev export --kind results-table --part docpart_rt1 --format json --output results-table.json
 benchling --env dev export --kind results-table --part strtbl_example --entry etr_abc123 --format csv --output listed-table.csv
@@ -297,6 +301,8 @@ benchling --env dev export --kind assay-results --entry etr_abc123 --schema assa
 Entry references may be canonical IDs, display IDs, or URLs for the selected tenant. Duplicate section titles must be addressed by part ID.
 
 `entry list` and `schema list` are read-only. They return one page, default 50 and at most 100, plus `next_token`. Pass that token back with `--cursor`. `schema list` reads entry schemas, then result schemas, then run schemas, following every upstream page until the page is full or the lists end. `schema get` adds the options of each dropdown field (`/dropdown/{id}` and `/dropdown/{id}/options/items`). There is no separate dropdown command.
+
+`container get` reads one inventory container. `container find` requires exactly one exact `--barcode` or `--name` filter and returns one page; pass `next_token` back with `--cursor`. `container schema list` returns one page of container schemas with their embedded field definitions.
 
 Every `entry list` filter is applied by Benchling. `routing.client_side` is always empty.
 
@@ -317,7 +323,7 @@ A results-table or unstructured-table cell is flattened the same way. A link or 
 
 ### Preview and apply changes
 
-A change specification covers one existing-entry mutation or one new-entry creation. Previewing only reads Benchling and creates a local immutable plan:
+A change specification covers one existing-entry mutation, one new-entry creation, or one container mutation. Previewing only reads Benchling and creates a local immutable plan:
 
 ```console
 benchling --env dev changes plan \
@@ -351,14 +357,47 @@ benchling --env dev changes status PLAN_ID
 ```
 
 An entry specification uses `entry_template_id`, `folder_id`, and `name`, and may include `schema_fields` when the template has a schema. Preview reads the template and folder, refuses missing or archived resources, and shows their names and IDs. Apply creates the entry once and returns its ID; use that ID with `entry inspect` or `results tables`. The V3 `Entry.Create` route supports `entryTemplateId` to instantiate a template ([Benchling API docs](https://docs.benchling.com/docs/api/benchling-api/entry/create)); template and folder reads use [EntryTemplate.Get](https://docs.benchling.com/docs/api/benchling-api/entry-template/get) and [Folder.Get](https://docs.benchling.com/docs/api/benchling-api/folder/get).
+Container creation and transfer use the same local preview and explicit apply lifecycle. Container plans do not take `--entry`:
 
-Supported specifications are documented in [schemas/change-spec.schema.json](schemas/change-spec.schema.json). The five families are:
+```console
+benchling --env dev changes plan --family containers --spec create-container.json
+benchling --env dev changes plan --family containers --spec transfer-container.json
+benchling --env dev changes apply PLAN_ID
+```
+
+Container create specifications use `operation: "create"` and `schema_id`; transfer specifications use `operation: "transfer"`, `source_container_id`, `destination_container_id`, and `destination_contents` (each item has an `entity_id`). Transfer previews read both containers and apply re-checks their modification timestamps before the one-time transfer. Create previews read the schema and apply re-checks its field definitions. As with other families, an uncertain write is never retried. MCP apply remains disabled unless the server was started with `--allow-writes ENV`.
+
+Example create specification:
+
+```json
+{
+  "operation": "create",
+  "schema_id": "contsch_example",
+  "name": "Sample vial",
+  "barcode": "VIAL-001"
+}
+```
+
+Example transfer specification:
+
+```json
+{
+  "operation": "transfer",
+  "source_container_id": "con_source",
+  "destination_container_id": "con_destination",
+  "transfer_quantity": { "value": 1, "units": "mL" },
+  "destination_contents": [{ "entity_id": "ent_sample" }]
+}
+```
+
+Supported specifications are documented in [schemas/change-spec.schema.json](schemas/change-spec.schema.json). The six families are:
 
 - `entry`: create an entry from a template in a folder; optional schema fields are validated against the template's schema and sent by field-definition ID;
 - `document`: insert, delete, move, or replace a text part;
 - `table`: set selected cells or append rows on an unstructured table;
-- `fields`: update fields already present on the entry's assigned schema; and
-- `results`: create V2 assay result records for an explicit `strtbl_…` table (they land as pending until a person accepts them in the table), or update existing results from a CSV file.
+- `fields`: update fields already present on the entry's assigned schema;
+- `results`: create V2 assay result records for an explicit `strtbl_…` table (they land as pending until a person accepts them in the table), or update existing results from a CSV file; and
+- `containers`: create a container from a container schema, or transfer contents from one container to another.
 
 Field inputs must use a schema field's V3 `systemName` or its field-definition ID and have the shape `{"value": ...}`. Plans show both identifiers, send the field-definition ID, validate value types and constraints, and re-check the affected definitions and values immediately before applying. Result uploads also verify that the table belongs to the selected entry, that every record uses the table's result schema, and that any supplied project IDs are readable. Result upload field keys stay system names.
 
@@ -563,4 +602,4 @@ If you use this software, please cite it. GitHub's "Cite this repository" button
 - [Contributing guide](CONTRIBUTING.md) and [Code of Conduct](CODE_OF_CONDUCT.md)
 - [Security policy](SECURITY.md)
 - [Changelog](CHANGELOG.md)
-- Licensed under the [MIT License](LICENSE).
+- Licensed under the [Apache License 2.0](LICENSE); see [NOTICE](NOTICE). Releases up to and including 0.4.1 were published under the MIT License and remain available under it.

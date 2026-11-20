@@ -330,6 +330,70 @@ class EntryCreationSpecification(BaseModel):
         return _omit(value)
 
 
+class ContainerCreate(BaseModel):
+    """Create one container after reviewing an immutable preview."""
+
+    model_config = _STRICT
+
+    operation: Literal["create"] = Field(description="Preview creation of a container.")
+    schema_id: str = Field(min_length=1, description="Container schema ID.")
+    name: str | None = Field(default=None, description="Optional container name.")
+    barcode: str | None = Field(default=None, description="Optional container barcode.")
+    project_id: str | None = Field(default=None, description="Optional project ID.")
+    parent_storage_id: str | None = Field(
+        default=None, description="Optional parent inventory or well coordinate."
+    )
+    fields: dict[str, Any] | None = Field(default=None, description="Container field values.")
+    restricted_sample_party_ids: list[str] | None = Field(
+        default=None, description="Optional restricted sample party IDs."
+    )
+    restriction_status: str | None = Field(
+        default=None, description="Optional RESTRICTED or UNRESTRICTED status."
+    )
+    sample_owner_ids: list[str] | None = Field(
+        default=None, description="Optional sample owner IDs."
+    )
+
+
+class ContainerDestinationContent(BaseModel):
+    """One entity and optional concentration in the destination container."""
+
+    model_config = _STRICT
+
+    entity_id: str = Field(min_length=1, description="Entity ID in the destination contents.")
+    concentration: dict[str, Any] | None = Field(
+        default=None, description="Optional concentration measurement."
+    )
+
+
+class ContainerTransfer(BaseModel):
+    """Transfer contents from one container into another after preview."""
+
+    model_config = _STRICT
+
+    operation: Literal["transfer"] = Field(description="Preview a container-to-container transfer.")
+    source_container_id: str = Field(min_length=1, description="Source container ID.")
+    destination_container_id: str = Field(min_length=1, description="Destination container ID.")
+    transfer_quantity: dict[str, Any] | None = Field(
+        default=None, description="Optional quantity to transfer from the source."
+    )
+    destination_contents: list[ContainerDestinationContent] = Field(
+        min_length=1, description="Destination contents after the transfer."
+    )
+    destination_quantity: dict[str, Any] | None = Field(
+        default=None, description="Optional desired destination quantity."
+    )
+    restricted_sample_party_ids: list[str] | None = Field(
+        default=None, description="Optional restricted sample party IDs."
+    )
+    restriction_status: str | None = Field(
+        default=None, description="Optional RESTRICTED or UNRESTRICTED status."
+    )
+    sample_owner_ids: list[str] | None = Field(
+        default=None, description="Optional sample owner IDs."
+    )
+
+
 ChangeSpecification = (
     DocumentInsert
     | DocumentDelete
@@ -341,6 +405,8 @@ ChangeSpecification = (
     | ResultUpload
     | ResultCsvUpdate
     | EntryCreationSpecification
+    | ContainerCreate
+    | ContainerTransfer
 )
 
 _BY_OPERATION: dict[str, type[BaseModel]] = {
@@ -351,6 +417,8 @@ _BY_OPERATION: dict[str, type[BaseModel]] = {
     "set_cells": TableSetCells,
     "append_rows": TableAppendRows,
     "update": ResultCsvUpdate,
+    "create": ContainerCreate,
+    "transfer": ContainerTransfer,
 }
 
 _SUPPORTED = [
@@ -360,6 +428,8 @@ _SUPPORTED = [
     "results upload: table_id and assay_results",
     "results update: operation update, csv_path, id_column, column_map",
     "entry: entry_template_id, folder_id, name, optional schema_fields",
+    "containers create: operation create and schema_id",
+    "containers transfer: operation transfer, source_container_id and destination_container_id",
 ]
 
 

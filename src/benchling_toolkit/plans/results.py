@@ -157,7 +157,7 @@ class ResultsPlanning(ResultUpdatePlanning):
         return warnings
 
     async def _apply_results(self, plan: ChangePlan, journal: ChangeJournal) -> dict[str, Any]:
-        entry_id = self._plan_entry_id(plan)
+        entry_id = self._entry_id(plan)
         if plan.preconditions.get("operation") == "update":
             return await self._apply_result_updates(plan, journal)
         if any("id" in record for record in plan.after["records"]):

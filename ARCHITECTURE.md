@@ -29,11 +29,11 @@ MCP `plan_changes` validates the specification with `parse_change_specification`
 
 ## Plan
 
-`ChangePlanner.plan` builds one plan for one existing-entry mutation or one new-entry creation. It does not send POST, PATCH, or any other write.
+`ChangePlanner.plan` builds one plan for one existing-entry mutation, one entry creation, or one container operation. It does not send POST, PATCH, or any other write.
 
-1. The family must be `entry`, `document`, `table`, `fields`, or `results`. A CSV-shaped request on another family is rejected.
-2. Existing-entry families use `BenchlingService.resolve_entry` to turn an ID, a display ID, or a same-tenant URL into a canonical entry id. Entry creation has no existing entry reference.
-3. Existing-entry planners read the current entry; entry creation reads the template and folder, rejects missing or archived resources, and optionally validates schema fields against the template schema.
+1. The family must be `entry`, `document`, `table`, `fields`, `results`, or `containers`. A CSV-shaped request on another family is rejected.
+2. Existing-entry families resolve an ID, display ID, or same-tenant URL to a canonical entry ID. Entry creation and container operations do not require an entry.
+3. The family planner reads the relevant entry, template and folder, container schema, or source/destination containers, and returns `before`, `after`, `preconditions`, `guarantees`, and `warnings`.
 4. The planner fills `env` and `tenant_url` from the active environment, stores the request, and sets `diff` to both sides plus a `changed` flag. That diff is not a structural patch.
 5. `checksum_for` takes the SHA-256 of the plan's canonical JSON. The `checksum` field itself is excluded. Canonical JSON uses sorted keys and compact separators, so the hash survives a round trip through Pydantic.
 6. `PlanRepository.save_plan` writes `plans/{id}.json`. The id is `uuid4().hex`. An id that is not 32 lowercase hex digits is rejected, which keeps the path inside the plans directory. An existing id is an error. The write is a temp file, mode `0600`, then a replace.
@@ -50,8 +50,10 @@ The saved plan is the preview the caller reviews. Changing the entry in Benchlin
 | `fields` | Entry schema and current field values | Schema id, a fingerprint of each touched field definition, and the observed values | `PATCH /entry/{id}` `schemaFields`, addressed by field-definition id |
 | `results` upload | The `strtbl_…` table on this entry, its schema, and any named projects | Entry id, table id, schema id, schema-field fingerprint | `POST /assay-results:bulk-create` (V2). Local UUIDs in the plan are correlation ids, not server ids and not idempotency keys |
 | `results` update | A local CSV, then each named result | Per result: id, `modifiedAt`, entry id, schema id, definition fingerprint, observed values | One `PATCH /result/{id}` per changed result, after every result has been re-checked |
+| `containers` create | The selected container schema and embedded field definitions | Schema ID and the schema field-definition snapshot | One `POST /containers` |
+| `containers` transfer | Source and destination containers | Both container IDs and their `modifiedAt` timestamps | One `POST /containers/{destination_id}:transfer` |
 
-A document move that would leave the entry starting with anything other than a section fails here, with `Entry must start with a section`, and no plan is saved. Entry creation rejects archived or missing templates and folders; schema fields require a schema on the template and are normalized to field-definition IDs. A table plan rejects structured tables, merged child cells, and a coordinate that is outside the table or repeated. A field plan rejects unknown fields and values that do not match the definition. A result upload rejects a table that is not on the entry, a record whose schema does not match the table, more than 500 records, and a caller-supplied result id. A result update rejects a result that is not on the selected entry, a missing `modifiedAt`, an unknown column, and a CSV that changes nothing.
+A document move that would leave the entry starting with anything other than a section fails here, with `Entry must start with a section`, and no plan is saved. Entry creation rejects archived or missing templates and folders; schema fields require a schema on the template and are normalized to field-definition IDs. A table plan rejects structured tables, merged child cells, and a coordinate that is outside the table or repeated. A field plan rejects unknown fields and values that do not match the definition. A result upload rejects a table that is not on the entry, a record whose schema does not match the table, more than 500 records, and a caller-supplied result id. A result update rejects a result that is not on the selected entry, a missing `modifiedAt`, an unknown column, and a CSV that changes nothing. A container create plan re-reads the schema before writing; a transfer plan re-reads both containers and refuses changed modification timestamps.
 
 Warnings are part of the plan. They are how the preview says that a table edit clears evaluation until Benchling recalculates it, that `replace_text` can stop halfway, that uploaded results land as pending until a person accepts them in the results table (the plug icon), and that a result PATCH writes the result directly rather than through notebook integration.
 

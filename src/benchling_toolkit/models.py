@@ -235,6 +235,7 @@ class PlanFamily(str, Enum):
     TABLE = "table"
     FIELDS = "fields"
     RESULTS = "results"
+    CONTAINERS = "containers"
 
 
 class PlanStatus(str, Enum):

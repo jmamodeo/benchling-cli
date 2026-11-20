@@ -271,7 +271,7 @@ class FieldsPlanning(FieldNormalization):
         )
 
     async def _apply_fields(self, plan: ChangePlan, journal: ChangeJournal) -> dict[str, Any]:
-        entry_id = self._plan_entry_id(plan)
+        entry_id = self._entry_id(plan)
         current = await self.service.get_entry_fields(entry_id)
         current_schema_id = (current.get("schema") or {}).get("id")
         self._expect(
