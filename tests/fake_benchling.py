@@ -349,6 +349,13 @@ class FakeBenchling:
                     "modifiedAt": "2026-05-01T00:00:00Z",
                 },
             ],
+            "entity": [
+                {
+                    "id": "es_target",
+                    "name": "Target entity schema",
+                    "modifiedAt": "2026-01-02T00:00:00Z",
+                }
+            ],
             "result": [
                 {
                     "id": "assaysch_abc123",
@@ -455,7 +462,26 @@ class FakeBenchling:
                     "__typename": "TextFieldDefinition",
                     "derivationType": "DIRECT",
                 },
+                {
+                    "id": "assayfield_status",
+                    "systemName": "status",
+                    "name": "Status",
+                    "__typename": "DropdownLinkFieldDefinition",
+                    "isRequired": False,
+                    "derivationType": "DIRECT",
+                    "linkDefinition": {"id": "sfs_status"},
+                },
+                {
+                    "id": "assayfield_sample",
+                    "systemName": "sample",
+                    "name": "Sample",
+                    "__typename": "CustomEntityLinkFieldDefinition",
+                    "isRequired": False,
+                    "derivationType": "DIRECT",
+                    "linkDefinition": {"id": "es_target"},
+                },
             ],
+            "es_target": [],
         }
         self.result_table_schema = "assaysch_abc123"
         self.extra_result_tables: list[dict[str, str]] = []
@@ -472,6 +498,10 @@ class FakeBenchling:
         self.bulk_response: dict[str, Any] = {"taskId": "task_abc123"}
         self.bulk_responses: list[dict[str, Any]] = []
         self.result_updates: list[dict[str, Any]] = []
+        self.linked_entities = {
+            "ent_target": {"id": "ent_target", "typedSchema": {"id": "es_target"}},
+            "ent_wrong_schema": {"id": "ent_wrong_schema", "typedSchema": {"id": "es_other"}},
+        }
 
     # ---- helpers -----------------------------------------------------
     def fail(
@@ -1141,8 +1171,12 @@ class FakeBenchling:
         return self._page(deepcopy(self.field_defs[schema_id]), call, 5)
 
     def _list_kind(self, call: Call, kind: str) -> tuple[int, dict[str, Any]]:
+        schemas = deepcopy(self.schema_catalog[kind])
+        name = call.params.get("name.anyOf.caseSensitive")
+        if name is not None:
+            schemas = [schema for schema in schemas if schema.get("name") == name]
         return self._page(
-            deepcopy(self.schema_catalog[kind]),
+            schemas,
             call,
             self._limited_page(call, self.schema_page_size),
         )
@@ -1155,6 +1189,15 @@ class FakeBenchling:
 
     def _list_run_schemas(self, call: Call) -> tuple[int, dict[str, Any]]:
         return self._list_kind(call, "run")
+
+    def _list_entity_schemas(self, call: Call) -> tuple[int, dict[str, Any]]:
+        return self._list_kind(call, "entity")
+
+    def _get_linked_entity(self, call: Call, entity_id: str) -> tuple[int, dict[str, Any]]:
+        entity = self.linked_entities.get(entity_id)
+        if entity is None:
+            return 404, {"error": {"message": "entity not found"}}
+        return 200, deepcopy(entity)
 
     def _dropdown(self, call: Call, dropdown_id: str) -> tuple[int, dict[str, Any]]:
         found = self.dropdowns.get(dropdown_id)
@@ -1289,10 +1332,14 @@ ROUTES: list[tuple[str, str]] = [
     (r"/entry-schema/items", "GET v3|list_entry_schemas"),
     (r"/result-schema/items", "GET v3|list_result_schemas"),
     (r"/run-schema/items", "GET v3|list_run_schemas"),
-    (r"/(?:entry|result|run)-schema/(\w+)/field-definitions/items", "GET v3|schema_fields"),
-    (r"/(?:entry|result|run)-schema/(\w+)", "GET v3|schema"),
+    (r"/entity-schema/items", "GET v3|list_entity_schemas"),
+    (r"/(?:entry|entity|result|run)-schema/(\w+)/field-definitions/items", "GET v3|schema_fields"),
+    (r"/(?:entry|entity|result|run)-schema/(\w+)", "GET v3|schema"),
     (r"/dropdown/(\w+)/options/items", "GET v3|dropdown_options"),
     (r"/dropdown/(\w+)", "GET v3|dropdown"),
+    (r"/custom-entity/(ent_\w+)", "GET v3|get_linked_entity"),
+    (r"/dna-sequence/(seq_\w+)", "GET v3|get_linked_entity"),
+    (r"/aa-sequence/(aaseq_\w+)", "GET v3|get_linked_entity"),
     (r"/result/items", "GET v3|list_results"),
     (r"/result/(\w+)", "PATCH v3|patch_result"),
     (r"/result/(\w+)", "GET v3|get_result"),

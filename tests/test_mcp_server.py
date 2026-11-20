@@ -27,6 +27,7 @@ READ_TOOLS = {
     "list_entries",
     "get_schema",
     "list_schemas",
+    "find_schema",
     "get_entry_fields",
     "list_results",
     "get_result",
@@ -730,6 +731,28 @@ async def test_list_schemas_pages_without_allow_writes(client, fake) -> None:
     assert "runsch_two" in ids
     assert len(ids) == len(set(ids))
     assert second["next_token"] is None
+    assert fake.writes() == []
+
+
+async def test_list_schemas_accepts_an_exact_name(client, fake) -> None:
+    data = (await call(client, "list_schemas", env="sandbox", name="Second result schema"))["data"]
+    assert [item["id"] for item in data["items"]] == ["assaysch_two"]
+    assert fake.writes() == []
+
+
+async def test_find_schema_returns_typed_fields(client, fake) -> None:
+    data = (
+        await call(
+            client,
+            "find_schema",
+            env="sandbox",
+            name="Schema assaysch_abc123",
+            kind="result",
+        )
+    )["data"]
+    fields = {field["systemName"]: field for field in data["field_definitions"]}
+    assert fields["ct"]["type"] == "INTEGER"
+    assert fields["status"]["dropdown_options"][0]["id"] == "sfso_open"
     assert fake.writes() == []
 
 

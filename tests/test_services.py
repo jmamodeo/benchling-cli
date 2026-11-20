@@ -226,6 +226,23 @@ async def test_get_template_truncates_long_text_previews(runtime, fake):
     assert preview.endswith("…")
 
 
+async def test_get_template_handles_missing_optional_structure_values(runtime, fake):
+    fake.entry_templates["etpl_abc123"]["days"] = [
+        {
+            "notes": [
+                {"type": "results_table"},
+                {"type": "text", "text": "  "},
+                {"type": "table", "name": ""},
+            ]
+        }
+    ]
+    structure = (await runtime.service.get_template("etpl_abc123"))["structure"]
+    assert structure["results_table_schema_ids"] == []
+    assert structure["text_block_count"] == 1
+    assert structure["text_previews"] == []
+    assert structure["table_names"] == []
+
+
 async def test_list_templates_pages_and_applies_name_filter(runtime, fake):
     fake.entry_templates["etpl_two"] = {
         "id": "etpl_two",

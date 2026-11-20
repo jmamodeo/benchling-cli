@@ -20,9 +20,10 @@ from .errors import UpstreamError, ValidationError
 
 LIST_LIMIT = 50
 LIST_LIMIT_MAX = 100
-SCHEMA_KINDS = ("entry", "result", "run")
+SCHEMA_KINDS = ("entry", "entity", "result", "run")
 SCHEMA_PATHS = {
     "entry": "/entry-schema/items",
+    "entity": "/entity-schema/items",
     "result": "/result-schema/items",
     "run": "/run-schema/items",
 }
@@ -34,6 +35,8 @@ V2_ENTRY_FILTERS = ("folder", "project", "schema", "name", "modified_at")
 
 def schema_collection(schema_id: str) -> str:
     """Return the V3 collection path segment for a schema id prefix."""
+    if schema_id.startswith("es_"):
+        return "entity-schema"
     if schema_id.startswith("assaysch_"):
         return "result-schema"
     if schema_id.startswith("runsch_"):
@@ -375,6 +378,7 @@ async def list_schemas(
     api: BenchlingAPI,
     *,
     kind: object = None,
+    name: object = None,
     limit: object = LIST_LIMIT,
     cursor: object = None,
 ) -> dict[str, Any]:
@@ -384,6 +388,7 @@ async def list_schemas(
     is exhausted. The next token resumes at the following upstream page.
     """
     page_size = check_limit(limit)
+    schema_name = _optional_text(name, "name")
     if kind is None:
         order = list(SCHEMA_KINDS)
     elif kind in SCHEMA_KINDS:
@@ -405,6 +410,8 @@ async def list_schemas(
         path = SCHEMA_PATHS[current]
         while len(items) < page_size:
             params: dict[str, Any] = {"pageSize": page_size - len(items)}
+            if schema_name is not None:
+                params["name.anyOf.caseSensitive"] = schema_name
             if token:
                 params["nextToken"] = token
             payload = await api.request("GET", path, params=params)

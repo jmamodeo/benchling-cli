@@ -667,6 +667,13 @@ def test_schema_list_pages_with_a_cursor(invoke, fake) -> None:
     assert fake.writes() == []
 
 
+def test_schema_list_looks_up_an_exact_name(invoke, fake) -> None:
+    code, payload, _ = invoke("schema", "list", "--name", "Second result schema")
+    assert code == 0
+    assert [item["id"] for item in payload["data"]["items"]] == ["assaysch_two"]
+    assert fake.calls[0].params["name.anyOf.caseSensitive"] == "Second result schema"
+
+
 def test_entry_list_sends_a_comma_name_as_the_v2_name_parameter(invoke, fake) -> None:
     fake.extra_entries.append(
         {
@@ -822,3 +829,13 @@ def test_schema_get_includes_dropdown_options(invoke) -> None:
     assert status["dropdown"]["id"] == "sfs_status"
     assert [option["name"] for option in status["dropdown"]["options"]] == ["Open", "Closed"]
     assert status["dropdown"]["options"][1]["archived"] is True
+
+
+def test_schema_find_returns_typed_field_definitions(invoke, fake) -> None:
+    code, payload, _ = invoke("schema", "find", "Schema assaysch_abc123", "--kind", "result")
+    assert code == 0, payload
+    fields = {field["systemName"]: field for field in payload["data"]["field_definitions"]}
+    assert fields["ct"]["type"] == "INTEGER"
+    assert fields["ct"]["is_required"] is True
+    assert fields["status"]["dropdown_options"][0]["id"] == "sfso_open"
+    assert fake.writes() == []

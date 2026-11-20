@@ -296,6 +296,43 @@ def normalize_table_row(row: Any, *, require_text: bool) -> dict[str, Any]:
     """Normalize one table row and its cells."""
     if not isinstance(row, dict) or not isinstance(row.get("cells"), list):
         raise UpstreamError("Table response contained invalid rows")
+    for key in ("id", "rowId"):
+        if key in row and row[key] is not None and (not isinstance(row[key], str) or not row[key]):
+            raise UpstreamError("Table response contained invalid rows")
+    row_index = row.get("rowIndex")
+    if row_index is not None and (
+        isinstance(row_index, bool) or not isinstance(row_index, int) or row_index < 0
+    ):
+        raise UpstreamError("Table response contained invalid rows")
+    for key in ("isArchived", "isSubmittable"):
+        if key in row and row[key] is not None and not isinstance(row[key], bool):
+            raise UpstreamError("Table response contained invalid rows")
+    status = row.get("submissionStatus")
+    if status is not None and (
+        not isinstance(status, str)
+        or status
+        not in {
+            "UNSUBMITTED",
+            "SUBMITTED",
+            "HAS_UNSUBMITTED_CHANGES",
+            "UNEVALUATED",
+        }
+    ):
+        raise UpstreamError("Table response contained invalid rows")
+    result = row.get("result")
+    if result is not None and (
+        not isinstance(result, dict)
+        or not isinstance(result.get("id"), str)
+        or not result["id"]
+        or (
+            result.get("__typename") is not None
+            and (
+                not isinstance(result["__typename"], str)
+                or result["__typename"].split(".")[-1] != "ResultRef"
+            )
+        )
+    ):
+        raise UpstreamError("Table response contained invalid rows")
     normalized: dict[str, Any] = {
         "cells": [normalize_table_cell(cell, require_text=require_text) for cell in row["cells"]]
     }
@@ -760,7 +797,7 @@ class BenchlingService:
                 details={"part_id": table_id},
             )
         columns = detail.get("columnDefinitions") or []
-        if not isinstance(columns, list):
+        if not isinstance(columns, list) or any(not isinstance(column, dict) for column in columns):
             raise UpstreamError(
                 "Results table response contained invalid columns",
                 details={"part_id": table_id},
@@ -781,9 +818,16 @@ class BenchlingService:
             "result_schema_id": schema_id if isinstance(schema_id, str) and schema_id else None,
             "row_count": row_count,
             "submission_status": detail.get("submissionStatus"),
-            "items": [normalize_table_row(row, require_text=False) for row in raw_rows],
+            "items": [self._normalize_results_table_row(row, len(columns)) for row in raw_rows],
             "next_token": token,
         }
+
+    @staticmethod
+    def _normalize_results_table_row(row: Any, column_count: int) -> dict[str, Any]:
+        normalized = normalize_table_row(row, require_text=False)
+        if len(normalized["cells"]) != column_count:
+            raise UpstreamError("Table response contained invalid rows")
+        return normalized
 
     async def _read_part_table(
         self,
@@ -799,8 +843,23 @@ class BenchlingService:
         path = rows_items_path(
             self.api.environment.base_url, part_id, detail.get("rows"), collection=collection
         )
+        columns: list[dict[str, Any]] | None = None
+        if not require_text:
+            raw_columns = detail.get("columnDefinitions") or []
+            if not isinstance(raw_columns, list) or any(
+                not isinstance(column, dict) for column in raw_columns
+            ):
+                raise UpstreamError(
+                    "Results table response contained invalid columns",
+                    details={"part_id": part_id},
+                )
+            columns = raw_columns
         rows = [
-            normalize_table_row(item, require_text=require_text)
+            (
+                self._normalize_results_table_row(item, len(columns))
+                if columns is not None
+                else normalize_table_row(item, require_text=True)
+            )
             async for item in self.api.paginate(path, params={"pageSize": TABLE_ROW_PAGE_SIZE})
         ]
         row_count = detail.get("rowCount")
@@ -863,14 +922,25 @@ class BenchlingService:
             )
         return {"resolved": resolved, "part": part, "table": table}
 
-    async def get_schema(self, schema_id: str) -> dict[str, Any]:
-        """Return an entry, result, or run schema with its field definitions.
+    async def get_schema(self, schema_id: str, *, kind: object = None) -> dict[str, Any]:
+        """Return a schema and its field definitions.
 
         The collection is chosen from the id prefix: ``assaysch_`` is a result
-        schema, ``runsch_`` is a run schema, and any other id is an entry schema.
-        Dropdown fields include the dropdown and its options.
+        schema, ``runsch_`` is a run schema, ``es_`` is an entity schema, and
+        any other id is an entry schema. Dropdown fields include their options.
         """
-        base = f"/{listing.schema_collection(schema_id)}/{schema_id}"
+        collections = {
+            "entry": "entry-schema",
+            "entity": "entity-schema",
+            "result": "result-schema",
+            "run": "run-schema",
+        }
+        if kind is not None and kind not in collections:
+            raise ValidationError("Schema kind must be entry, entity, result, or run")
+        collection = (
+            collections[str(kind)] if kind is not None else listing.schema_collection(schema_id)
+        )
+        base = f"/{collection}/{quote(schema_id, safe='')}"
         schema = await self.api.request("GET", base)
         fields = [
             item
@@ -879,6 +949,54 @@ class BenchlingService:
             )
         ]
         return {"schema": schema, "field_definitions": await self._with_dropdowns(fields)}
+
+    async def find_schema(self, name: object, *, kind: object = None) -> dict[str, Any]:
+        """Find one exact schema name and return its detailed, typed field definitions."""
+        if not isinstance(name, str) or not name.strip():
+            raise ValidationError("name must be a non-empty string")
+        schema_name = name.strip()
+        if "," in schema_name:
+            raise ValidationError("name must not contain a comma")
+        if kind is not None and (not isinstance(kind, str) or kind not in listing.SCHEMA_KINDS):
+            raise ValidationError(
+                "Schema kind must be entry, entity, result, or run",
+                details={"supported": list(listing.SCHEMA_KINDS)},
+            )
+        matches: list[dict[str, Any]] = []
+        cursor: str | None = None
+        while True:
+            page = await self.list_schemas(
+                kind=kind, name=schema_name, limit=listing.LIST_LIMIT_MAX, cursor=cursor
+            )
+            matches.extend(page["items"])
+            cursor = page["next_token"]
+            if cursor is None:
+                break
+        if not matches:
+            raise NotFoundError(
+                f'No schema named "{schema_name}" was found',
+                details={"name": schema_name, "kind": kind},
+            )
+        candidates = [{"id": item["id"], "kind": item["kind"]} for item in matches]
+        if len(candidates) > 1:
+            labels = ", ".join(f"{item['id']} ({item['kind']})" for item in candidates)
+            raise ValidationError(
+                f'Schema name "{schema_name}" is ambiguous; candidates: {labels}',
+                details={"candidates": candidates},
+            )
+        found = matches[0]
+        detail = await self.get_schema(found["id"], kind=found["kind"])
+        detail["kind"] = found["kind"]
+        detail["field_definitions"] = [
+            {
+                **field,
+                "type": field_definition_type(field),
+                "is_required": bool(field.get("isRequired")),
+                "dropdown_options": (field.get("dropdown") or {}).get("options", []),
+            }
+            for field in detail["field_definitions"]
+        ]
+        return detail
 
     async def get_container(self, container_id: str) -> dict[str, Any]:
         """Return one V2 inventory container by ID."""
@@ -1004,11 +1122,14 @@ class BenchlingService:
         self,
         *,
         kind: object = None,
+        name: object = None,
         limit: object = listing.LIST_LIMIT,
         cursor: object = None,
     ) -> dict[str, Any]:
         """Return one page of entry, result, and run schemas."""
-        return await listing.list_schemas(self.api, kind=kind, limit=limit, cursor=cursor)
+        return await listing.list_schemas(
+            self.api, kind=kind, name=name, limit=limit, cursor=cursor
+        )
 
     async def get_entry_fields(self, reference: str) -> dict[str, Any]:
         """Return an entry's custom fields keyed by raw and system name, with schema, project and result tables."""
@@ -1256,6 +1377,39 @@ class BenchlingService:
     async def get_result(self, result_id: str) -> dict[str, Any]:
         """Fetch a single result by ID."""
         return await self.api.request("GET", f"/result/{result_id}")
+
+    async def get_linked_entity_schema_id(self, entity_id: str) -> str:
+        """Read a linked entity and return its entity schema ID for result-plan validation."""
+        entity_routes = {
+            "ent_": ("custom-entity", "customEntity"),
+            "seq_": ("dna-sequence", "dnaSequence"),
+            "aaseq_": ("aa-sequence", "aaSequence"),
+        }
+        route = next(
+            (value for prefix, value in entity_routes.items() if entity_id.startswith(prefix)),
+            None,
+        )
+        if route is None:
+            raise ValidationError(
+                "Linked entity ID has an unsupported namespace",
+                details={"reason": "unresolvable_link_target", "entity_id": entity_id},
+            )
+        collection, wrapper = route
+        payload = await self.api.request("GET", f"/{collection}/{quote(entity_id, safe='')}")
+        entity = payload.get(wrapper, payload)
+        if not isinstance(entity, dict) or entity.get("id") != entity_id:
+            raise UpstreamError(
+                "Benchling returned an unexpected linked entity",
+                details={"entity_id": entity_id},
+            )
+        schema = entity.get("typedSchema") or entity.get("schema")
+        schema_id = schema.get("id") if isinstance(schema, dict) else None
+        if not isinstance(schema_id, str) or not schema_id:
+            raise UpstreamError(
+                "Linked entity response did not include its schema",
+                details={"entity_id": entity_id},
+            )
+        return schema_id
 
     async def doctor(self) -> dict[str, Any]:
         """Probe V3 and V2 entry endpoints; failures are reported per check rather than raised."""
