@@ -815,6 +815,68 @@ def results_rows(
     )
 
 
+@results_app.command("pending")
+def results_pending(
+    ctx: typer.Context,
+    plan_id: str | None = typer.Option(
+        None, "--plan", help="Result upload plan ID; reads the record IDs from its journal."
+    ),
+    result_ids: list[str] | None = typer.Option(
+        None, "--id", help="V2 assay result ID. Repeat to read several."
+    ),
+    schema_id: str | None = typer.Option(
+        None, "--schema", help="Result schema ID. Needs --created-after."
+    ),
+    created_after: str | None = typer.Option(
+        None,
+        "--created-after",
+        help="RFC 3339 time, e.g. 2026-11-19T00:00:00Z. Used with --schema.",
+    ),
+    limit: int = typer.Option(50, "--limit", min=1, max=100, help="Rows to list, from 1 to 100."),
+    cursor: str | None = typer.Option(
+        None, "--cursor", help="next_token from the previous page (--schema only)."
+    ),
+) -> None:
+    """Read back results, including pending ones, and mark each pending or accepted.
+
+    Pending results have no entry until a person accepts them with the plug icon
+    in the results table, so `results list --entry` does not find them. Pass one
+    of --plan, --id, or --schema with --created-after. Reads only.
+    """
+    state: State = ctx.obj
+    _execute(
+        state.env,
+        lambda runtime: runtime.planner.read_back_results(
+            plan_id=plan_id,
+            result_ids=result_ids or None,
+            schema_id=schema_id,
+            created_after=created_after,
+            limit=limit,
+            cursor=cursor,
+        ),
+    )
+
+
+@results_app.command("verify")
+def results_verify(
+    ctx: typer.Context,
+    plan_id: str,
+    sample: int = typer.Option(
+        20, "--sample", min=1, max=200, help="Rows to list per category, from 1 to 200."
+    ),
+) -> None:
+    """Diff a result upload plan against the records Benchling created.
+
+    Compares planned fields by system name and reports matched, mismatched,
+    missing, and extra rows, and which rows still need the plug-icon accept. Reads only.
+    """
+    state: State = ctx.obj
+    _execute(
+        state.env,
+        lambda runtime: runtime.planner.verify_results(plan_id, sample=sample),
+    )
+
+
 @app.command("export")
 def export_data(
     ctx: typer.Context,

@@ -1,0 +1,503 @@
+"""Read back result uploads, including pending rows, and diff them against the plan."""
+
+from __future__ import annotations
+
+import json
+
+import pytest
+from conftest import runtime_for
+from fake_benchling import ENTRY_ID
+from typer.testing import CliRunner
+
+from benchling_toolkit import cli
+from benchling_toolkit.errors import ValidationError
+from benchling_toolkit.plans import readback
+
+TABLE = "strtbl_example"
+
+
+def record(ct=12, **overrides):
+    return {"schemaId": "assaysch_abc123", "fields": {"ct": {"value": ct}}, **overrides}
+
+
+async def applied_plan(runtime, fake, records):
+    planned = await runtime.planner.plan(
+        ENTRY_ID, "results", {"table_id": TABLE, "assay_results": records}
+    )
+    await runtime.planner.apply(planned.id)
+    return planned
+
+
+def journal_text(runtime, plan_id):
+    return (runtime.repository.config.journals_dir / f"{plan_id}.json").read_text()
+
+
+def bulk_get_calls(fake):
+    return [call for call in fake.calls if call.path == "/api/v2/assay-results:bulk-get"]
+
+
+async def test_pending_by_plan_reads_task_ids_and_writes_nothing(runtime, fake) -> None:
+    planned = await applied_plan(runtime, fake, [record(1), record(2)])
+    ids = fake.complete_upload()
+    before = journal_text(runtime, planned.id)
+    writes = len(fake.writes())
+
+    data = await runtime.planner.read_back_results(plan_id=planned.id)
+
+    assert data["source"] == {"mode": "plan", "plan_id": planned.id, "entry_id": ENTRY_ID}
+    assert data["counts"] == {
+        "read": 2,
+        "pending": 2,
+        "accepted": 0,
+        "archived": 0,
+        "not_found": 0,
+    }
+    assert [item["id"] for item in data["items"]] == ids
+    assert all(item["needs_accept"] and item["table_id"] == TABLE for item in data["items"])
+    assert data["needs_accept"] == ids
+    assert data["batches"][0]["task_status"] == "SUCCEEDED"
+    assert "plug" in data["next_step"] and '"Assay results"' in data["next_step"]
+    assert ENTRY_ID in data["next_step"]
+    assert journal_text(runtime, planned.id) == before
+    assert len(fake.writes()) == writes
+    (call,) = bulk_get_calls(fake)
+    assert call.params == {"assayResultIds": ",".join(ids)}
+
+
+async def test_pending_by_plan_uses_ids_stored_by_changes_status(runtime, fake) -> None:
+    planned = await applied_plan(runtime, fake, [record()])
+    fake.complete_upload()
+    await runtime.planner.status(planned.id)
+    fake.task_requests.clear()
+
+    data = await runtime.planner.read_back_results(plan_id=planned.id)
+
+    assert fake.task_requests == []
+    assert data["counts"]["pending"] == 1
+
+
+async def test_accepted_rows_are_not_reported_as_needing_accept(runtime, fake) -> None:
+    planned = await applied_plan(runtime, fake, [record(1), record(2)])
+    first, second = fake.complete_upload()
+    fake.accept_results([first])
+
+    data = await runtime.planner.read_back_results(plan_id=planned.id, limit=1)
+
+    assert data["counts"]["pending"] == 1 and data["counts"]["accepted"] == 1
+    assert data["items"][0]["id"] == second
+    assert data["returned"] == 1 and data["truncated"] is True
+    assert data["needs_accept"] == [second]
+    assert data["next_step"].startswith("1 result is pending")
+    fake.accept_results([second])
+    data = await runtime.planner.read_back_results(plan_id=planned.id)
+    assert data["counts"]["pending"] == 0 and data["next_step"] is None
+
+
+async def test_pending_by_ids_chunks_bulk_get_at_200_and_lists_not_found(runtime, fake) -> None:
+    fake.assay_results = [
+        {"id": f"id{n}", "entryId": None, "schema": {"id": "assaysch_abc123"}, "fields": {}}
+        for n in range(250)
+    ]
+    requested = [f"id{n}" for n in range(250)] + ["id0", "missing"]
+
+    data = await runtime.planner.read_back_results(result_ids=requested, limit=5)
+
+    assert [len(call.params["assayResultIds"].split(",")) for call in bulk_get_calls(fake)] == [
+        200,
+        51,
+    ]
+    assert data["counts"]["read"] == 250 and data["counts"]["pending"] == 250
+    assert data["not_found"] == ["missing"]
+    assert len(data["items"]) == 5 and len(data["needs_accept"]) == 5
+    assert data["source"] == {"mode": "ids", "requested": 251}
+    assert "the entry the results were uploaded to" in data["next_step"]
+
+
+async def test_pending_by_schema_and_time_uses_v2_list_without_an_entry_filter(
+    runtime, fake
+) -> None:
+    fake.assay_results = [
+        {
+            "id": f"id{n}",
+            "entryId": ENTRY_ID if n == 1 else None,
+            "createdAt": f"2026-11-1{n}T00:00:00Z",
+            "schema": {"id": "assaysch_abc123"},
+            "fields": {},
+        }
+        for n in range(1, 5)
+    ] + [
+        {
+            "id": "other",
+            "entryId": None,
+            "createdAt": "2026-11-19T00:00:00Z",
+            "schema": {"id": "assaysch_two"},
+        }
+    ]
+    fake.assay_result_page_size = 2
+
+    first = await runtime.planner.read_back_results(
+        schema_id="assaysch_abc123", created_after="2026-11-12T00:00:00Z", limit=2
+    )
+    assert [item["id"] for item in first["items"]] == ["id2", "id3"]
+    assert first["next_token"]
+    second = await runtime.planner.read_back_results(
+        schema_id="assaysch_abc123",
+        created_after="2026-11-12T00:00:00Z",
+        limit=2,
+        cursor=first["next_token"],
+    )
+    assert [item["id"] for item in second["items"]] == ["id4"]
+    assert second["next_token"] is None
+    lists = [call for call in fake.calls if call.path == "/api/v2/assay-results"]
+    assert lists[0].params == {
+        "schemaId": "assaysch_abc123",
+        "createdAt.gte": "2026-11-12T00:00:00Z",
+        "sort": "createdAt:asc",
+        "pageSize": "2",
+    }
+    assert all("entry" not in key.lower() for call in lists for key in call.params)
+    assert fake.writes() == []
+
+
+@pytest.mark.parametrize(
+    ("arguments", "message"),
+    [
+        ({}, "exactly one"),
+        ({"plan_id": "abc", "result_ids": ["x"]}, "exactly one"),
+        ({"schema_id": "assaysch_abc123"}, "passed together"),
+        ({"created_after": "2026-11-19"}, "passed together"),
+        ({"result_ids": ["x"], "cursor": "1"}, "cursor applies only"),
+        ({"result_ids": ["x"], "limit": 0}, "limit must be between 1 and 100"),
+        ({"result_ids": ["x"], "limit": True}, "limit must be between 1 and 100"),
+        ({"result_ids": []}, "non-empty list"),
+        ({"result_ids": ["a,b"]}, "commas"),
+        ({"schema_id": "assaysch_abc123", "created_after": "yesterday"}, "RFC 3339"),
+    ],
+)
+async def test_read_back_rejects_invalid_arguments(runtime, fake, arguments, message) -> None:
+    with pytest.raises(ValidationError, match=message):
+        await runtime.planner.read_back_results(**arguments)
+    assert [call for call in fake.calls if "/assay-results" in call.path] == []
+
+
+async def test_read_back_requires_an_applied_result_upload_plan(runtime, fake) -> None:
+    unapplied = await runtime.planner.plan(
+        ENTRY_ID, "results", {"table_id": TABLE, "assay_results": [record()]}
+    )
+    with pytest.raises(ValidationError, match="not been applied"):
+        await runtime.planner.verify_results(unapplied.id)
+    table_plan = await runtime.planner.plan(
+        ENTRY_ID,
+        "table",
+        {"operation": "append_rows", "table_part_id": "docpart_table1", "rows": [["D", "4"]]},
+    )
+    with pytest.raises(ValidationError, match="Only result upload plans"):
+        await runtime.planner.read_back_results(plan_id=table_plan.id)
+    with pytest.raises(ValidationError, match="Unknown change plan"):
+        await runtime.planner.verify_results("0" * 32)
+
+
+async def test_verify_matches_every_planned_row_regardless_of_order(runtime, fake) -> None:
+    planned = await applied_plan(runtime, fake, [record(1), record(2)])
+    ids = fake.complete_upload()
+    fake.assay_results.reverse()
+    fake.assay_results[0]["fields"]["ct"]["value"] = 2.0
+    fake.assay_results[1]["fields"]["ct"]["value"] = 1.0
+    fake.tasks["task_abc123"]["response"]["assayResults"].reverse()
+
+    data = await runtime.planner.verify_results(planned.id)
+
+    assert data["ok"] is True
+    assert data["counts"]["matched"] == 2 and data["counts"]["pending"] == 2
+    assert data["mismatched"] == data["missing"] == data["extra"] == []
+    assert [row["plan_row_index"] for row in data["needs_accept"]] == [0, 1]
+    assert {row["result_id"] for row in data["needs_accept"]} == set(ids)
+    assert data["summary"].startswith("2 of 2 planned rows match")
+    assert "plug" in data["next_step"]
+    assert fake.writes()[-1].path == "/api/v2/assay-results:bulk-create"
+
+
+async def test_verify_reports_mismatched_fields_by_system_name(runtime, fake) -> None:
+    planned = await applied_plan(runtime, fake, [record(1), record(2)])
+    _first, second = fake.complete_upload()
+    fake.assay_results[1]["fields"]["ct"]["value"] = 20
+    fake.accept_results([second])
+
+    data = await runtime.planner.verify_results(planned.id)
+
+    assert data["ok"] is False
+    assert data["counts"]["matched"] == 1 and data["counts"]["mismatched"] == 1
+    assert data["mismatched"] == [
+        {
+            "table_id": TABLE,
+            "plan_row_index": 1,
+            "result_id": second,
+            "state": "accepted",
+            "fields": [{"field": "ct", "planned": 2, "actual": 20}],
+        }
+    ]
+    assert data["counts"]["accepted"] == 1 and data["counts"]["pending"] == 1
+    assert len(data["needs_accept"]) == 1
+
+
+async def test_verify_reports_extra_and_not_found_records(runtime, fake) -> None:
+    planned = await applied_plan(runtime, fake, [record(1), record(2)])
+    first, second = fake.complete_upload()
+    fake.assay_results.append(
+        {
+            "id": "extra",
+            "entryId": None,
+            "schema": {"id": "assaysch_abc123"},
+            "fields": {"ct": {"value": 9}},
+        }
+    )
+    fake.assay_results = [item for item in fake.assay_results if item["id"] != second]
+    fake.tasks["task_abc123"]["response"]["assayResults"].append({"id": "extra"})
+
+    data = await runtime.planner.verify_results(planned.id)
+
+    assert data["counts"]["not_found"] == 1
+    assert data["counts"]["matched"] == 1
+    assert data["mismatched"][0]["result_id"] == "extra"
+    assert data["mismatched"][0]["plan_row_index"] == 1
+    fake.assay_results.append(
+        {
+            "id": second,
+            "entryId": None,
+            "schema": {"id": "assaysch_abc123"},
+            "fields": {"ct": {"value": 2}},
+        }
+    )
+    data = await runtime.planner.verify_results(planned.id)
+    assert data["counts"]["matched"] == 2
+    assert data["extra"] == [{"table_id": TABLE, "result_id": "extra", "state": "pending"}]
+    assert first in {row["result_id"] for row in data["needs_accept"]}
+
+
+async def test_verify_reports_missing_rows_while_the_task_runs(runtime, fake) -> None:
+    planned = await applied_plan(runtime, fake, [record(1), record(2)])
+    fake.task = {"status": "RUNNING"}
+
+    data = await runtime.planner.verify_results(planned.id)
+
+    assert data["ok"] is False
+    assert data["counts"]["missing"] == 2 and data["counts"]["fetched"] == 0
+    assert {row["reason"] for row in data["missing"]} == {"task_running"}
+    assert data["batches"][0]["task_status"] == "RUNNING"
+    assert data["next_step"] is None
+    assert bulk_get_calls(fake) == []
+
+
+async def test_verify_names_a_failed_table_upload_in_a_multi_table_plan(runtime, fake) -> None:
+    fake.field_defs["assaysch_other"] = fake.field_defs["assaysch_abc123"]
+    fake.extra_result_tables.append(
+        {
+            "type": "results_table",
+            "apiId": "strtbl_other",
+            "name": "Other results",
+            "assayResultSchemaId": "assaysch_other",
+            "columns": ["ct"],
+        }
+    )
+    planned = await runtime.planner.plan(
+        ENTRY_ID,
+        "results",
+        {
+            "batches": [
+                {"table_id": TABLE, "assay_results": [record(1)]},
+                {
+                    "table_id": "strtbl_other",
+                    "assay_results": [record(8, schemaId="assaysch_other")],
+                },
+            ]
+        },
+    )
+    fake.fail("POST", "/assay-results:bulk-create", 400)
+    with pytest.raises(Exception):  # noqa: B017 - partial completion is covered elsewhere
+        await runtime.planner.apply(planned.id)
+    fake.complete_upload()
+
+    data = await runtime.planner.verify_results(planned.id)
+
+    assert data["missing"] == [
+        {"table_id": TABLE, "plan_row_index": 0, "reason": "submission_failed"}
+    ]
+    assert data["counts"]["matched"] == 1
+    assert data["batches"][0]["submission"] == "submission_failed"
+    assert '"Other results"' in data["next_step"]
+    assert '"Assay results"' not in data["next_step"]
+
+
+async def test_verify_bounds_each_sample_but_counts_every_row(runtime, fake) -> None:
+    planned = await applied_plan(runtime, fake, [record(n) for n in range(30)])
+    fake.complete_upload()
+    for item in fake.assay_results:
+        item["fields"]["ct"]["value"] = -1
+
+    data = await runtime.planner.verify_results(planned.id, sample=5)
+
+    assert data["counts"]["mismatched"] == 30
+    assert len(data["mismatched"]) == 5 and len(data["needs_accept"]) == 5
+    assert data["sample_limit"] == 5
+    for bad in (0, 201, True):
+        with pytest.raises(ValidationError, match="sample"):
+            await runtime.planner.verify_results(planned.id, sample=bad)
+
+
+@pytest.mark.parametrize(
+    ("planned", "actual", "equal"),
+    [
+        (12, 12.0, True),
+        (True, 1, False),
+        (["b", "a"], ["a", "b"], True),
+        ([1, 2], [2, 1], False),
+        (["a"], ["a", "b"], False),
+        ("x", "x", True),
+        (None, None, True),
+    ],
+)
+def test_values_equal(planned, actual, equal) -> None:
+    assert readback.values_equal(planned, actual) is equal
+
+
+def test_missing_planned_field_is_a_mismatch_unless_planned_null() -> None:
+    fetched = {"schema": {"id": "assaysch_abc123"}, "fields": {"ct": {"value": 1}}}
+    assert readback.field_mismatches({"note": {"value": None}}, fetched, "assaysch_abc123") == []
+    assert readback.field_mismatches({"note": {"value": "n"}}, fetched, "assaysch_abc123") == [
+        {"field": "note", "planned": "n", "actual": None, "present": False}
+    ]
+    assert readback.field_mismatches({}, fetched, "assaysch_other")[0]["field"] == "schemaId"
+
+
+def test_archived_results_are_not_pending() -> None:
+    assert readback.result_state({"entryId": None, "archiveRecord": {"reason": "Retired"}}) == (
+        "archived"
+    )
+
+
+@pytest.fixture
+def invoke(benchling_env, fake, monkeypatch):
+    monkeypatch.setattr(cli, "Runtime", lambda environment: runtime_for(fake, environment))
+
+    def run(*args: str):
+        result = CliRunner().invoke(cli.app, ["--env", "sandbox", *args])
+        return result.exit_code, json.loads(result.stdout)
+
+    return run
+
+
+def test_cli_pending_and_verify_read_back_a_plan(invoke, fake, tmp_path) -> None:
+    spec = tmp_path / "results.json"
+    spec.write_text(json.dumps({"table_id": TABLE, "assay_results": [record()]}))
+    code, planned = invoke(
+        "changes", "plan", "--entry", ENTRY_ID, "--family", "results", "--spec", str(spec)
+    )
+    assert code == 0, planned
+    plan_id = planned["data"]["id"]
+    code, applied = invoke("changes", "apply", plan_id)
+    assert code == 0, applied
+    (result_id,) = fake.complete_upload()
+
+    code, pending = invoke("results", "pending", "--plan", plan_id)
+    assert code == 0, pending
+    assert pending["data"]["needs_accept"] == [result_id]
+    code, by_id = invoke("results", "pending", "--id", result_id, "--limit", "1")
+    assert code == 0 and by_id["data"]["counts"]["pending"] == 1
+    code, verified = invoke("results", "verify", plan_id, "--sample", "3")
+    assert code == 0, verified
+    assert verified["data"]["ok"] is True
+    assert verified["data"]["sample_limit"] == 3
+    code, failed = invoke("results", "pending")
+    assert code == 2 and failed["error"]["code"] == "validation_error"
+
+
+async def test_task_lookup_failure_and_unconfirmed_uploads_are_reported(runtime, fake) -> None:
+    planned = await applied_plan(runtime, fake, [record()])
+    fake.fail("GET", "/tasks/", 403, times=2)
+    pending = await runtime.planner.read_back_results(plan_id=planned.id)
+    assert pending["batches"][0]["remote_task_error"]["code"] == "access_denied"
+    assert pending["items"] == [] and bulk_get_calls(fake) == []
+    verified = await runtime.planner.verify_results(planned.id)
+    assert verified["missing"][0]["reason"] == "task_unreadable"
+
+    unconfirmed = await runtime.planner.plan(
+        ENTRY_ID, "results", {"table_id": TABLE, "assay_results": [record()]}
+    )
+    fake.bulk_response = {}
+    with pytest.raises(Exception):  # noqa: B017 - the unknown outcome is covered elsewhere
+        await runtime.planner.apply(unconfirmed.id)
+    verified = await runtime.planner.verify_results(unconfirmed.id)
+    assert verified["missing"][0]["reason"] == "submission_unconfirmed"
+    assert verified["batches"][0]["submission"] == "submission_unconfirmed"
+
+
+async def test_verify_reads_a_single_table_plan_without_batches(runtime, fake) -> None:
+    planned = await applied_plan(runtime, fake, [record(4)])
+    fake.complete_upload()
+    stored = runtime.repository.load_plan(planned.id)
+    legacy = stored.model_copy(
+        update={"after": {k: v for k, v in stored.after.items() if k != "batches"}}
+    )
+    batches = readback.planned_batches(legacy)
+    assert batches[0]["table_id"] == TABLE and batches[0]["table_name"] == "Assay results"
+    assert readback.planned_batches(stored.model_copy(update={"after": {"batches": ["bad"]}})) == []
+
+
+@pytest.mark.parametrize(
+    ("payload", "message"),
+    [
+        ({"assayResults": "nope"}, "unexpected bulk result response"),
+        ({"assayResults": ["nope"]}, "unexpected bulk result response"),
+    ],
+)
+async def test_bulk_get_rejects_malformed_responses(runtime, fake, payload, message) -> None:
+    fake.payload_overrides.append(("/assay-results:bulk-get", 200, payload))
+    with pytest.raises(Exception, match=message):
+        await runtime.service.get_assay_results(["id1"])
+
+
+async def test_bulk_get_ignores_records_without_ids(runtime, fake) -> None:
+    fake.payload_overrides.append(("/assay-results:bulk-get", 200, {"assayResults": [{}]}))
+    assert await runtime.service.get_assay_results(["id1"]) == {
+        "items": [],
+        "not_found": ["id1"],
+    }
+
+
+@pytest.mark.parametrize(
+    ("arguments", "message"),
+    [
+        ({"schema_id": " ", "created_after": "2026-11-19"}, "schema_id is required"),
+        ({"schema_id": "assaysch_abc123", "created_after": ""}, "created_after is required"),
+        (
+            {"schema_id": "assaysch_abc123", "created_after": "2026-11-19", "page_size": 0},
+            "page_size",
+        ),
+        (
+            {"schema_id": "assaysch_abc123", "created_after": "2026-11-19", "page_size": True},
+            "page_size",
+        ),
+    ],
+)
+async def test_list_assay_results_validates_arguments(runtime, fake, arguments, message) -> None:
+    with pytest.raises(ValidationError, match=message):
+        await runtime.service.list_assay_results(**arguments)
+    assert fake.calls == []
+
+
+async def test_list_assay_results_rejects_a_malformed_page(runtime, fake) -> None:
+    fake.payload_overrides.append(("/assay-results", 200, {"items": []}))
+    with pytest.raises(Exception, match="unexpected result list response"):
+        await runtime.service.list_assay_results(
+            schema_id="assaysch_abc123", created_after="2026-11-19"
+        )
+
+
+def test_readback_helpers_handle_sparse_records() -> None:
+    assert readback.field_values({"fields": None}) == {}
+    assert readback.field_values({"fields": {"a": 1}}) == {"a": 1}
+    assert readback.record_schema_id({"schemaId": "assaysch_abc123"}) == "assaysch_abc123"
+    assert readback.record_schema_id({}) is None
+    assert readback.values_equal([1, 2], [1, 2]) is True
+    assert "go to its results table" in readback.pending_next_step(2, entry_id=ENTRY_ID)
+    assert readback.pending_next_step(0) is None

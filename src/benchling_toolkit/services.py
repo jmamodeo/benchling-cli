@@ -84,6 +84,7 @@ KNOWN_PART_TYPES = {
 
 TABLE_ROW_PAGE_SIZE = 100
 ENTRY_BULK_GET_LIMIT = 100
+ASSAY_RESULT_BULK_GET_LIMIT = 200
 TEMPLATE_TEXT_PREVIEW_LIMIT = 160
 
 _BENCHLING_VALUE_TYPES = {
@@ -1387,6 +1388,73 @@ class BenchlingService:
             params["schema.eq"] = schema_id
         items = [item async for item in self.api.paginate("/result/items", params=params)]
         return {"items": items, "entry_id": resolved, "schema_id": schema_id}
+
+    async def get_assay_results(self, result_ids: object) -> dict[str, Any]:
+        """Fetch V2 assay results by ID through bulk-get, 200 IDs per request.
+
+        IDs that Benchling does not return are listed under ``not_found``.
+        Pending results are included: they are records without an entry.
+        """
+        requested = self._bulk_lookup_ids(result_ids, "result_ids") or []
+        unique = list(dict.fromkeys(requested))
+        found: dict[str, dict[str, Any]] = {}
+        for offset in range(0, len(unique), ASSAY_RESULT_BULK_GET_LIMIT):
+            batch = unique[offset : offset + ASSAY_RESULT_BULK_GET_LIMIT]
+            payload = await self.api.request(
+                "GET",
+                "/assay-results:bulk-get",
+                version=2,
+                params={"assayResultIds": ",".join(batch)},
+            )
+            records = payload.get("assayResults")
+            if not isinstance(records, list) or any(not isinstance(item, dict) for item in records):
+                raise UpstreamError("Benchling returned an unexpected bulk result response")
+            for item in records:
+                if isinstance(item.get("id"), str):
+                    found[item["id"]] = item
+        return {
+            "items": [found[result_id] for result_id in unique if result_id in found],
+            "not_found": [result_id for result_id in unique if result_id not in found],
+        }
+
+    async def list_assay_results(
+        self,
+        *,
+        schema_id: str,
+        created_after: str,
+        page_size: int = 50,
+        cursor: str | None = None,
+    ) -> dict[str, Any]:
+        """Return one page of V2 assay results for a schema created at or after a time.
+
+        V2 ``GET /assay-results`` has no entry filter, so pending results (no entry yet)
+        are found by schema and creation time. ``created_after`` is RFC 3339.
+        """
+        if not isinstance(schema_id, str) or not schema_id.strip():
+            raise ValidationError("schema_id is required")
+        if not isinstance(created_after, str) or not created_after.strip():
+            raise ValidationError("created_after is required")
+        try:
+            datetime.fromisoformat(created_after.strip())
+        except ValueError as exc:
+            raise ValidationError(
+                "created_after must be an RFC 3339 date or datetime, e.g. 2026-11-19T00:00:00Z"
+            ) from exc
+        if isinstance(page_size, bool) or page_size < 1 or page_size > 100:
+            raise ValidationError("page_size must be between 1 and 100")
+        params: dict[str, Any] = {
+            "schemaId": schema_id.strip(),
+            "createdAt.gte": created_after.strip(),
+            "sort": "createdAt:asc",
+            "pageSize": page_size,
+        }
+        if cursor:
+            params["nextToken"] = cursor
+        payload = await self.api.request("GET", "/assay-results", version=2, params=params)
+        records = payload.get("assayResults")
+        if not isinstance(records, list) or any(not isinstance(item, dict) for item in records):
+            raise UpstreamError("Benchling returned an unexpected result list response")
+        return {"items": records, "next_token": payload.get("nextToken") or None}
 
     async def get_result(self, result_id: str) -> dict[str, Any]:
         """Fetch a single result by ID."""

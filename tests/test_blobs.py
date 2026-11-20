@@ -122,6 +122,32 @@ async def test_apply_uploads_once_then_links_the_blob_id(
     assert _sidecars() == []
 
 
+async def test_verify_compares_an_uploaded_file_by_its_blob_id(
+    runtime, fake, tmp_path, attachments
+) -> None:
+    path = _write(tmp_path / "plot.png", b"synthetic plot")
+    planned = await runtime.planner.plan(
+        ENTRY_ID, "results", _upload({"plot": {"value": {"file": str(path)}}})
+    )
+    await runtime.planner.apply(planned.id)
+    fake.complete_upload()
+
+    data = await runtime.planner.verify_results(planned.id)
+    assert data["counts"]["matched"] == 1
+    assert data["mismatched"] == data["missing"] == []
+
+    fake.assay_results[0]["fields"]["plot"]["value"] = "00000000-0000-4000-8000-000000000099"
+    data = await runtime.planner.verify_results(planned.id)
+    [row] = data["mismatched"]
+    assert row["fields"] == [
+        {
+            "field": "plot",
+            "planned": BLOB_1,
+            "actual": "00000000-0000-4000-8000-000000000099",
+        }
+    ]
+
+
 async def test_multi_value_attachment_mixes_files_and_existing_blob_ids(
     runtime, fake, tmp_path
 ) -> None:
