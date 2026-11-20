@@ -498,6 +498,8 @@ class FakeBenchling:
         self.bulk_response: dict[str, Any] = {"taskId": "task_abc123"}
         self.bulk_responses: list[dict[str, Any]] = []
         self.result_updates: list[dict[str, Any]] = []
+        self.assay_results: list[dict[str, Any]] = []
+        self.assay_result_page_size: int | None = None
         self.linked_entities = {
             "ent_target": {"id": "ent_target", "typedSchema": {"id": "es_target"}},
             "ent_wrong_schema": {"id": "ent_wrong_schema", "typedSchema": {"id": "es_other"}},
@@ -1296,6 +1298,65 @@ class FakeBenchling:
             return 202, self.bulk_responses.pop(0)
         return 202, dict(self.bulk_response)
 
+    def complete_upload(
+        self, task_id: str = "task_abc123", *, payload_index: int = -1
+    ) -> list[str]:
+        """Create pending V2 results from a bulk-create payload and finish its task."""
+        payload = self.bulk_payloads[payload_index]
+        created = []
+        for record in payload["assayResults"]:
+            number = len(self.assay_results) + len(created) + 1
+            created.append(
+                {
+                    "id": f"00000000-0000-4000-8000-{number:012d}",
+                    "v3Id": f"result_up{number}",
+                    "entryId": None,
+                    "isReviewed": False,
+                    "archiveRecord": None,
+                    "createdAt": f"2026-11-19T00:00:{number:02d}Z",
+                    "schema": {"id": record["schemaId"], "name": "Synthetic result schema"},
+                    "projectId": record.get("projectId"),
+                    "fields": {
+                        name: {"value": value.get("value"), "displayValue": str(value.get("value"))}
+                        for name, value in record["fields"].items()
+                    },
+                }
+            )
+        self.assay_results.extend(created)
+        self.tasks[task_id] = {
+            "status": "SUCCEEDED",
+            "response": {
+                "assayResults": [{"id": item["id"], "v3Id": item["v3Id"]} for item in created]
+            },
+        }
+        return [item["id"] for item in created]
+
+    def accept_results(self, result_ids: list[str], entry_id: str = ENTRY_ID) -> None:
+        for item in self.assay_results:
+            if item["id"] in result_ids:
+                item["entryId"] = entry_id
+                item["isReviewed"] = True
+
+    def _bulk_get_assay_results(self, call: Call) -> tuple[int, dict[str, Any]]:
+        requested = [item for item in call.params.get("assayResultIds", "").split(",") if item]
+        if not requested or len(requested) > 200:
+            return 400, {"error": {"message": "assayResultIds must list 1 to 200 IDs"}}
+        found = [deepcopy(item) for item in self.assay_results if item["id"] in requested]
+        return 200, {"assayResults": found}
+
+    def _list_assay_results_v2(self, call: Call) -> tuple[int, dict[str, Any]]:
+        if "entry.eq" in call.params or "entryId" in call.params:
+            return 400, {"error": {"message": "unsupported filter"}}
+        items = self.assay_results
+        if "schemaId" in call.params:
+            items = [
+                r for r in items if (r.get("schema") or {}).get("id") == call.params["schemaId"]
+            ]
+        if "createdAt.gte" in call.params:
+            items = [r for r in items if r["createdAt"] >= call.params["createdAt.gte"]]
+        size = self.assay_result_page_size or int(call.params.get("pageSize") or 50)
+        return self._page(deepcopy(items), call, size, key="assayResults")
+
     # ---- results -----------------------------------------------------
     def _list_results(self, call: Call) -> tuple[int, dict[str, Any]]:
         items = self.results
@@ -1387,4 +1448,6 @@ ROUTES: list[tuple[str, str]] = [
     (r"/projects/(\w+)", "GET v2|get_project"),
     (r"/tasks/(\w+)", "GET v2|get_task"),
     (r"/assay-results:bulk-create", "POST v2|bulk_create"),
+    (r"/assay-results:bulk-get", "GET v2|bulk_get_assay_results"),
+    (r"/assay-results", "GET v2|list_assay_results_v2"),
 ]
