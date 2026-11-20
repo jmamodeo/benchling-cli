@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-20
+
 ### Added
 
 - Entry output has a `web_url` field, the entry's link in the Benchling web app, taken from V3 `webUrl` or V2 `webURL` (`null` when Benchling returns none). It is in `entry resolve`, `entry get` (with or without `--full`), `entry list` and `entry bulk-get`, and in the MCP tools `resolve_entry`, `get_entry`, `list_entries` and `get_entries`. `changes apply` and MCP `apply_changes` return `web_url` for an entry created from a template and for a results upload. The pending-results `next_step` from `changes apply`, `results pending --plan` and `results verify` now includes the link, not only the entry ID.
@@ -226,7 +228,8 @@ All notable changes to this project are documented here. The format is based on
 - Versioned JSON envelope, stable exit codes, and published JSON schemas.
 - Operating-system trust-store TLS verification.
 
-[Unreleased]: https://github.com/jmamodeo/benchling-toolkit/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/jmamodeo/benchling-toolkit/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/jmamodeo/benchling-toolkit/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/jmamodeo/benchling-toolkit/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/jmamodeo/benchling-toolkit/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/jmamodeo/benchling-toolkit/compare/v0.2.0...v0.4.0
