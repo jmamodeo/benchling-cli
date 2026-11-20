@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-11-20
+
 ### Added
 
 - The pip package ships `SKILL.md`. It is installed as `share/benchling-toolkit/SKILL.md` under the environment prefix, next to the JSON schemas and contracts, so an agent can read the skill without a clone of the repository.
@@ -240,7 +242,8 @@ All notable changes to this project are documented here. The format is based on
 - Versioned JSON envelope, stable exit codes, and published JSON schemas.
 - Operating-system trust-store TLS verification.
 
-[Unreleased]: https://github.com/jmamodeo/benchling-toolkit/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/jmamodeo/benchling-toolkit/compare/v0.5.2...HEAD
+[0.5.2]: https://github.com/jmamodeo/benchling-toolkit/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/jmamodeo/benchling-toolkit/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/jmamodeo/benchling-toolkit/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/jmamodeo/benchling-toolkit/compare/v0.4.0...v0.4.1
