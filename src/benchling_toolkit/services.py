@@ -256,17 +256,34 @@ def rows_items_path(base_url: str, part_id: str, rows_url: Any, *, collection: s
     return path
 
 
+_CELL_ERROR_KEYS = ("errorType", "message", "type")
+
+
+def _invalid_rows(**context: Any) -> UpstreamError:
+    """The invalid-rows error, with only locating context (never a cell value) in details."""
+    details = {key: value for key, value in context.items() if value is not None}
+    return UpstreamError("Table response contained invalid rows", details=details)
+
+
+def _typename_of(value: Any) -> str | None:
+    typename = value.get("__typename") if isinstance(value, dict) else None
+    return typename if isinstance(typename, str) else None
+
+
 def normalize_benchling_value(value: Any, *, require_text: bool) -> dict[str, Any]:
-    """Map a Benchling value object (`__typename` plus `value`) onto `{type, value}`."""
+    """Map a Benchling value object (`__typename` plus `value`) onto `{type, value}`.
+
+    `value` is optional on every BenchlingValue type, so a missing one is `null`.
+    """
+    typename = _typename_of(value)
     if not isinstance(value, dict):
-        raise UpstreamError("Table response contained invalid rows")
-    typename = value.get("__typename")
-    kind = _BENCHLING_VALUE_TYPES.get(typename) if isinstance(typename, str) else None
+        raise _invalid_rows()
+    kind = _BENCHLING_VALUE_TYPES.get(typename) if typename is not None else None
     if kind is None or (require_text and kind != "text_value"):
-        raise UpstreamError("Table response contained invalid rows")
-    if "value" not in value or (require_text and not isinstance(value.get("value"), str)):
-        raise UpstreamError("Table response contained invalid rows")
-    normalized: dict[str, Any] = {"type": kind, "value": value["value"]}
+        raise _invalid_rows(typename=typename)
+    if require_text and not isinstance(value.get("value"), str):
+        raise _invalid_rows(typename=typename)
+    normalized: dict[str, Any] = {"type": kind, "value": value.get("value")}
     if kind == "text_and_url_value" and "url" in value:
         normalized["url"] = value["url"]
     if kind == "decimal_value" and "numericValue" in value:
@@ -274,41 +291,106 @@ def normalize_benchling_value(value: Any, *, require_text: bool) -> dict[str, An
     return normalized
 
 
-def normalize_table_cell(cell: Any, *, require_text: bool) -> dict[str, Any]:
-    """Normalize one table cell. Unstructured cells must carry a text input."""
+def normalize_evaluation_value(value: Any) -> dict[str, Any]:
+    """Normalize a cell's `evaluationValue` without failing on shapes the toolkit does not know.
+
+    Known BenchlingValue types map as for `inputValue`. A `*CellEvaluationValue`
+    (for example ObjectLinkCellEvaluationValue with `id` and `name`) keeps its
+    keys under `type: <typename>`. Any other typename becomes
+    `{type: "unknown", typename}`; readers then fall back to `inputValue`, as the
+    Benchling docs advise.
+    """
+    if not isinstance(value, dict):
+        raise _invalid_rows()
+    typename = _typename_of(value)
+    if typename is not None and typename in _BENCHLING_VALUE_TYPES:
+        return normalize_benchling_value(value, require_text=False)
+    if typename is not None and typename.split(".")[-1].endswith("CellEvaluationValue"):
+        normalized: dict[str, Any] = {"type": typename}
+        normalized.update({key: item for key, item in value.items() if key != "__typename"})
+        return normalized
+    return {"type": "unknown", "typename": typename}
+
+
+def _cell_errors(errors: Any) -> list[dict[str, Any]] | None:
+    """The cell's CellError list (errorType, message, type), when Benchling sent one."""
+    if not isinstance(errors, list):
+        return None
+    return [
+        {key: error[key] for key in _CELL_ERROR_KEYS if key in error}
+        for error in errors
+        if isinstance(error, dict)
+    ]
+
+
+def normalize_table_cell(
+    cell: Any,
+    *,
+    require_text: bool,
+    part_id: str | None = None,
+    row_index: int | None = None,
+    cell_index: int | None = None,
+) -> dict[str, Any]:
+    """Normalize one table cell. Unstructured cells must carry a text input.
+
+    A rejected cell raises with part, row, cell and typename in `details`, never its values.
+    """
+    location = {"part_id": part_id, "row_index": row_index, "cell_index": cell_index}
     if not isinstance(cell, dict):
-        raise UpstreamError("Table response contained invalid rows")
+        raise _invalid_rows(**location)
     normalized: dict[str, Any] = {}
     if cell.get("inputValue") is not None:
-        normalized["inputValue"] = normalize_benchling_value(
-            cell["inputValue"], require_text=require_text
-        )
+        try:
+            normalized["inputValue"] = normalize_benchling_value(
+                cell["inputValue"], require_text=require_text
+            )
+        except UpstreamError:
+            raise _invalid_rows(**location, typename=_typename_of(cell["inputValue"])) from None
     elif require_text:
-        raise UpstreamError("Table response contained invalid rows")
+        raise _invalid_rows(**location)
     evaluation = cell.get("evaluationValue")
     if evaluation is not None:
-        normalized["evaluationValue"] = normalize_benchling_value(evaluation, require_text=False)
+        try:
+            normalized["evaluationValue"] = normalize_evaluation_value(evaluation)
+        except UpstreamError:
+            raise _invalid_rows(**location, typename=_typename_of(evaluation)) from None
     for key in ("format", "mergeRange", "mergeRangeParent", "selectorId"):
         if cell.get(key) is not None:
             normalized[key] = cell[key]
+    errors = _cell_errors(cell.get("errors"))
+    if errors:
+        normalized["errors"] = errors
     return normalized
 
 
-def normalize_table_row(row: Any, *, require_text: bool) -> dict[str, Any]:
-    """Normalize one table row and its cells."""
+def normalize_table_row(
+    row: Any,
+    *,
+    require_text: bool,
+    part_id: str | None = None,
+    position: int | None = None,
+) -> dict[str, Any]:
+    """Normalize one table row and its cells.
+
+    `position` is the row's place in the read; it names the row in an error
+    when the row has no valid `rowIndex`.
+    """
+    raw_index = row.get("rowIndex") if isinstance(row, dict) else None
+    valid_index = isinstance(raw_index, int) and not isinstance(raw_index, bool) and raw_index >= 0
+    location: dict[str, Any] = {
+        "part_id": part_id,
+        "row_index": raw_index if valid_index else position,
+    }
     if not isinstance(row, dict) or not isinstance(row.get("cells"), list):
-        raise UpstreamError("Table response contained invalid rows")
+        raise _invalid_rows(**location)
     for key in ("id", "rowId"):
         if key in row and row[key] is not None and (not isinstance(row[key], str) or not row[key]):
-            raise UpstreamError("Table response contained invalid rows")
-    row_index = row.get("rowIndex")
-    if row_index is not None and (
-        isinstance(row_index, bool) or not isinstance(row_index, int) or row_index < 0
-    ):
-        raise UpstreamError("Table response contained invalid rows")
+            raise _invalid_rows(**location)
+    if raw_index is not None and not valid_index:
+        raise _invalid_rows(**location)
     for key in ("isArchived", "isSubmittable"):
         if key in row and row[key] is not None and not isinstance(row[key], bool):
-            raise UpstreamError("Table response contained invalid rows")
+            raise _invalid_rows(**location)
     status = row.get("submissionStatus")
     if status is not None and (
         not isinstance(status, str)
@@ -320,7 +402,7 @@ def normalize_table_row(row: Any, *, require_text: bool) -> dict[str, Any]:
             "UNEVALUATED",
         }
     ):
-        raise UpstreamError("Table response contained invalid rows")
+        raise _invalid_rows(**location)
     result = row.get("result")
     if result is not None and (
         not isinstance(result, dict)
@@ -334,9 +416,12 @@ def normalize_table_row(row: Any, *, require_text: bool) -> dict[str, Any]:
             )
         )
     ):
-        raise UpstreamError("Table response contained invalid rows")
+        raise _invalid_rows(**location)
     normalized: dict[str, Any] = {
-        "cells": [normalize_table_cell(cell, require_text=require_text) for cell in row["cells"]]
+        "cells": [
+            normalize_table_cell(cell, require_text=require_text, cell_index=index, **location)
+            for index, cell in enumerate(row["cells"])
+        ]
     }
     for key in _TABLE_ROW_KEYS:
         if key in row and row[key] is not None:
@@ -843,15 +928,30 @@ class BenchlingService:
             "result_schema_id": schema_id if isinstance(schema_id, str) and schema_id else None,
             "row_count": row_count,
             "submission_status": detail.get("submissionStatus"),
-            "items": [self._normalize_results_table_row(row, len(columns)) for row in raw_rows],
+            "items": [
+                self._normalize_results_table_row(row, len(columns), part_id=table_id)
+                for row in raw_rows
+            ],
             "next_token": token,
         }
 
     @staticmethod
-    def _normalize_results_table_row(row: Any, column_count: int) -> dict[str, Any]:
-        normalized = normalize_table_row(row, require_text=False)
+    def _normalize_results_table_row(
+        row: Any, column_count: int, *, part_id: str, position: int | None = None
+    ) -> dict[str, Any]:
+        normalized = normalize_table_row(
+            row, require_text=False, part_id=part_id, position=position
+        )
         if len(normalized["cells"]) != column_count:
-            raise UpstreamError("Table response contained invalid rows")
+            raise UpstreamError(
+                "Table response contained invalid rows",
+                details={
+                    "part_id": part_id,
+                    "row_index": normalized.get("rowIndex", position),
+                    "cells": len(normalized["cells"]),
+                    "columns": column_count,
+                },
+            )
         return normalized
 
     async def _read_part_table(
@@ -879,14 +979,18 @@ class BenchlingService:
                     details={"part_id": part_id},
                 )
             columns = raw_columns
-        rows = [
-            (
-                self._normalize_results_table_row(item, len(columns))
+        rows: list[dict[str, Any]] = []
+        async for item in self.api.paginate(path, params={"pageSize": TABLE_ROW_PAGE_SIZE}):
+            position = len(rows)
+            rows.append(
+                self._normalize_results_table_row(
+                    item, len(columns), part_id=part_id, position=position
+                )
                 if columns is not None
-                else normalize_table_row(item, require_text=True)
+                else normalize_table_row(
+                    item, require_text=True, part_id=part_id, position=position
+                )
             )
-            async for item in self.api.paginate(path, params={"pageSize": TABLE_ROW_PAGE_SIZE})
-        ]
         row_count = detail.get("rowCount")
         if isinstance(row_count, bool) or not isinstance(row_count, int):
             raise UpstreamError(
