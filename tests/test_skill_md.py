@@ -134,7 +134,29 @@ def test_body_covers_the_read_and_preview_workflows() -> None:
     ):
         assert phrase in body
     assert "client secret" in body.casefold()
-    assert "Do not run `auth login`" in body
+    assert "Run `auth login` only when the person has given you the credentials" in body
+    assert "never invent a tenant URL, client ID, or secret" in body
+
+
+def test_skill_pairs_the_toolkit_with_a_browser_without_driving_one() -> None:
+    body = SKILL.split("\n---\n", 1)[1]
+    description = _frontmatter()["description"]
+    assert isinstance(description, str)
+    assert "The toolkit does not drive a browser" in description
+    assert "browser automation" not in description
+    assert "never drives a browser" in body
+    assert "Do not automate the browser" not in body
+    assert "the task needs the Benchling website rather than the API" not in body
+    sections = re.findall(r"^## (.+)$", body, flags=re.MULTILINE)
+    pending = sections.index("Results land as pending")
+    assert sections[pending + 1] == "Working alongside the browser"
+    alongside = body.split("## Working alongside the browser", 1)[1].split("\n## ", 1)[0]
+    for phrase in ("`web_url`", "results pending --plan PLAN_ID", "results verify PLAN_ID"):
+        assert phrase in alongside
+    assert (
+        "The toolkit writes as the app; the browser acts as the signed-in user, so the "
+        "signed-in user needs access to the entry and the app needs access to its folder."
+    ) in alongside
 
 
 def test_skill_urls_are_the_repository_only() -> None:
