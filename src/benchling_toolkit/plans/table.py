@@ -134,6 +134,7 @@ class TablePlanning(PlannerBase):
         return after_content
 
     async def _apply_table(self, plan: ChangePlan, journal: ChangeJournal) -> dict[str, Any]:
+        entry_id = self._entry_id(plan)
         part_id = plan.after["table_part_id"]
         current = await self.service.get_table(part_id)
         version = entry_version(current)
@@ -153,7 +154,7 @@ class TablePlanning(PlannerBase):
             )
         try:
             response = await self.api.request(
-                "PATCH", f"/entry/{plan.entry_id}", json={"partsMutation": mutation}
+                "PATCH", f"/entry/{entry_id}", json={"partsMutation": mutation}
             )
         except ConflictError as exc:
             raise ConflictError(

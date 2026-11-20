@@ -1,10 +1,10 @@
 ---
 name: benchling-toolkit
-description: "Use the benchling CLI and its local MCP server to list, read, and export a Benchling notebook, and to preview a change before applying it. Use when the user asks to list entries, read an entry, section, part, unstructured table, schema, or assay result, export a table or results to JSON or CSV, or plan and then apply a document, table, field, or result change. Credentials come from benchling auth login --env NAME and stay in the OS keychain. The MCP server is read-only unless it was started with --allow-writes ENV. Do not use this for browser automation, or when no environment has been saved with auth login."
+description: "Use the benchling CLI and its local MCP server to list, read, and export a Benchling notebook, and to preview a change before applying it. Use when the user asks to list, find, or read entries, containers, schemas, or assay results; read sections or document parts; export a table or results to JSON or CSV; or plan and then apply a document, table, field, result, or container change. Credentials come from benchling auth login --env NAME and stay in the OS keychain. The MCP server is read-only unless it was started with --allow-writes ENV. Do not use this for browser automation, or when no environment has been saved with auth login."
 license: Apache-2.0
 compatibility: "Requires the benchling command from benchling-toolkit (Python 3.11+), an OS keychain, and network access to the tenant saved for that environment. The MCP server is local stdio."
 metadata:
-  summary: "Safe reads and previewed writes for a Benchling notebook. Lists, reads, and exports entries, tables, and assay results. Applies a change only after a local plan. The MCP server is read-only unless started with --allow-writes ENV."
+  summary: "Safe reads and previewed writes for a Benchling notebook. Lists, reads, and exports entries, containers, tables, and assay results. Applies a change only after a local plan. The MCP server is read-only unless started with --allow-writes ENV."
   version: "0.4.1"
   docs_url: "https://github.com/jmamodeo/benchling-toolkit"
 ---
@@ -19,10 +19,11 @@ Use this when an agent should work in a Benchling tenant through the `benchling`
 
 Use this skill when the person asks to:
 
-- list entries, schemas, or assay results
+- list entries, containers, container schemas, schemas, or assay results
 - read an entry, a section, a document part, an unstructured table, entry fields, or results-table rows
+- get a container by ID or find containers by barcode or name
 - export a table or assay results to a local JSON or CSV file
-- preview a document, table, field, or result change, and apply it only after they accept that plan
+- preview a document, table, field, result, or container change, and apply it only after they accept that plan
 
 Stop and do not improvise when:
 
@@ -98,10 +99,14 @@ benchling --env NAME entry list --folder lib_example --name "Example entry"
 benchling --env NAME entry list --modified-after 2026-01-01 --cursor NEXT_TOKEN
 benchling --env NAME schema list
 benchling --env NAME schema list --kind result --limit 50
+benchling --env NAME container get con_example
+benchling --env NAME container find --barcode VIAL-001
+benchling --env NAME container find --name "Sample vial"
+benchling --env NAME container schema list --limit 50
 benchling --env NAME results list --entry etr_example --page-size 100
 ```
 
-`entry list` filters are applied by Benchling. `--name` is an exact match, not a substring. `--folder` uses the V2 entry list. `--modified-after` and `--modified-before` take `YYYY-MM-DD` or an RFC3339 timestamp that includes a time zone. `--limit` is 1 to 100 and defaults to 50 on `entry list` and `schema list`. `schema list --kind` is `entry`, `result`, or `run`. Omit `--kind` to list all three. `results list` uses `--page-size` (default 100, maximum 100), plus optional `--schema` and `--cursor`.
+`entry list` filters are applied by Benchling. `--name` is an exact match, not a substring. `--folder` uses the V2 entry list. `container find` requires exactly one exact `--barcode` or `--name`. `container find` and `container schema list` return one page, default 50 and maximum 100; pass `next_token` back with `--cursor`. Container schema results include their field definitions. `--modified-after` and `--modified-before` take `YYYY-MM-DD` or an RFC3339 timestamp that includes a time zone. `--limit` is 1 to 100 and defaults to 50 on `entry list` and `schema list`. `schema list --kind` is `entry`, `result`, or `run`. Omit `--kind` to list all three. `results list` uses `--page-size` (default 100, maximum 100), plus optional `--schema` and `--cursor`.
 
 ### Read entries, tables, and results
 
@@ -138,15 +143,19 @@ benchling --env NAME export --kind assay-results --entry etr_example --schema as
 
 ## Preview, then apply
 
-One plan covers one entry and one family: `document`, `table`, `fields`, or `results`. Write the JSON specification to a file, then plan. `--spec -` reads that JSON from stdin. Do not combine `--spec` with `--csv`.
+One plan covers one entry and one family (`document`, `table`, `fields`, or `results`), or a container operation (`containers`). Write the JSON specification to a file, then plan. `--spec -` reads that JSON from stdin. Do not combine `--spec` with `--csv`.
 
 ```console
 benchling --env NAME changes plan --entry etr_example --family table --spec set-cells.json
+benchling --env NAME changes plan --family containers --spec create-container.json
+benchling --env NAME changes plan --family containers --spec transfer-container.json
 benchling --env NAME changes apply PLAN_ID
 benchling --env NAME changes status PLAN_ID
 ```
 
 `changes plan` does not write to Benchling. `changes apply` re-checks the plan's preconditions, then writes. `changes status` reads the local journal and does not write.
+
+Container create plans name a `schema_id`; transfer plans name a `source_container_id`, a `destination_container_id`, and `destination_contents` (using `entity_id`). Review the preview before `changes apply`. Create re-checks the schema and transfer re-checks both container modification timestamps. They are single-use plans, and uncertain writes are not retried.
 
 Table, set cells. `examples/table-set-cells.json` is this shape. `table_part_id` is a `docpart_…` id.
 

@@ -234,6 +234,7 @@ class PlanFamily(str, Enum):
     TABLE = "table"
     FIELDS = "fields"
     RESULTS = "results"
+    CONTAINERS = "containers"
 
 
 class PlanStatus(str, Enum):
@@ -260,7 +261,7 @@ class ChangePlan(BaseModel):
     created_at: datetime
     env: str
     tenant_url: str
-    entry_id: str
+    entry_id: str | None = None
     family: PlanFamily
     request: dict[str, Any]
     before: dict[str, Any]

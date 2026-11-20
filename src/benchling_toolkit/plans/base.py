@@ -8,9 +8,11 @@ from typing import Any
 from ..api import BenchlingAPI
 from ..errors import (
     ConflictError,
+    ValidationError,
 )
 from ..models import (
     ChangeJournal,
+    ChangePlan,
     JournalEvent,
 )
 from ..services import (
@@ -51,6 +53,13 @@ class PlannerBase:
                 f"{label.capitalize()} changed after the plan was created",
                 details={"expected": expected, "actual": actual},
             )
+
+    @staticmethod
+    def _entry_id(plan: ChangePlan) -> str:
+        """Require an entry target when applying an entry-family plan."""
+        if not plan.entry_id:
+            raise ValidationError("Entry change plan has no entry ID")
+        return plan.entry_id
 
     def _event(
         self, journal: ChangeJournal, stage: str, status: str, details: dict[str, Any]

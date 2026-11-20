@@ -103,6 +103,34 @@ def test_version_flag_matches_package_metadata(invoke) -> None:
         ),
         (["results", "get", "result_1"], "id", "result_1"),
         (["results", "tables", ENTRY_ID], "complete", True),
+        (["container", "get", "con_source1"], "id", "con_source1"),
+        (
+            ["container", "find", "--barcode", "BAR-SOURCE"],
+            "items",
+            [
+                {
+                    "id": "con_source1",
+                    "name": "Source vial",
+                    "barcode": "BAR-SOURCE",
+                    "modifiedAt": "2026-01-01T00:00:00Z",
+                    "schema": {"id": "contsch_abc123"},
+                    "contents": [{"entity": {"id": "ent_sample1"}}],
+                }
+            ],
+        ),
+        (
+            ["container", "schema", "list"],
+            "items",
+            [
+                {
+                    "id": "contsch_abc123",
+                    "name": "Synthetic vial schema",
+                    "type": "container",
+                    "modifiedAt": "2026-01-01T00:00:00Z",
+                    "fieldDefinitions": [{"name": "Storage note", "type": "text"}],
+                }
+            ],
+        ),
     ],
 )
 def test_read_commands_succeed(invoke, args, key, expected) -> None:
@@ -217,6 +245,32 @@ def test_plan_status_apply_lifecycle_through_cli(invoke, fake, tmp_path) -> None
     assert TEXT_PART not in fake.part_ids()
     code, again, _ = invoke("changes", "apply", plan_id)
     assert code == 5 and again["error"]["code"] == "conflict"
+
+
+def test_container_create_uses_changes_plan_and_apply(invoke, fake, tmp_path) -> None:
+    code, planned, _ = invoke(
+        "changes",
+        "plan",
+        "--family",
+        "containers",
+        "--spec",
+        write_spec(
+            tmp_path,
+            {
+                "operation": "create",
+                "schema_id": "contsch_abc123",
+                "name": "Synthetic vial from CLI",
+            },
+        ),
+    )
+    assert code == 0
+    assert planned["data"]["entry_id"] is None
+    assert planned["data"]["family"] == "containers"
+    assert fake.writes() == []
+    code, applied, _ = invoke("changes", "apply", planned["data"]["id"])
+    assert code == 0
+    assert applied["data"]["journal"]["status"] == "succeeded"
+    assert [call.path for call in fake.writes()] == ["/api/v2/containers"]
 
 
 def test_plan_reads_spec_from_stdin(invoke) -> None:

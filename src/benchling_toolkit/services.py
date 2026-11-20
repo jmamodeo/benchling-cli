@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from datetime import UTC, datetime
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from . import listing
 from .api import BenchlingAPI
@@ -718,6 +718,84 @@ class BenchlingService:
             )
         ]
         return {"schema": schema, "field_definitions": await self._with_dropdowns(fields)}
+
+    async def get_container(self, container_id: str) -> dict[str, Any]:
+        """Return one V2 inventory container by ID."""
+        container_id = self._container_reference(container_id, "container_id")
+        payload = await self.api.request(
+            "GET", f"/containers/{quote(container_id, safe='')}", version=2
+        )
+        return self._v2_object(payload, "container")
+
+    async def get_container_schema(self, schema_id: str) -> dict[str, Any]:
+        """Return one V2 container schema and its embedded field definitions."""
+        schema_id = self._container_reference(schema_id, "schema_id")
+        payload = await self.api.request(
+            "GET", f"/container-schemas/{quote(schema_id, safe='')}", version=2
+        )
+        return self._v2_object(payload, "container schema")
+
+    async def find_containers(
+        self,
+        *,
+        barcode: object = None,
+        name: object = None,
+        limit: object = listing.LIST_LIMIT,
+        cursor: object = None,
+    ) -> dict[str, Any]:
+        """Return one V2 container page filtered by an exact barcode or name."""
+        if (barcode is None) == (name is None):
+            raise ValidationError("Specify exactly one of barcode or name")
+        page_size = listing.check_limit(limit)
+        params: dict[str, Any] = {"pageSize": page_size}
+        key, value = ("barcodes", barcode) if barcode is not None else ("name", name)
+        search_value = self._container_reference(value, key)
+        if key == "barcodes" and "," in search_value:
+            raise ValidationError("barcode must identify one container")
+        params[key] = search_value
+        if cursor is not None:
+            if not isinstance(cursor, str) or not cursor:
+                raise ValidationError("cursor must be a non-empty string")
+            params["nextToken"] = cursor
+        payload = await self.api.request("GET", "/containers", version=2, params=params)
+        containers = payload.get("containers")
+        if not isinstance(containers, list) or any(
+            not isinstance(item, dict) for item in containers
+        ):
+            raise UpstreamError("Benchling returned an unexpected container list")
+        next_token = payload.get("nextToken")
+        if next_token is not None and not isinstance(next_token, str):
+            raise UpstreamError("Benchling returned an invalid container pagination token")
+        return {"items": containers, "next_token": next_token or None}
+
+    async def list_container_schemas(
+        self, *, limit: object = listing.LIST_LIMIT, cursor: object = None
+    ) -> dict[str, Any]:
+        """Return one page of V2 container schemas, including embedded field definitions."""
+        page_size = listing.check_limit(limit)
+        params: dict[str, Any] = {"pageSize": page_size}
+        if cursor is not None:
+            if not isinstance(cursor, str) or not cursor:
+                raise ValidationError("cursor must be a non-empty string")
+            params["nextToken"] = cursor
+        payload = await self.api.request("GET", "/container-schemas", version=2, params=params)
+        schemas = payload.get("containerSchemas")
+        if not isinstance(schemas, list) or any(not isinstance(item, dict) for item in schemas):
+            raise UpstreamError("Benchling returned an unexpected container schema list")
+        next_token = payload.get("nextToken")
+        if next_token is not None and not isinstance(next_token, str):
+            raise UpstreamError("Benchling returned an invalid container schema pagination token")
+        return {"items": schemas, "next_token": next_token or None}
+
+    @staticmethod
+    def _container_reference(value: object, label: str) -> str:
+        """Require a safe, non-empty inventory reference without echoing user input."""
+        if not isinstance(value, str) or not value.strip():
+            raise ValidationError(f"{label} must be a non-empty string")
+        result = value.strip()
+        if any(ord(char) < 32 for char in result):
+            raise ValidationError(f"{label} must not contain control characters")
+        return result
 
     async def _with_dropdowns(self, fields: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Copy field definitions, attaching options for each dropdown field."""

@@ -163,7 +163,8 @@ class ResultsPlanning(ResultUpdatePlanning):
             raise ConflictError(
                 "This result plan uses an unsupported bulk-table contract; create a new preview"
             )
-        table = await self.service.get_result_table(plan.entry_id, plan.preconditions["table_id"])
+        entry_id = self._entry_id(plan)
+        table = await self.service.get_result_table(entry_id, plan.preconditions["table_id"])
         self._expect(
             table.get("schema_id"),
             plan.preconditions["result_schema_id"],
