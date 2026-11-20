@@ -7,6 +7,7 @@ from benchling_toolkit.errors import (
     NotFoundError,
     PartialCompletionError,
     UnsupportedError,
+    UpstreamError,
     ValidationError,
 )
 
@@ -61,6 +62,24 @@ async def test_entry_plan_reads_and_previews_then_creates_entry_once(runtime, fa
     assert tables["items"][0]["table_id"] == "strtbl_created1"
 
 
+async def test_entry_plan_rejects_entry_reference(runtime) -> None:
+    with pytest.raises(ValidationError, match="must not specify --entry"):
+        await runtime.planner.plan("etr_abc123", "entry", REQUEST)
+
+
+@pytest.mark.parametrize(
+    "specification",
+    [
+        {**REQUEST, "unsupported": True},
+        {**REQUEST, "name": "  "},
+        {**REQUEST, "schema_fields": {}},
+    ],
+)
+async def test_entry_plan_rejects_invalid_input(runtime, specification) -> None:
+    with pytest.raises(ValidationError):
+        await runtime.planner.plan(None, "entry", specification)
+
+
 @pytest.mark.parametrize(
     ("resource", "resource_id"), [("template", "etpl_abc123"), ("folder", "lib_abc123")]
 )
@@ -71,6 +90,23 @@ async def test_archived_template_or_folder_is_rejected(
     resources[resource_id]["archived"] = True
 
     with pytest.raises(UnsupportedError, match="archived"):
+        await runtime.planner.plan(None, "entry", REQUEST)
+    assert fake.writes() == []
+
+
+@pytest.mark.parametrize(
+    ("resource", "change"),
+    [
+        ("template", {"id": "etpl_unexpected"}),
+        ("folder", {"archived": None}),
+    ],
+)
+async def test_entry_plan_rejects_unverified_template_or_folder(runtime, fake, resource, change):
+    resources = fake.entry_templates if resource == "template" else fake.folders
+    resource_id = "etpl_abc123" if resource == "template" else "lib_abc123"
+    resources[resource_id].update(change)
+
+    with pytest.raises(UpstreamError):
         await runtime.planner.plan(None, "entry", REQUEST)
     assert fake.writes() == []
 
@@ -119,6 +155,17 @@ async def test_entry_create_with_uncertain_response_cannot_be_retried(runtime, f
     with pytest.raises(PartialCompletionError):
         await runtime.planner.apply(planned.id)
     assert runtime.repository.load_journal(planned.id).status.value == "unknown"
+    with pytest.raises(ConflictError):
+        await runtime.planner.apply(planned.id)
+    assert len(fake.writes()) == 1
+
+
+async def test_entry_create_without_response_id_is_not_retried(runtime, fake) -> None:
+    planned = await runtime.planner.plan(None, "entry", REQUEST)
+    fake.payload_overrides.append(("/api/v3/entry", 201, {"entry": {"name": REQUEST["name"]}}))
+
+    with pytest.raises(PartialCompletionError):
+        await runtime.planner.apply(planned.id)
     with pytest.raises(ConflictError):
         await runtime.planner.apply(planned.id)
     assert len(fake.writes()) == 1

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from fake_benchling import ENTRY_ID
 
@@ -23,6 +25,54 @@ async def plan(runtime, records, table_id=TABLE):
     return await runtime.planner.plan(
         ENTRY_ID, "results", {"table_id": table_id, "assay_results": records}
     )
+
+
+async def multi_table_plan(runtime, fake):
+    fake.field_defs["assaysch_other"] = fake.field_defs["assaysch_abc123"]
+    fake.extra_result_tables.append(
+        {
+            "type": "results_table",
+            "apiId": "strtbl_other",
+            "name": "Other results",
+            "assayResultSchemaId": "assaysch_other",
+            "columns": ["ct"],
+        }
+    )
+    return await runtime.planner.plan(
+        ENTRY_ID,
+        "results",
+        {
+            "batches": [
+                {"table_id": TABLE, "assay_results": [record()]},
+                {
+                    "table_id": "strtbl_other",
+                    "assay_results": [
+                        record(schemaId="assaysch_other", fields={"ct": {"value": 8}})
+                    ],
+                },
+            ]
+        },
+    )
+
+
+@pytest.mark.parametrize(
+    ("arguments", "message"),
+    [
+        ({"wait": "yes"}, "wait must be a boolean"),
+        ({"timeout": True}, "timeout must be greater than 0"),
+        ({"timeout": 0}, "timeout must be greater than 0"),
+        ({"timeout": 3601}, "timeout must be greater than 0"),
+        ({"timeout": "soon"}, "timeout must be greater than 0"),
+    ],
+)
+async def test_status_rejects_invalid_wait_arguments(runtime, arguments, message) -> None:
+    with pytest.raises(ValidationError, match=message):
+        await runtime.planner.status("plan_abc123", **arguments)
+
+
+async def test_result_plan_requires_entry_reference(runtime) -> None:
+    with pytest.raises(ValidationError, match="Entry reference is required"):
+        await runtime.planner.plan(None, "results", {})
 
 
 @pytest.mark.parametrize(
@@ -104,6 +154,114 @@ async def test_apply_posts_normalized_records_once(runtime, fake) -> None:
     assert all("id" not in record for record in payload["assayResults"])
 
 
+async def test_multi_table_plan_previews_schemas_and_counts_and_applies_each_batch(
+    runtime, fake
+) -> None:
+    planned = await multi_table_plan(runtime, fake)
+    assert [
+        (table["table_id"], table["schema_id"], table["row_count"])
+        for table in planned.before["tables"]
+    ] == [
+        (TABLE, "assaysch_abc123", 1),
+        ("strtbl_other", "assaysch_other", 1),
+    ]
+    fake.bulk_responses = [{"taskId": "task_first"}, {"taskId": "task_second"}]
+    applied = await runtime.planner.apply(planned.id)
+    assert [payload["tableId"] for payload in fake.bulk_payloads] == [TABLE, "strtbl_other"]
+    assert [item["task_id"] for item in applied["journal"]["result"]["batches"]] == [
+        "task_first",
+        "task_second",
+    ]
+    assert "next_step" in applied
+    assert "Assay results" in applied["next_step"]
+    assert "Other results" in applied["next_step"]
+
+
+async def test_multi_table_apply_keeps_success_when_another_table_fails(runtime, fake) -> None:
+    planned = await multi_table_plan(runtime, fake)
+    fake.fail("POST", "/assay-results:bulk-create", 400)
+    with pytest.raises(PartialCompletionError) as caught:
+        await runtime.planner.apply(planned.id)
+    journal = caught.value.details["journal"]
+    assert journal["status"] == "partial"
+    submissions = [event for event in journal["events"] if event["stage"] == "submit_results"]
+    assert [event["status"] for event in submissions] == ["failed", "succeeded"]
+    assert submissions[0]["details"]["table_id"] == TABLE
+    assert submissions[1]["details"]["task_id"] == "task_abc123"
+    assert submissions[1]["details"]["table_id"] == "strtbl_other"
+    assert "Other results" in caught.value.details["next_step"]
+    assert "Assay results" not in caught.value.details["next_step"]
+    assert len(fake.bulk_payloads) == 1
+    assert fake.bulk_payloads[0]["tableId"] == "strtbl_other"
+
+
+async def test_status_waits_for_every_table_and_maps_documented_error_indices(
+    runtime, fake
+) -> None:
+    planned = await multi_table_plan(runtime, fake)
+    fake.bulk_responses = [{"taskId": "task_first"}, {"taskId": "task_second"}]
+    await runtime.planner.apply(planned.id)
+    fake.task_responses["task_first"] = [
+        {"status": "RUNNING"},
+        {"status": "FAILED", "errors": {"index": 0, "message": "invalid value"}},
+    ]
+    fake.tasks["task_second"] = {
+        "status": "FAILED",
+        "errors": [
+            {"index": 0, "message": "invalid schema"},
+            {"index": 7, "message": "out of range"},
+            {"message": "table-level error"},
+        ],
+    }
+    status = await runtime.planner.status(planned.id, wait=True, timeout=1)
+    assert fake.task_requests.count("task_first") == 2
+    assert fake.task_requests.count("task_second") == 1
+    assert [
+        (error["table_id"], error["row_index"], error["plan_row_index"])
+        for error in status["row_errors"]
+    ] == [
+        (TABLE, 0, 0),
+        ("strtbl_other", 0, 1),
+    ]
+    assert status["row_errors"][0]["error"]["message"] == "invalid value"
+    assert status["row_errors"][1]["error"]["message"] == "invalid schema"
+    assert status["unmatched_row_errors"] == [
+        {
+            "error": {"index": 7, "message": "out of range"},
+            "reason": "Task error has no usable input row index",
+            "table_id": "strtbl_other",
+        },
+        {
+            "error": {"message": "table-level error"},
+            "reason": "Task error has no usable input row index",
+            "table_id": "strtbl_other",
+        },
+    ]
+
+
+async def test_status_reports_task_that_is_still_running_after_timeout(runtime, fake) -> None:
+    planned = await plan(runtime, [record()])
+    await runtime.planner.apply(planned.id)
+    fake.task = {"status": "RUNNING"}
+    status = await runtime.planner.status(planned.id, wait=True, timeout=0.1)
+    assert status["result_state"] == "submission_running"
+    assert status["tasks"][0]["timed_out"] is True
+
+
+async def test_status_timeout_bounds_a_task_request(runtime, fake, monkeypatch) -> None:
+    planned = await plan(runtime, [record()])
+    await runtime.planner.apply(planned.id)
+
+    async def slow_task(_task_id):
+        await asyncio.sleep(1)
+        return {"status": "RUNNING"}
+
+    monkeypatch.setattr(runtime.service, "get_task", slow_task)
+    status = await runtime.planner.status(planned.id, wait=True, timeout=0.1)
+    assert status["tasks"][0]["timed_out"] is True
+    assert status["tasks"][0]["result_state"] == "submission_running"
+
+
 async def test_status_persists_server_assigned_ids_not_local_correlations(runtime, fake) -> None:
     planned = await plan(runtime, [record()])
     await runtime.planner.apply(planned.id)
@@ -143,6 +301,7 @@ async def test_accepted_upload_without_task_id_reports_unknown_completion(runtim
     with pytest.raises(PartialCompletionError) as caught:
         await runtime.planner.apply(planned.id)
     assert caught.value.details["client_record_ids"] == planned.after["client_record_ids"]
+    assert "pending" in caught.value.details["next_step"]
     assert (await runtime.planner.status(planned.id))["journal"]["status"] == "unknown"
 
 
