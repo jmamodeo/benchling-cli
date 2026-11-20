@@ -75,12 +75,14 @@ where = ["src"]
 benchling_toolkit = ["py.typed"]
 
 [tool.setuptools.data-files]
+"share/benchling-toolkit" = ["SKILL.md"]
 "share/benchling-toolkit/schemas" = ["schemas/*.json"]
 "share/benchling-toolkit/contracts" = ["contracts/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+addopts = "-q -m 'not wheel'"
+markers = ["wheel: builds or reads the wheel; run in the CI build job with -m wheel"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 

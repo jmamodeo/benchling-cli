@@ -23,6 +23,7 @@ from .keychain import Keychain, _in_mcp_serve
 from .models import Envelope, PlanFamily
 from .runtime import Runtime, RuntimePool
 from .services import part_content
+from .skill import read_skill_md
 
 _Env = Annotated[
     str,
@@ -168,6 +169,7 @@ def build_mcp_server(
     _register_export_tool(mcp, pool)
     _register_change_tools(mcp, pool, writable_envs)
     _register_issue_tool(mcp)
+    _register_skill_resource(mcp)
     return mcp
 
 
@@ -1071,6 +1073,23 @@ class _CitationInput(BaseModel):
         )
     )
     quote: str = Field(description="The exact line on that page that shows the fix is possible.")
+
+
+SKILL_RESOURCE_URI = "skill://benchling-toolkit/SKILL.md"
+
+
+def _register_skill_resource(mcp: MCPServer) -> None:
+    """Register the packaged SKILL.md as a read-only resource. It needs no environment."""
+
+    @mcp.resource(
+        SKILL_RESOURCE_URI,
+        name="benchling-toolkit-skill",
+        description="The SKILL.md installed with benchling-toolkit: when and how to use it.",
+        mime_type="text/markdown",
+    )
+    def skill_md() -> str:
+        """Return the packaged SKILL.md."""
+        return read_skill_md()
 
 
 def _register_issue_tool(mcp: MCPServer) -> None:

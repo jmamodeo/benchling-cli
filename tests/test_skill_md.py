@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import shlex
+import tomllib
 from pathlib import Path
 
 import yaml
@@ -178,3 +179,9 @@ def test_every_documented_command_is_accepted_by_the_cli() -> None:
         result = runner.invoke(cli.app, argv[1:])
         assert result.exit_code == 0, (command, result.output)
         assert "Usage:" in result.output
+
+
+def test_pip_package_ships_skill_md() -> None:
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    data_files = pyproject["tool"]["setuptools"]["data-files"]
+    assert "SKILL.md" in data_files["share/benchling-toolkit"]
