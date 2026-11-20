@@ -3,7 +3,7 @@
 Safe, auditable tools for AI agents working in Benchling.
 
 [![CI](https://github.com/jmamodeo/benchling-toolkit/actions/workflows/ci.yml/badge.svg)](https://github.com/jmamodeo/benchling-toolkit/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
 [![Coverage](https://img.shields.io/badge/coverage-97%25-brightgreen)](https://github.com/jmamodeo/benchling-toolkit/actions/workflows/ci.yml)
 
@@ -545,4 +545,4 @@ If you use this software, please cite it. GitHub's "Cite this repository" button
 - [Contributing guide](CONTRIBUTING.md) and [Code of Conduct](CODE_OF_CONDUCT.md)
 - [Security policy](SECURITY.md)
 - [Changelog](CHANGELOG.md)
-- Licensed under the [MIT License](LICENSE).
+- Licensed under the [Apache License 2.0](LICENSE); see [NOTICE](NOTICE). Releases up to and including 0.4.1 were published under the MIT License and remain available under it.
