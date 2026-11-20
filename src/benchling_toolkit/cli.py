@@ -53,6 +53,7 @@ part_app = typer.Typer(help="Read document parts.")
 table_app = typer.Typer(help="Read unstructured tables.")
 schema_app = typer.Typer(help="List and read entry, result, and run schemas.")
 results_app = typer.Typer(help="Read result records and results-table rows.")
+blob_app = typer.Typer(help="Read blob (attachment) metadata.")
 container_app = typer.Typer(help="Read and search inventory containers.")
 container_schema_app = typer.Typer(help="List container schemas.")
 changes_app = typer.Typer(help="Preview and explicitly apply safe changes.")
@@ -71,6 +72,7 @@ app.add_typer(part_app, name="part")
 app.add_typer(table_app, name="table")
 app.add_typer(schema_app, name="schema")
 app.add_typer(results_app, name="results")
+app.add_typer(blob_app, name="blob")
 app.add_typer(container_app, name="container")
 container_app.add_typer(container_schema_app, name="schema")
 app.add_typer(changes_app, name="changes")
@@ -772,6 +774,13 @@ def results_get(ctx: typer.Context, result_id: str) -> None:
     """Get one result record by ID."""
     state: State = ctx.obj
     _execute(state.env, lambda runtime: runtime.service.get_result(result_id))
+
+
+@blob_app.command("get")
+def blob_get(ctx: typer.Context, blob_id: str) -> None:
+    """Get one blob's metadata: name, type, MIME type and upload status. Nothing is downloaded."""
+    state: State = ctx.obj
+    _execute(state.env, lambda runtime: runtime.service.get_blob(blob_id))
 
 
 @results_app.command("tables")

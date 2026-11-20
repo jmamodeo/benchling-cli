@@ -52,6 +52,12 @@
         "/entry-templates",
         "/entry-templates/{entry_template_id}",
         "/assay-results:bulk-create",
+        "/blobs",
+        "/blobs:start-multipart-upload",
+        "/blobs/{blob_id}",
+        "/blobs/{blob_id}/parts",
+        "/blobs/{blob_id}:complete-upload",
+        "/blobs/{blob_id}:abort-upload",
         "/projects/{project_id}",
         "/tasks/{task_id}"
       ]

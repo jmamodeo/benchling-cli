@@ -128,6 +128,8 @@ One server process can open every environment that has a keychain secret. The ag
 
 `plan_changes` for a result update reads `csv_path` from the local filesystem. The path is not confined to a directory. That is a local read, performed as the user, of a path the agent supplied. The bytes affect the plan only when they parse as the mapped CSV. Apply does not open the path again.
 
+A result attachment value `{"file": PATH}`, or a CSV cell `file:PATH`, is also a local path the agent supplies, and it is not confined to a directory either. Unlike the CSV, these bytes leave the machine: apply uploads the whole file to the tenant as a blob. Planning only hashes it and stores the path in an owner-only file under the state directory, so the plan and the preview carry the base name, size and hashes but not the path or the contents. Files inside the toolkit state directory (which holds `environments.json` and the plans) are refused, as are non-regular and empty files and files over 100 MiB. Apply re-hashes the file and refuses a plan whose file changed. The control that matters is the same as for any write: a person reads the preview's file list before apply, and the server needs `--allow-writes`.
+
 A secret pasted into an agent transcript is already outside this process. The CLI will not accept that secret as an argument. It will accept it on stdin if something pipes it to `auth login --secret-stdin`. The intended path is a person at a terminal, or a CI secret that never enters the agent's prompt.
 
 Issue drafts are a path from the tenant to a public repository. `issue_draft` and `benchling issue draft` refuse a draft when any field looks like a tenant host (a `benchling.com` subdomain other than docs, help, or the placeholder tenants), a Benchling record or display ID, a known client secret, a token or key, or an email address. Findings name the field and the kind, never the value. The MCP tool only drafts; filing is the person opening the prefilled URL, or the CLI with `--file` after they confirm.
@@ -139,6 +141,7 @@ Issue drafts are a path from the tenant to a public repository. `issue_draft` an
 - It does not require a person to approve each MCP apply. Process start is the approval.
 - It does not stop an agent with a shell. That agent is the OS user.
 - It does not stop a read-only agent from copying data it is allowed to read, including into an export path.
+- It does not stop a write-enabled agent from uploading any local file the OS user can read, outside the state directory, into a result attachment field.
 - It does not stop a write-enabled agent from planning and applying many entries, as long as each plan passes the family checks and the app can write those entries.
 - Tool annotations do not enforce anything. A client is free to ignore `destructiveHint`.
 

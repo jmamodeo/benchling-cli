@@ -31,6 +31,7 @@ READ_TOOLS = {
     "get_entry_fields",
     "list_results",
     "get_result",
+    "get_blob",
     "list_result_tables",
     "list_results_table_rows",
     "get_container",
@@ -93,6 +94,21 @@ async def test_tools_are_annotated_by_whether_they_can_write(client) -> None:
     assert tools["issue_draft"].annotations.read_only_hint is True
     for name in set(tools) - {"list_environments", "issue_draft"}:
         assert "env" in tools[name].input_schema["required"], name
+
+
+async def test_get_blob_reads_metadata_without_writes(client, fake) -> None:
+    blob_id = "00000000-0000-4000-8000-000000000009"
+    fake.blobs[blob_id] = {
+        "id": blob_id,
+        "name": "plot.png",
+        "type": "VISUALIZATION",
+        "mimeType": "image/png",
+        "uploadStatus": "COMPLETE",
+    }
+    payload = await call(client, "get_blob", env="sandbox", blob_id=blob_id)
+    assert payload["ok"] is True
+    assert payload["data"]["uploadStatus"] == "COMPLETE"
+    assert fake.writes() == []
 
 
 async def test_missing_env_argument_is_a_protocol_error(client) -> None:

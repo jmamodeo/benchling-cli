@@ -15,6 +15,8 @@ from jsonschema import Draft202012Validator
 from referencing import Registry, Resource
 from referencing.jsonschema import DRAFT202012
 
+from benchling_toolkit.plans import blobs
+
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = json.loads((ROOT / "contracts" / "openapi-manifest.json").read_text())
 
@@ -22,6 +24,12 @@ _V3_ENTRY = re.compile(r"/api/v3/entry/[^/]+$")
 _V3_ENTRY_CREATE = re.compile(r"/api/v3/entry$")
 _V3_RESULT = re.compile(r"/api/v3/result/[^/]+$")
 _V2_BULK = re.compile(r"/api/v2/assay-results:bulk-create$")
+_V2_BLOB_ROUTES = (
+    (re.compile(r"/api/v2/blobs$"), "BlobCreate"),
+    (re.compile(r"/api/v2/blobs:start-multipart-upload$"), "BlobMultipartCreate"),
+    (re.compile(r"/api/v2/blobs/[^/]+/parts$"), "BlobPartCreate"),
+    (re.compile(r"/api/v2/blobs/[^/]+:complete-upload$"), "BlobComplete"),
+)
 
 
 def _contract(name: str) -> dict[str, Any]:
@@ -75,6 +83,9 @@ def _request_schema(call: Any) -> tuple[str, str] | None:
         return "benchling-v3", "UpdateResultInput"
     if call.method == "POST" and _V2_BULK.search(call.path):
         return None
+    for pattern, schema_name in _V2_BLOB_ROUTES:
+        if call.method == "POST" and pattern.search(call.path):
+            return "benchling-v2", schema_name
     raise AssertionError(f"no request schema for {call.method} {call.path}")
 
 
@@ -113,7 +124,7 @@ def test_retired_document_coordinates_fail_the_current_schema() -> None:
 
 
 async def test_every_client_request_body_matches_the_openapi_schema(
-    runtime, fake, tmp_path
+    runtime, fake, tmp_path, monkeypatch
 ) -> None:
     text = {"contentType": "text", "text": "introduced"}
     await _apply(
@@ -170,6 +181,38 @@ async def test_every_client_request_body_matches_the_openapi_schema(
                     "schemaId": "assaysch_abc123",
                     "fields": {"ct": {"value": 12}, "note": {"value": "n"}},
                 }
+            ],
+        },
+    )
+    fake.field_defs["assaysch_abc123"].append(
+        {
+            "id": "assayfield_plot",
+            "systemName": "plot",
+            "name": "Plot",
+            "__typename": "AttachmentLinkFieldDefinition",
+            "derivationType": "DIRECT",
+        }
+    )
+    small = tmp_path / "small.csv"
+    small.write_bytes(b"a,b\n1,2\n")
+    large = tmp_path / "large.bin"
+    large.write_bytes(bytes(20))
+    monkeypatch.setattr(blobs, "SINGLE_UPLOAD_MAX_BYTES", 10)
+    monkeypatch.setattr(blobs, "PART_BYTES", 8)
+    await _apply(
+        runtime,
+        "results",
+        {
+            "table_id": "strtbl_example",
+            "assay_results": [
+                {
+                    "schemaId": "assaysch_abc123",
+                    "fields": {"ct": {"value": 1}, "plot": {"value": {"file": str(small)}}},
+                },
+                {
+                    "schemaId": "assaysch_abc123",
+                    "fields": {"ct": {"value": 2}, "plot": {"value": {"file": str(large)}}},
+                },
             ],
         },
     )

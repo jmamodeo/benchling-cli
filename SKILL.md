@@ -141,11 +141,12 @@ benchling --env NAME part get etr_example docpart_text1
 benchling --env NAME table get docpart_table1
 benchling --env NAME schema get assaysch_example
 benchling --env NAME results get RESULT_ID
+benchling --env NAME blob get BLOB_ID
 benchling --env NAME results tables etr_example
 benchling --env NAME results rows docpart_example --limit 50 --cursor NEXT_TOKEN
 ```
 
-`table get` reads an unstructured table. Its argument is a `docpart_…` id from `entry inspect`. `results tables` returns `table_id` values that are `strtbl_…` ids. `results rows` reads one page of a results-table part (`docpart_…`) from that part's rows URL. `schema get` includes each dropdown field's options.
+`table get` reads an unstructured table. Its argument is a `docpart_…` id from `entry inspect`. `results tables` returns `table_id` values that are `strtbl_…` ids. `results rows` reads one page of a results-table part (`docpart_…`) from that part's rows URL. `schema get` includes each dropdown field's options. `blob get` reads the metadata of the blob an attachment field links (name, type, MIME type, upload status); it does not download the file.
 
 ### Export
 
@@ -259,9 +260,20 @@ Several tables can be submitted in one plan. Each batch has its own table, schem
 }
 ```
 
+To attach a local file (an instrument file or a plot) to a result attachment field, give that field `{"file": "PATH"}`. Optional keys: `blob_type` (`RAW_FILE`, the default, or `VISUALIZATION` for an image preview) and `mime_type`. A relative path is resolved against the current directory. Only attachment fields accept a file. The preview's `after.uploads` lists each file's base name, size, SHA-256 and MD5; show them to the person, because apply uploads exactly that file. Apply refuses the plan if the file changed since the preview, uploads it as a blob once with no retry, then writes the result with the blob ID. Files over 100 MiB are refused. Do not plan a file the person did not name.
+
+```json
+{
+  "table_id": "strtbl_example",
+  "assay_results": [
+    { "schemaId": "assaysch_example", "fields": { "ct": { "value": 12 }, "plot": { "value": { "file": "plots/run-01.png", "blob_type": "VISUALIZATION" } } } }
+  ]
+}
+```
+
 Apply submits each table separately. If a batch fails, other batches are still attempted and the journal reports successful, failed, or unconfirmed submissions; do not retry an uncertain batch automatically. For a failed task, errors with a valid `index` are linked to the zero-based input row and local correlation ID. Errors without a usable index are reported as unmatched with their raw value.
 
-CSV update of existing results. `--id-column` names the result id. Each `--map` is `CSV_COLUMN=FIELD`. `FIELD` is the export display name, the system name, or the field-definition id. Unmapped columns are not written.
+CSV update of existing results. `--id-column` names the result id. Each `--map` is `CSV_COLUMN=FIELD`. `FIELD` is the export display name, the system name, or the field-definition id. Unmapped columns are not written. In an attachment column, a cell `file:PATH` uploads that local file (relative to the CSV's folder) at apply; any other text is an existing blob ID.
 
 ```console
 benchling --env NAME changes plan --entry etr_example --family results --csv assay.csv --id-column id --map Ct=Ct --map Note=Note
@@ -320,4 +332,4 @@ benchling mcp serve --allow-writes ENV
 
 Do not add `--allow-writes` unless the person asked to allow writes for that environment. `export` takes `kind`, `path`, `format`, and optional `part_id`, `entry`, and `schema_id`. It returns the same summary as the CLI and writes a local file only. `apply_changes` for entry creation returns the new entry ID; for results uploads it returns `next_step`: relay it to the user so they can accept pending results. `plan_changes` takes `env`, an optional `entry`, `family` (`entry`, `document`, `table`, `fields`, `results`, or `containers`), and `specification` (the same JSON shapes as `--spec`, including table-specific result `batches`). Omit `entry` for entry and container plans. `get_change_status` accepts `wait` and `timeout` to poll result tasks and does not need `--allow-writes`.
 
-Tools for this workflow: `list_entries`, `list_schemas`, `resolve_entry`, `inspect_entry`, `get_entry`, `get_entries`, `get_folder`, `inspect_entry_template`, `get_entry_fields`, `get_section`, `get_part`, `get_table`, `get_schema`, `list_results`, `get_result`, `list_result_tables`, `list_results_table_rows`, `export`, `plan_changes`, `apply_changes`, `get_change_status`, `issue_draft`. `list_environments` and `issue_draft` take no environment.
+Tools for this workflow: `list_entries`, `list_schemas`, `resolve_entry`, `inspect_entry`, `get_entry`, `get_entries`, `get_folder`, `inspect_entry_template`, `get_entry_fields`, `get_section`, `get_part`, `get_table`, `get_schema`, `list_results`, `get_result`, `get_blob`, `list_result_tables`, `list_results_table_rows`, `export`, `plan_changes`, `apply_changes`, `get_change_status`, `issue_draft`. `list_environments` and `issue_draft` take no environment.

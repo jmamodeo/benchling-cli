@@ -16,8 +16,10 @@ from ..models import (
 )
 from ..services import (
     field_definition_type,
+    is_attachment_field,
 )
 from .base import PlannerBase, PlanParts, write_event_details
+from .blobs import local_file_descriptor
 
 
 class FieldNormalization(PlannerBase):
@@ -30,6 +32,7 @@ class FieldNormalization(PlannerBase):
         *,
         require_all_required: bool = False,
         address_by: Literal["system_name", "field_definition_id"] = "system_name",
+        local_files: bool = False,
     ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         by_system = {
             str(item["systemName"]): item for item in definitions if item.get("systemName")
@@ -73,7 +76,9 @@ class FieldNormalization(PlannerBase):
                         "derivation_type": definition.get("derivationType"),
                     },
                 )
-            self._validate_schema_field_value(definition, field_input["value"])
+            self._validate_schema_field_value(
+                definition, field_input["value"], local_files=local_files
+            )
             field_id = definition.get("id")
             if address_by == "field_definition_id":
                 if not isinstance(field_id, str) or not field_id:
@@ -144,7 +149,9 @@ class FieldNormalization(PlannerBase):
             )
         return sorted(fingerprints, key=lambda item: str(item["system_name"]))
 
-    def _validate_schema_field_value(self, definition: dict[str, Any], value: Any) -> None:
+    def _validate_schema_field_value(
+        self, definition: dict[str, Any], value: Any, *, local_files: bool = False
+    ) -> None:
         field = str(definition.get("systemName") or definition.get("id"))
         if value is None:
             if definition.get("isRequired"):
@@ -159,7 +166,13 @@ class FieldNormalization(PlannerBase):
             raise ValidationError(
                 "A multi-value schema field requires an array", details={"field": field}
             )
-        if field_type in {"TEXT", "LONG_TEXT"}:
+        if is_attachment_field(definition):
+            valid = all(
+                (isinstance(item, str) and bool(item))
+                or (local_files and local_file_descriptor(item) is not None)
+                for item in values
+            )
+        elif field_type in {"TEXT", "LONG_TEXT"}:
             valid = all(isinstance(item, str) for item in values)
         elif field_type == "INTEGER":
             valid = all(isinstance(item, int) and not isinstance(item, bool) for item in values)
