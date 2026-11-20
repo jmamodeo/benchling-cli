@@ -119,7 +119,7 @@ def test_version_flag_matches_package_metadata(invoke) -> None:
             "schema",
             {"id": "entsch_abc123", "name": "Schema entsch_abc123"},
         ),
-        (["entry", "template", "inspect", "etpl_abc123"], "id", "etpl_abc123"),
+        (["template", "get", "etpl_abc123"], "template_id", "etpl_abc123"),
         (["folder", "get", "lib_abc123"], "id", "lib_abc123"),
         (["results", "get", "result_1"], "id", "result_1"),
         (["results", "tables", ENTRY_ID], "complete", True),
@@ -176,6 +176,14 @@ def test_entry_bulk_get_accepts_ids_or_display_ids(invoke, fake) -> None:
     )
     assert code == 0
     assert [item["displayId"] for item in payload["data"]["items"]] == ["EXP-1", "EXP-2"]
+
+
+def test_template_list_forwards_name_and_cursor(invoke, fake) -> None:
+    code, payload, _ = invoke("template", "list", "--name", "Synthetic template", "--limit", "10")
+    assert code == 0
+    assert payload["data"]["items"][0]["id"] == "etpl_abc123"
+    (call,) = [item for item in fake.calls if item.path.endswith("/entry-templates")]
+    assert call.params == {"pageSize": "10", "name": "Synthetic template"}
 
 
 def test_results_list_forwards_filters_and_cursor(invoke, fake) -> None:

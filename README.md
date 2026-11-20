@@ -5,7 +5,7 @@ Safe, auditable tools for AI agents working in Benchling.
 [![CI](https://github.com/jmamodeo/benchling-toolkit/actions/workflows/ci.yml/badge.svg)](https://github.com/jmamodeo/benchling-toolkit/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
-[![Coverage](https://img.shields.io/badge/coverage-97%25-brightgreen)](https://github.com/jmamodeo/benchling-toolkit/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/badge/coverage-96%25-brightgreen)](https://github.com/jmamodeo/benchling-toolkit/actions/workflows/ci.yml)
 
 > **Unofficial; not affiliated with or endorsed by Benchling, Inc.** Benchling is a trademark of Benchling, Inc.
 
@@ -277,7 +277,8 @@ benchling --env dev entry resolve EXP-0001
 benchling --env dev entry get etr_abc123 --full
 benchling --env dev entry bulk-get --id etr_abc123 --id etr_other
 benchling --env dev entry inspect etr_abc123
-benchling --env dev entry template inspect etpl_example
+benchling --env dev template get etpl_example
+benchling --env dev template list --name "Example template"
 benchling --env dev folder get lib_example
 benchling --env dev section get etr_abc123 docpart_section1
 benchling --env dev part get etr_abc123 docpart_text1
@@ -303,7 +304,7 @@ benchling --env dev export --kind assay-results --entry etr_abc123 --schema assa
 
 Entry references may be canonical IDs, display IDs, or URLs for the selected tenant. Duplicate section titles must be addressed by part ID.
 
-`entry bulk-get` fetches multiple entries by repeated `--id` or `--display-id` options (specify exactly one kind). `folder get` reads one folder, and `entry template inspect` reads one entry template. These lookups are read-only.
+`entry bulk-get` fetches multiple entries by repeated `--id` or `--display-id` options (specify exactly one kind), chunking requests at 100 IDs. `template list` returns one page; pass `next_token` back with `--cursor`, and optionally filter by exact `--name`. `template get` summarizes the template structure, including note types, sections, result schemas, table names, and short text previews. It reads V2 `GET /entry-templates/{id}` because V3 `EntryTemplate.Get` returns metadata only. Entry creation planning still reads V3 template metadata to validate the template and its active state. `folder get` reads one folder. These lookups are read-only.
 
 `entry list` and `schema list` are read-only. They return one page, default 50 and at most 100, plus `next_token`. Pass that token back with `--cursor`. `schema list` reads entry schemas, then result schemas, then run schemas, following every upstream page until the page is full or the lists end. `schema get` adds the options of each dropdown field (`/dropdown/{id}` and `/dropdown/{id}/options/items`). There is no separate dropdown command.
 
@@ -362,7 +363,7 @@ benchling --env dev changes status PLAN_ID
 benchling --env dev changes status PLAN_ID --wait --timeout 300
 ```
 
-An entry specification uses `entry_template_id`, `folder_id`, and `name`, and may include `schema_fields` when the template has a schema. Preview reads the template and folder, refuses missing or archived resources, and shows their names and IDs. Apply creates the entry once and returns its ID; use that ID with `entry inspect` or `results tables`. The V3 `Entry.Create` route supports `entryTemplateId` to instantiate a template ([Benchling API docs](https://docs.benchling.com/docs/api/benchling-api/entry/create)); template and folder reads use [EntryTemplate.Get](https://docs.benchling.com/docs/api/benchling-api/entry-template/get) and [Folder.Get](https://docs.benchling.com/docs/api/benchling-api/folder/get).
+An entry specification uses `entry_template_id`, `folder_id`, and `name`, and may include `schema_fields` when the template has a schema. Preview reads V3 template metadata and folder data, refuses missing or archived resources, and shows their names and IDs. Use `template get` for the template's note structure; V3 `EntryTemplate.Get` returns metadata only. Apply creates the entry once and returns its ID; use that ID with `entry inspect` or `results tables`. The V3 `Entry.Create` route supports `entryTemplateId` to instantiate a template ([Benchling API docs](https://docs.benchling.com/docs/api/benchling-api/entry/create)); template and folder reads use [EntryTemplate.Get](https://docs.benchling.com/docs/api/benchling-api/entry-template/get) and [Folder.Get](https://docs.benchling.com/docs/api/benchling-api/folder/get).
 Container creation and transfer use the same local preview and explicit apply lifecycle. Container plans do not take `--entry`:
 
 ```console

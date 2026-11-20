@@ -110,7 +110,7 @@ benchling --env NAME results list --entry etr_example --page-size 100
 
 `entry list` filters are applied by Benchling. `--name` is an exact match, not a substring. `--folder` uses the V2 entry list. `container find` requires exactly one exact `--barcode` or `--name`. `container find` and `container schema list` return one page, default 50 and maximum 100; pass `next_token` back with `--cursor`. Container schema results include their field definitions. `--modified-after` and `--modified-before` take `YYYY-MM-DD` or an RFC3339 timestamp that includes a time zone. `--limit` is 1 to 100 and defaults to 50 on `entry list` and `schema list`. `schema list --kind` is `entry`, `result`, or `run`. Omit `--kind` to list all three. `results list` uses `--page-size` (default 100, maximum 100), plus optional `--schema` and `--cursor`.
 
-`entry bulk-get` uses either repeated `--id` or repeated `--display-id` options, not both. `folder get` and `entry template inspect` read one resource by ID.
+`entry bulk-get` uses either repeated `--id` or repeated `--display-id` options, not both, and chunks requests at the V2 limit of 100 IDs. `template list` returns one page; pass `next_token` back with `--cursor` and optionally filter by exact `--name`. `template get` summarizes note types in order, results-table schemas, table names, section titles, and text previews. It reads V2 `GET /entry-templates/{id}` because V3 `EntryTemplate.Get` returns metadata only. `folder get` reads one folder by ID.
 
 ### Read entries, tables, and results
 
@@ -122,7 +122,8 @@ benchling --env NAME entry inspect etr_example
 benchling --env NAME entry get etr_example --full
 benchling --env NAME entry bulk-get --id etr_example --id etr_other
 benchling --env NAME entry bulk-get --display-id EXP-0001 --display-id EXP-0002
-benchling --env NAME entry template inspect etpl_example
+benchling --env NAME template get etpl_example
+benchling --env NAME template list --name "Example template"
 benchling --env NAME folder get lib_example
 benchling --env NAME entry fields get etr_example
 benchling --env NAME section get etr_example docpart_section1

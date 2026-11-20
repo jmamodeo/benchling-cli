@@ -118,6 +118,26 @@ async def test_bulk_get_entries_uses_v2_ids_or_display_ids(runtime, fake, lookup
     assert call.path == "/api/v2/entries:bulk-get"
 
 
+async def test_bulk_get_entries_chunks_at_one_hundred_ids(runtime, fake):
+    fake.extra_entries = [
+        {
+            "id": f"etr_bulk{index}",
+            "name": f"Entry {index}",
+            "displayId": f"BULK-{index}",
+            "modifiedAt": "2026-01-01T00:00:00Z",
+            "schemaId": "entsch_abc123",
+            "projectId": "src_abc123",
+            "folderId": "lib_abc123",
+        }
+        for index in range(101)
+    ]
+    ids = [f"etr_bulk{index}" for index in range(101)]
+    result = await runtime.service.get_entries(entry_ids=ids)
+    calls = [call for call in fake.calls if call.path.endswith("/entries:bulk-get")]
+    assert result["count"] == 101
+    assert [len(call.params["entryIds"].split(",")) for call in calls] == [100, 1]
+
+
 @pytest.mark.parametrize(
     "lookup",
     [
@@ -141,16 +161,29 @@ async def test_bulk_get_entries_rejects_malformed_response(runtime, fake):
         await runtime.service.get_entries(entry_ids=[ENTRY_ID])
 
 
-async def test_get_folder_and_entry_template_use_v3_lookups(runtime, fake):
+async def test_get_folder_and_template_use_expected_api_versions(runtime, fake):
     folder = await runtime.service.get_folder("lib_abc123")
-    template = await runtime.service.get_entry_template("etpl_abc123")
+    template = await runtime.service.get_template("etpl_abc123")
     assert folder["name"] == "Synthetic folder"
-    assert template["schema"]["id"] == "entsch_abc123"
+    assert template["schema_id"] == "entsch_abc123"
+    assert template["structure"]["note_types"] == [
+        "text",
+        "code",
+        "results_table",
+        "table",
+        "text_box",
+    ]
+    assert template["structure"]["results_table_schema_ids"] == ["assaysch_abc123"]
+    assert template["structure"]["table_names"] == ["Template results", "Sample metadata"]
+    assert template["structure"]["section_titles"] == ["Introduction", "Results"]
+    assert template["structure"]["text_block_count"] == 3
+    assert template["structure"]["text_previews"][0]["preview"] == "Template instructions"
+    assert "V3 EntryTemplate.Get returns metadata only" in template["structure_source"]
     assert [call.path for call in fake.calls if "/folder/" in call.path] == [
         "/api/v3/folder/lib_abc123"
     ]
-    assert [call.path for call in fake.calls if "/entry-template/" in call.path] == [
-        "/api/v3/entry-template/etpl_abc123"
+    assert [call.path for call in fake.calls if "/entry-templates/" in call.path] == [
+        "/api/v2/entry-templates/etpl_abc123"
     ]
 
 
@@ -158,15 +191,87 @@ async def test_get_folder_and_entry_template_use_v3_lookups(runtime, fake):
     ("path", "method", "resource_id"),
     [
         ("/folder/lib_abc123", "get_folder", "lib_abc123"),
-        ("/entry-template/etpl_abc123", "get_entry_template", "etpl_abc123"),
+        ("/entry-templates/etpl_abc123", "get_template", "etpl_abc123"),
     ],
 )
 async def test_resource_lookups_reject_malformed_responses(
     runtime, fake, path, method, resource_id
 ):
     fake.payload_overrides.append((path, 200, {"name": "missing ID"}))
-    with pytest.raises(UpstreamError, match="unexpected"):
+    with pytest.raises(UpstreamError, match="expected object|unexpected"):
         await getattr(runtime.service, method)(resource_id)
+
+
+@pytest.mark.parametrize(
+    "template",
+    [
+        {"id": "etpl_abc123", "days": "invalid"},
+        {"id": "etpl_abc123", "days": [{"notes": ["invalid"]}]},
+        {"id": "etpl_abc123", "days": [{"notes": [{}]}]},
+    ],
+)
+async def test_get_template_rejects_malformed_structure(runtime, fake, template):
+    fake.payload_overrides.append(
+        ("/entry-templates/etpl_abc123", 200, {"entryTemplate": template})
+    )
+    with pytest.raises(UpstreamError):
+        await runtime.service.get_template("etpl_abc123")
+
+
+async def test_get_template_truncates_long_text_previews(runtime, fake):
+    fake.entry_templates["etpl_abc123"]["days"][0]["notes"][0]["text"] = "x" * 200
+    result = await runtime.service.get_template("etpl_abc123")
+    preview = result["structure"]["text_previews"][0]["preview"]
+    assert len(preview) == 161
+    assert preview.endswith("…")
+
+
+async def test_list_templates_pages_and_applies_name_filter(runtime, fake):
+    fake.entry_templates["etpl_two"] = {
+        "id": "etpl_two",
+        "name": "Second template",
+        "modifiedAt": "2026-02-01T00:00:00Z",
+    }
+    fake.entry_templates["etpl_three"] = {
+        "id": "etpl_three",
+        "name": "Target template",
+        "modifiedAt": "2026-03-01T00:00:00Z",
+    }
+    first = await runtime.service.list_templates(limit=2)
+    second = await runtime.service.list_templates(limit=2, cursor=first["next_token"])
+    filtered = await runtime.service.list_templates(name="Target template")
+    assert [item["id"] for item in first["items"]] == ["etpl_abc123", "etpl_two"]
+    assert first["next_token"] == "2"
+    assert [item["id"] for item in second["items"]] == ["etpl_three"]
+    assert [item["id"] for item in filtered["items"]] == ["etpl_three"]
+    assert fake.calls[-1].params == {"pageSize": "50", "name": "Target template"}
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"limit": 0}, "limit"),
+        ({"name": ""}, "name"),
+        ({"cursor": ""}, "cursor"),
+    ],
+)
+async def test_list_templates_validates_arguments(runtime, fake, kwargs, message):
+    with pytest.raises(ValidationError, match=message):
+        await runtime.service.list_templates(**kwargs)
+    assert not any(call.path.endswith("/entry-templates") for call in fake.calls)
+
+
+@pytest.mark.parametrize(
+    ("payload", "message"),
+    [
+        ({"entryTemplates": "invalid"}, "template list"),
+        ({"entryTemplates": [], "nextToken": 1}, "pagination token"),
+    ],
+)
+async def test_list_templates_rejects_malformed_responses(runtime, fake, payload, message):
+    fake.payload_overrides.append(("/entry-templates", 200, payload))
+    with pytest.raises(UpstreamError, match=message):
+        await runtime.service.list_templates()
 
 
 async def test_canonical_id_that_does_not_exist_is_not_found(runtime) -> None:

@@ -43,6 +43,8 @@
         "/entries",
         "/entries:bulk-get",
         "/entries/{entry_id}",
+        "/entry-templates",
+        "/entry-templates/{entry_template_id}",
         "/assay-results:bulk-create",
         "/projects/{project_id}",
         "/tasks/{task_id}"

@@ -41,7 +41,7 @@ app = typer.Typer(
 auth_app = typer.Typer(help="Log in, log out, and inspect saved environments.")
 entry_app = typer.Typer(help="Resolve, list, fetch, and inspect entries.")
 entry_fields_app = typer.Typer(help="Read entry schema fields.")
-entry_template_app = typer.Typer(help="Inspect entry templates.")
+template_app = typer.Typer(help="List and inspect entry templates.")
 folder_app = typer.Typer(help="Read notebook folders.")
 section_app = typer.Typer(help="Read entry sections.")
 part_app = typer.Typer(help="Read document parts.")
@@ -59,7 +59,7 @@ issue_app = typer.Typer(
 app.add_typer(auth_app, name="auth")
 app.add_typer(entry_app, name="entry")
 entry_app.add_typer(entry_fields_app, name="fields")
-entry_app.add_typer(entry_template_app, name="template")
+app.add_typer(template_app, name="template")
 app.add_typer(folder_app, name="folder")
 app.add_typer(section_app, name="section")
 app.add_typer(part_app, name="part")
@@ -508,11 +508,26 @@ def entry_inspect(ctx: typer.Context, reference: str) -> None:
     _execute(state.env, lambda runtime: runtime.service.inspect_entry(reference))
 
 
-@entry_template_app.command("inspect")
-def entry_template_inspect(ctx: typer.Context, template_id: str) -> None:
-    """Inspect an entry template by ID."""
+@template_app.command("get")
+def template_get(ctx: typer.Context, template_id: str) -> None:
+    """Get an entry template and summarize its structure."""
     state: State = ctx.obj
-    _execute(state.env, lambda runtime: runtime.service.get_entry_template(template_id))
+    _execute(state.env, lambda runtime: runtime.service.get_template(template_id))
+
+
+@template_app.command("list")
+def template_list(
+    ctx: typer.Context,
+    name: str | None = typer.Option(None, "--name", help="Exact entry-template name."),
+    limit: int = typer.Option(50, "--limit", min=1, max=100, help="Page size, from 1 to 100."),
+    cursor: str | None = typer.Option(None, "--cursor", help="next_token from the previous page."),
+) -> None:
+    """List one page of entry templates."""
+    state: State = ctx.obj
+    _execute(
+        state.env,
+        lambda runtime: runtime.service.list_templates(name=name, limit=limit, cursor=cursor),
+    )
 
 
 @folder_app.command("get")

@@ -252,16 +252,22 @@ class FakeBenchling:
                 "schema": {"id": "entsch_abc123"},
                 "days": [
                     {
+                        "title": "Introduction",
                         "notes": [
+                            {"type": "text", "text": "Template instructions"},
+                            {"type": "code", "text": "measure()"},
                             {
                                 "type": "results_table",
                                 "apiId": "strtbl_created1",
                                 "name": "Template results",
                                 "assayResultSchemaId": "assaysch_abc123",
                                 "columns": ["ct"],
-                            }
-                        ]
-                    }
+                            },
+                            {"type": "table", "table": {"name": "Sample metadata"}},
+                            {"type": "text_box", "text": "Box preview"},
+                        ],
+                    },
+                    {"title": "Results", "notes": []},
                 ],
             }
         }
@@ -648,6 +654,23 @@ class FakeBenchling:
         if template is None:
             return 404, {"error": {"message": "entry template not found"}}
         return 200, deepcopy(template)
+
+    def _get_entry_template_v2(self, call: Call, template_id: str) -> tuple[int, dict[str, Any]]:
+        template = self.entry_templates.get(template_id)
+        if template is None:
+            return 404, {"error": {"message": "entry template not found"}}
+        return 200, {"entryTemplate": deepcopy(template)}
+
+    def _list_entry_templates(self, call: Call) -> tuple[int, dict[str, Any]]:
+        templates = list(self.entry_templates.values())
+        if call.params.get("name"):
+            templates = [item for item in templates if item["name"] == call.params["name"]]
+        return self._page(
+            deepcopy(templates),
+            call,
+            self._limited_page(call, None),
+            key="entryTemplates",
+        )
 
     def _get_folder_v3(self, call: Call, folder_id: str) -> tuple[int, dict[str, Any]]:
         folder = self.folders.get(folder_id)
@@ -1251,6 +1274,9 @@ ROUTES: list[tuple[str, str]] = [
     (r"/entry-template/(\w+)", "GET v3|get_entry_template"),
     (r"/folder/(\w+)", "GET v3|get_folder_v3"),
     (r"/entry", "POST v3|create_entry"),
+    (r"/entry-templates", "GET v2|list_entry_templates"),
+    (r"/entry-templates/(\w+)", "GET v2|get_entry_template_v2"),
+    (r"/entry-templates/(\w+)", "GET v3|get_entry_template"),
     (r"/entries:bulk-get", "GET v2|bulk_get_entries"),
     (r"/entries", "GET v2|list_entries_v2"),
     (r"/entry/(etr_\w+)", "GET v3|get_entry"),
