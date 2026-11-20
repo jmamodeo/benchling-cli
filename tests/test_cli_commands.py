@@ -219,6 +219,37 @@ def test_plan_status_apply_lifecycle_through_cli(invoke, fake, tmp_path) -> None
     assert code == 5 and again["error"]["code"] == "conflict"
 
 
+def test_results_status_wait_is_available_through_cli(invoke, fake, tmp_path) -> None:
+    code, planned, _ = invoke(
+        "changes",
+        "plan",
+        "--entry",
+        ENTRY_ID,
+        "--family",
+        "results",
+        "--spec",
+        write_spec(
+            tmp_path,
+            {
+                "table_id": "strtbl_example",
+                "assay_results": [
+                    {"schemaId": "assaysch_abc123", "fields": {"ct": {"value": 12}}}
+                ],
+            },
+        ),
+    )
+    assert code == 0, planned
+    code, applied, _ = invoke("changes", "apply", planned["data"]["id"])
+    assert code == 0, applied
+    fake.task = {"status": "SUCCEEDED", "response": {"assayResults": []}}
+    code, status, _ = invoke(
+        "changes", "status", planned["data"]["id"], "--wait", "--timeout", "1"
+    )
+    assert code == 0, status
+    assert status["data"]["result_state"] == "pending_integration"
+    assert status["data"]["tasks"][0]["task_status"] == "SUCCEEDED"
+
+
 def test_plan_reads_spec_from_stdin(invoke) -> None:
     code, planned, _ = invoke(
         "changes",

@@ -859,6 +859,7 @@ async def test_every_tool_parameter_has_a_description(client) -> None:
         "append_rows",
         "schema_fields",
         "assay_results",
+        "batches",
         "csv_path",
         "id_column",
         "column_map",
@@ -946,3 +947,13 @@ async def test_apply_changes_for_results_returns_the_next_step(writer, fake) -> 
     assert applied["ok"] is True
     assert "pending" in applied["data"]["next_step"]
     assert "Assay results" in applied["data"]["next_step"]
+    fake.task = {"status": "SUCCEEDED", "response": {"assayResults": []}}
+    status = await call(
+        writer,
+        "get_change_status",
+        env="sandbox",
+        plan_id=planned["data"]["id"],
+        wait=True,
+        timeout=1,
+    )
+    assert status["data"]["result_state"] == "pending_integration"

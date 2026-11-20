@@ -399,14 +399,19 @@ class FakeBenchling:
             ],
         }
         self.result_table_schema = "assaysch_abc123"
+        self.extra_result_tables: list[dict[str, str]] = []
         self.results: list[dict[str, Any]] = [
             {"id": f"result_{n}", "entryId": ENTRY_ID, "schemaId": "assaysch_abc123"}
             for n in range(1, 4)
         ]
         self.task: dict[str, Any] = {"status": "RUNNING"}
+        self.tasks: dict[str, dict[str, Any]] = {}
+        self.task_responses: dict[str, list[dict[str, Any]]] = {}
+        self.task_requests: list[str] = []
         self.entry_patches: list[dict[str, Any]] = []
         self.bulk_payloads: list[dict[str, Any]] = []
         self.bulk_response: dict[str, Any] = {"taskId": "task_abc123"}
+        self.bulk_responses: list[dict[str, Any]] = []
         self.result_updates: list[dict[str, Any]] = []
 
     # ---- helpers -----------------------------------------------------
@@ -962,6 +967,16 @@ class FakeBenchling:
 
     # ---- v2 entry / project / task -----------------------------------
     def _get_entry_v2(self, call: Call, entry_id: str) -> tuple[int, dict[str, Any]]:
+        result_tables = [
+            {
+                "type": "results_table",
+                "apiId": "strtbl_example",
+                "name": "Assay results",
+                "assayResultSchemaId": self.result_table_schema,
+                "columns": ["ct"],
+            },
+            *deepcopy(self.extra_result_tables),
+        ]
         entry: dict[str, Any] = {
             "id": ENTRY_ID,
             "folderId": "lib_abc123",
@@ -969,16 +984,7 @@ class FakeBenchling:
             "fields": dict(self.entry_fields),
             "days": [
                 {
-                    "notes": [
-                        {
-                            "type": "results_table",
-                            "apiId": "strtbl_example",
-                            "name": "Assay results",
-                            "assayResultSchemaId": self.result_table_schema,
-                            "columns": ["ct"],
-                        },
-                        {"type": "text", "text": "ignored"},
-                    ]
+                    "notes": [*result_tables, {"type": "text", "text": "ignored"}]
                 }
             ],
         }
@@ -995,10 +1001,15 @@ class FakeBenchling:
         return 200, {"project": {"id": project_id, "name": "Synthetic project"}}
 
     def _get_task(self, call: Call, task_id: str) -> tuple[int, dict[str, Any]]:
-        return 200, dict(self.task)
+        self.task_requests.append(task_id)
+        if self.task_responses.get(task_id):
+            return 200, self.task_responses[task_id].pop(0)
+        return 200, dict(self.tasks.get(task_id, self.task))
 
     def _bulk_create(self, call: Call) -> tuple[int, dict[str, Any]]:
         self.bulk_payloads.append(call.body)
+        if self.bulk_responses:
+            return 202, self.bulk_responses.pop(0)
         return 202, dict(self.bulk_response)
 
     # ---- results -----------------------------------------------------

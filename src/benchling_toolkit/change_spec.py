@@ -272,6 +272,33 @@ class ResultUpload(BaseModel):
     )
 
 
+class ResultUploadBatch(BaseModel):
+    """Upload records to one explicit V2 result table as part of a multi-table plan."""
+
+    model_config = _STRICT
+
+    table_id: str = Field(
+        min_length=1,
+        pattern=r"^strtbl_",
+        description="V2 result table ID. It starts with strtbl_.",
+    )
+    assay_results: list[AssayResultRecord] = Field(
+        min_length=1,
+        description="New result records to upload to this table.",
+    )
+
+
+class MultiTableResultUpload(BaseModel):
+    """Upload records to several V2 result tables in one plan."""
+
+    model_config = _STRICT
+
+    batches: list[ResultUploadBatch] = Field(
+        min_length=1,
+        description="Table-specific result batches. Each table can contain at most 500 records.",
+    )
+
+
 class ResultCsvUpdate(BaseModel):
     """Update existing results from a CSV file and an explicit column map."""
 
@@ -315,6 +342,7 @@ ChangeSpecification = (
     | TableAppendRows
     | FieldChange
     | ResultUpload
+    | MultiTableResultUpload
     | ResultCsvUpdate
 )
 
@@ -332,7 +360,7 @@ _SUPPORTED = [
     "document: insert, delete, move, replace_text",
     "table: set_cells, append_rows",
     "fields: schema_fields",
-    "results upload: table_id and assay_results",
+    "results upload: table_id and assay_results, or batches with table_id and assay_results",
     "results update: operation update, csv_path, id_column, column_map",
 ]
 
@@ -377,11 +405,14 @@ def _model_for(value: dict[str, Any]) -> type[BaseModel]:
         return ResultCsvUpdate
     has_fields = "schema_fields" in value
     has_results = "table_id" in value or "assay_results" in value
-    if has_fields and has_results:
+    has_batches = "batches" in value
+    if has_fields and (has_results or has_batches):
         raise InputError(
             "Change specification mixes field updates and result records",
             details={"supported": _SUPPORTED},
         )
+    if has_batches:
+        return MultiTableResultUpload
     if has_fields:
         return FieldChange
     if has_results:

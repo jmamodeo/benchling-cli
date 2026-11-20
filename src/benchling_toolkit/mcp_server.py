@@ -751,9 +751,9 @@ def _register_change_tools(
         remote read. An invalid specification is a validation_error envelope and
         nothing is written. Result updates pass operation "update", csv_path,
         id_column, and column_map. Inline result uploads pass table_id and
-        assay_results; the created results land as pending until a person accepts
-        them in the results table in Benchling. Apply the preview later with
-        apply_changes.
+        assay_results, or batches containing table_id and assay_results for each
+        table. Each table may contain up to 500 records. Apply the preview later
+        with apply_changes; created results land pending until accepted in each table.
         """
 
         async def call(rt: Runtime) -> Any:
@@ -794,9 +794,19 @@ def _register_change_tools(
             str,
             Field(description="ID of a plan created by plan_changes in this environment."),
         ],
+        wait: Annotated[
+            bool,
+            Field(description="Poll result tasks until completion or timeout; defaults to false."),
+        ] = False,
+        timeout: Annotated[
+            float,
+            Field(description="Maximum wait in seconds, from 0.1 to 3600.", ge=0.1, le=3600),
+        ] = 300.0,
     ) -> Envelope[Any]:
-        """Read an immutable plan and its local execution journal."""
-        return await safe(env, lambda rt: rt.planner.status(plan_id))
+        """Read a plan journal and task status; optionally wait for result tasks."""
+        return await safe(
+            env, lambda rt: rt.planner.status(plan_id, wait=wait, timeout=timeout)
+        )
 
 
 class _CitationInput(BaseModel):

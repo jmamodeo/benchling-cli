@@ -789,12 +789,19 @@ def changes_apply(ctx: typer.Context, plan_id: str) -> None:
 
 
 @changes_app.command("status")
-def changes_status(ctx: typer.Context, plan_id: str) -> None:
-    """Show the journal and status of a plan."""
+def changes_status(
+    ctx: typer.Context,
+    plan_id: str,
+    wait: bool = typer.Option(False, "--wait", help="Poll result tasks until completion or timeout."),
+    timeout: float = typer.Option(
+        300.0, "--timeout", min=0.1, max=3600, help="Maximum wait, in seconds (0.1-3600)."
+    ),
+) -> None:
+    """Show a plan journal; optionally wait for submitted result tasks."""
     state: State = ctx.obj
 
     async def call(runtime: Runtime) -> dict[str, Any]:
-        return await runtime.planner.status(plan_id)
+        return await runtime.planner.status(plan_id, wait=wait, timeout=timeout)
 
     _execute(state.env, call)
 

@@ -144,9 +144,10 @@ One plan covers one entry and one family: `document`, `table`, `fields`, or `res
 benchling --env NAME changes plan --entry etr_example --family table --spec set-cells.json
 benchling --env NAME changes apply PLAN_ID
 benchling --env NAME changes status PLAN_ID
+benchling --env NAME changes status PLAN_ID --wait --timeout 300
 ```
 
-`changes plan` does not write to Benchling. `changes apply` re-checks the plan's preconditions, then writes. `changes status` reads the local journal and does not write.
+`changes plan` does not write to Benchling. `changes apply` re-checks the plan's preconditions, then writes. `changes status` reads each recorded result task once by default and stores returned task status locally. Pass `--wait --timeout SECONDS` to poll until all tasks are complete or the timeout expires.
 
 Table, set cells. `examples/table-set-cells.json` is this shape. `table_part_id` is a `docpart_…` id.
 
@@ -202,7 +203,7 @@ Fields. Each key is a V3 system name or a field-definition id. Each value is an 
 { "schema_fields": { "temperature": { "value": 21 } } }
 ```
 
-Result upload. `table_id` is an `strtbl_…` id from `results tables`. Field keys stay system names. The results land as pending (see "Results land as pending" below). Read the task state with `changes status PLAN_ID`.
+Result upload. `table_id` is an `strtbl_…` id from `results tables`; each batch may have up to 500 records and can use a different schema. Field keys stay system names. The results land as pending (see "Results land as pending" below). Read each task with `changes status PLAN_ID`, or wait with `changes status PLAN_ID --wait --timeout SECONDS`.
 
 ```json
 {
@@ -212,6 +213,19 @@ Result upload. `table_id` is an `strtbl_…` id from `results tables`. Field key
   ]
 }
 ```
+
+Several tables can be submitted in one plan. Each batch has its own table, schema, and record list:
+
+```json
+{
+  "batches": [
+    { "table_id": "strtbl_example", "assay_results": [{ "schemaId": "assaysch_example", "fields": { "ct": { "value": 12 } } }] },
+    { "table_id": "strtbl_other", "assay_results": [{ "schemaId": "assaysch_other", "fields": { "ct": { "value": 8 } } }] }
+  ]
+}
+```
+
+Apply submits each table separately. If a batch fails, other batches are still attempted and the journal reports successful, failed, or unconfirmed submissions; do not retry an uncertain batch automatically. For a failed task, errors with a valid `index` are linked to the zero-based input row and local correlation ID. Errors without a usable index are reported as unmatched with their raw value.
 
 CSV update of existing results. `--id-column` names the result id. Each `--map` is `CSV_COLUMN=FIELD`. `FIELD` is the export display name, the system name, or the field-definition id. Unmapped columns are not written.
 
@@ -223,7 +237,7 @@ benchling --env NAME changes plan --entry etr_example --family results --csv ass
 
 Results created through the API do not go straight into a notebook results table. Benchling marks them pending. They stay out of the table, and have no entry (`entry` is null), until a person clicks the plug (integrate) icon in that table's toolbar in the Benchling UI. This is the expected behaviour in practice. Benchling documents it for V3 results created with `documentPartResultsTableId` and for V2 `assay-results:bulk-create` with a `tableId`, so do not assume V3 changes it. Results created without a table id are not attached to a table at all. The public V2 and V3 specs have no call that accepts pending results, so the toolkit cannot do it.
 
-After every successful results create, tell the user, naming the entry and the table: "Open entry X, go to results table Y, and click the plug icon in its toolbar to accept the pending results. Until you do, they do not show in the table and I cannot update them, because a results update needs a result that is on the entry. Refresh the page if the entry is already open." The apply response carries the same text in `next_step`. Say it every time.
+After a results create, tell the user, naming the entry and every submitted table: "Open entry X, go to results table Y, and click the plug icon in its toolbar to accept the pending results. Until you do, they do not show in the table and I cannot update them, because a results update needs a result that is on the entry. Refresh the page if the entry is already open." The apply response carries the same text in `next_step`, including partial or unconfirmed submissions where acceptance may be needed. Say it every time.
 
 Check, do not assume. Re-read with `results list --entry ENTRY` and `results rows PART_ID`. Pending results are missing from the entry and the table. After acceptance they appear on the entry. Only then plan a results update. A result that is not on the entry is refused at plan time with "Result is not on the selected entry", and nothing is written.
 
@@ -270,6 +284,6 @@ benchling mcp serve
 benchling mcp serve --allow-writes ENV
 ```
 
-Do not add `--allow-writes` unless the person asked to allow writes for that environment. `export` takes `kind`, `path`, `format`, and optional `part_id`, `entry`, and `schema_id`. It returns the same summary as the CLI and writes a local file only. `apply_changes` for a results upload returns `next_step`: relay it to the user. `plan_changes` takes `env`, `entry`, `family` (`document`, `table`, `fields`, or `results`), and `specification` (the same JSON shapes as `--spec`). `get_change_status` reads the journal and does not need `--allow-writes`.
+Do not add `--allow-writes` unless the person asked to allow writes for that environment. `export` takes `kind`, `path`, `format`, and optional `part_id`, `entry`, and `schema_id`. It returns the same summary as the CLI and writes a local file only. `apply_changes` for a results upload returns `next_step`: relay it to the user. `plan_changes` takes `env`, `entry`, `family` (`document`, `table`, `fields`, or `results`), and `specification` (the same JSON shapes as `--spec`, including table-specific result `batches`). `get_change_status` accepts `wait` and `timeout` to poll result tasks and does not need `--allow-writes`.
 
 Tools for this workflow: `list_entries`, `list_schemas`, `resolve_entry`, `inspect_entry`, `get_entry`, `get_entry_fields`, `get_section`, `get_part`, `get_table`, `get_schema`, `list_results`, `get_result`, `list_result_tables`, `list_results_table_rows`, `export`, `plan_changes`, `apply_changes`, `get_change_status`, `issue_draft`. `list_environments` and `issue_draft` take no environment.
