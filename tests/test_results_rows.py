@@ -165,3 +165,41 @@ async def test_results_rows_reject_a_cell_that_is_not_a_value(runtime, fake) -> 
     fake.corrupt_cells = True
     with pytest.raises(UpstreamError, match="invalid rows"):
         await runtime.service.list_results_table_rows(PART)
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        {"id": 5, "cells": [{"inputValue": {"__typename": "TextValue", "value": "ok"}}]},
+        {"rowIndex": True, "cells": [{"inputValue": {"__typename": "TextValue", "value": "ok"}}]},
+        {
+            "isSubmittable": "yes",
+            "cells": [{"inputValue": {"__typename": "TextValue", "value": "ok"}}],
+        },
+        {
+            "submissionStatus": "UNKNOWN",
+            "cells": [{"inputValue": {"__typename": "TextValue", "value": "ok"}}],
+        },
+        {
+            "result": {"__typename": "ResultRef", "id": 5},
+            "cells": [{"inputValue": {"__typename": "TextValue", "value": "ok"}}],
+        },
+        {"cells": []},
+    ],
+)
+async def test_results_rows_reject_invalid_nested_row_metadata_and_cell_counts(
+    runtime, fake, row
+) -> None:
+    fake.add_results_table()
+    fake.payload_overrides.append((ROWS_PATH, 200, {"items": [row], "nextToken": ""}))
+    with pytest.raises(UpstreamError, match="invalid rows"):
+        await runtime.service.list_results_table_rows(PART)
+
+
+async def test_full_results_table_read_rejects_a_mismatched_cell_count(runtime, fake) -> None:
+    fake.add_results_table()
+    fake.results_parts[PART]["rows"][0]["cells"].append(
+        {"inputValue": {"__typename": "TextValue", "value": "extra"}}
+    )
+    with pytest.raises(UpstreamError, match="invalid rows"):
+        await runtime.service.get_results_table_part(PART)

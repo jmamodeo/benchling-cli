@@ -565,14 +565,17 @@ def schema_list(
     kind: str | None = typer.Option(
         None, "--kind", help="entry, result, or run. Omit to list all three."
     ),
+    name: str | None = typer.Option(None, "--name", help="Exact, case-sensitive schema name."),
     limit: int = typer.Option(50, "--limit", min=1, max=100, help="Page size, from 1 to 100."),
     cursor: str | None = typer.Option(None, "--cursor", help="next_token from the previous page."),
 ) -> None:
-    """List entry, result, and run schemas, following every upstream page up to the limit."""
+    """List schemas, optionally matching an exact name, following upstream pages up to the limit."""
     state: State = ctx.obj
     _execute(
         state.env,
-        lambda runtime: runtime.service.list_schemas(kind=kind, limit=limit, cursor=cursor),
+        lambda runtime: runtime.service.list_schemas(
+            kind=kind, name=name, limit=limit, cursor=cursor
+        ),
     )
 
 
@@ -620,15 +623,24 @@ def results_list(
     ctx: typer.Context,
     entry: str | None = typer.Option(None),
     schema_id: str | None = typer.Option(None, "--schema"),
+    entity_id: str | None = typer.Option(None, "--entity-id"),
+    entity_field_id: str | None = typer.Option(
+        None, "--entity-field-id", help="Limit the linked-entity match to this schema field."
+    ),
     page_size: int = typer.Option(100, min=1, max=100),
     cursor: str | None = typer.Option(None),
 ) -> None:
-    """List result records, optionally filtered by entry or schema, one page at a time."""
+    """List result records, optionally filtered by entry, schema, or linked entity."""
     state: State = ctx.obj
     _execute(
         state.env,
         lambda runtime: runtime.service.list_results(
-            entry=entry, schema_id=schema_id, page_size=page_size, cursor=cursor
+            entry=entry,
+            schema_id=schema_id,
+            entity_id=entity_id,
+            entity_field_id=entity_field_id,
+            page_size=page_size,
+            cursor=cursor,
         ),
     )
 

@@ -366,6 +366,38 @@ async def test_list_results_validates_page_size_before_calling_the_api(runtime, 
     assert fake.calls == []
 
 
+async def test_list_results_filters_by_linked_entity_and_optional_field(runtime, fake) -> None:
+    await runtime.service.list_results(entity_id="ent_abc123", entity_field_id="tsf_entity")
+    (call,) = [call for call in fake.calls if call.path.endswith("/result/items")]
+    assert call.params == {
+        "pageSize": "100",
+        "schemaFieldLinkValue.linkedItemIds": "ent_abc123",
+        "schemaFieldLinkValue.schemaFieldIds": "tsf_entity",
+    }
+
+    fake.calls.clear()
+    await runtime.service.list_all_results(entity_id="ent_abc123", entity_field_id="tsf_entity")
+    (call,) = [call for call in fake.calls if call.path.endswith("/result/items")]
+    assert call.params["schemaFieldLinkValue.linkedItemIds"] == "ent_abc123"
+    assert call.params["schemaFieldLinkValue.schemaFieldIds"] == "tsf_entity"
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"entity_id": ""},
+        {"entity_id": "ent_a,ent_b"},
+        {"entity_field_id": "tsf_entity"},
+    ],
+)
+async def test_list_results_rejects_bad_entity_filters_before_calling_api(
+    runtime, fake, kwargs
+) -> None:
+    with pytest.raises(ValidationError):
+        await runtime.service.list_results(**kwargs)
+    assert fake.calls == []
+
+
 async def test_get_schema_routes_result_schemas_separately(runtime, fake) -> None:
     await runtime.service.get_schema("assaysch_abc123")
     assert any(c.path.startswith("/api/v3/result-schema/") for c in fake.calls)

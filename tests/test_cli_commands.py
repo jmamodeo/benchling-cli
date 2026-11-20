@@ -166,6 +166,10 @@ def test_results_list_forwards_filters_and_cursor(invoke, fake) -> None:
         ENTRY_ID,
         "--schema",
         "assaysch_abc123",
+        "--entity-id",
+        "ent_abc123",
+        "--entity-field-id",
+        "tsf_sample",
         "--page-size",
         "2",
         "--cursor",
@@ -179,6 +183,8 @@ def test_results_list_forwards_filters_and_cursor(invoke, fake) -> None:
         "nextToken": "1",
         "entry.eq": ENTRY_ID,
         "schema.eq": "assaysch_abc123",
+        "schemaFieldLinkValue.linkedItemIds": "ent_abc123",
+        "schemaFieldLinkValue.schemaFieldIds": "tsf_sample",
     }
 
 
@@ -609,6 +615,13 @@ def test_schema_list_pages_with_a_cursor(invoke, fake) -> None:
     assert code == 0
     assert [item["id"] for item in second["data"]["items"]] == ["entsch_three", "entsch_four"]
     assert fake.writes() == []
+
+
+def test_schema_list_looks_up_an_exact_name(invoke, fake) -> None:
+    code, payload, _ = invoke("schema", "list", "--name", "Second result schema")
+    assert code == 0
+    assert [item["id"] for item in payload["data"]["items"]] == ["assaysch_two"]
+    assert fake.calls[0].params["name.anyOf.caseSensitive"] == "Second result schema"
 
 
 def test_entry_list_sends_a_comma_name_as_the_v2_name_parameter(invoke, fake) -> None:

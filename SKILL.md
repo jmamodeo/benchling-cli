@@ -100,14 +100,16 @@ benchling --env NAME entry list --folder lib_example --name "Example entry"
 benchling --env NAME entry list --modified-after 2026-01-01 --cursor NEXT_TOKEN
 benchling --env NAME schema list
 benchling --env NAME schema list --kind result --limit 50
+benchling --env NAME schema list --name "qPCR assay"
 benchling --env NAME container get con_example
 benchling --env NAME container find --barcode VIAL-001
 benchling --env NAME container find --name "Sample vial"
 benchling --env NAME container schema list --limit 50
 benchling --env NAME results list --entry etr_example --page-size 100
+benchling --env NAME results list --entity-id ent_example --entity-field-id tsf_sample
 ```
 
-`entry list` filters are applied by Benchling. `--name` is an exact match, not a substring. `--folder` uses the V2 entry list. `container find` requires exactly one exact `--barcode` or `--name`. `container find` and `container schema list` return one page, default 50 and maximum 100; pass `next_token` back with `--cursor`. Container schema results include their field definitions. `--modified-after` and `--modified-before` take `YYYY-MM-DD` or an RFC3339 timestamp that includes a time zone. `--limit` is 1 to 100 and defaults to 50 on `entry list` and `schema list`. `schema list --kind` is `entry`, `result`, or `run`. Omit `--kind` to list all three. `results list` uses `--page-size` (default 100, maximum 100), plus optional `--schema` and `--cursor`.
+`entry list` filters are applied by Benchling. `--name` is an exact match, not a substring. `--folder` uses the V2 entry list. `container find` requires exactly one exact `--barcode` or `--name`. `container find` and `container schema list` return one page, default 50 and maximum 100; pass `next_token` back with `--cursor`. Container schema results include their field definitions. `--modified-after` and `--modified-before` take `YYYY-MM-DD` or an RFC3339 timestamp that includes a time zone. `--limit` is 1 to 100 and defaults to 50 on `entry list` and `schema list`. `schema list --kind` is `entry`, `result`, or `run`. Omit `--kind` to list all three. `schema list --name` matches one exact, case-sensitive name. `results list` uses `--page-size` (default 100, maximum 100), plus optional `--schema`, `--entity-id`, `--entity-field-id`, and `--cursor`. The entity-field filter requires `--entity-id`.
 
 ### Read entries, tables, and results
 
@@ -140,7 +142,7 @@ benchling --env NAME export --kind results-table --part strtbl_example --entry e
 benchling --env NAME export --kind assay-results --entry etr_example --schema assaysch_example --format csv --output assay.csv
 ```
 
-`--kind` is `table`, `results-table`, or `assay-results`. `--format` is `json` or `csv`. `--output` is required (`-o` is the short form). `table` and `results-table` need `--part`. A `docpart_…` id comes from `entry inspect`. A `strtbl_…` id from `results tables` needs `--kind results-table` and `--entry` for that same entry. `--kind table` rejects a `strtbl_…` id. `assay-results` takes `--entry` and `--schema`, the same filters as `results list`. Add `--overwrite` only when the person asked to replace that file.
+`--kind` is `table`, `results-table`, or `assay-results`. `--format` is `json` or `csv`. `--output` is required (`-o` is the short form). `table` and `results-table` need `--part`. A `docpart_…` id comes from `entry inspect`. A `strtbl_…` id from `results tables` needs `--kind results-table` and `--entry` for that same entry. `--kind table` rejects a `strtbl_…` id. `assay-results` takes `--entry` and `--schema`. Add `--overwrite` only when the person asked to replace that file.
 
 ## Preview, then apply
 

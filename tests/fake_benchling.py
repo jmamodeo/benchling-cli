@@ -1090,8 +1090,12 @@ class FakeBenchling:
         return self._page(deepcopy(self.field_defs[schema_id]), call, 5)
 
     def _list_kind(self, call: Call, kind: str) -> tuple[int, dict[str, Any]]:
+        schemas = deepcopy(self.schema_catalog[kind])
+        name = call.params.get("name.anyOf.caseSensitive")
+        if name is not None:
+            schemas = [schema for schema in schemas if schema.get("name") == name]
         return self._page(
-            deepcopy(self.schema_catalog[kind]),
+            schemas,
             call,
             self._limited_page(call, self.schema_page_size),
         )

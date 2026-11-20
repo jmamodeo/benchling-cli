@@ -35,8 +35,8 @@ READ_TOOLS = {
 }
 
 
-async def call(client, name, **arguments):
-    result = await client.call_tool(name, arguments)
+async def call(client, tool_name, **arguments):
+    result = await client.call_tool(tool_name, arguments)
     assert result.is_error is False, result
     payload = result.structured_content
     assert set(payload) == {"schema_version", "ok", "data", "error", "meta"}
@@ -467,6 +467,21 @@ async def test_list_results_uses_explicit_cursor_pagination(client, fake) -> Non
     assert filtered["items"] == []
 
 
+async def test_list_results_accepts_entity_filters(client, fake) -> None:
+    await call(
+        client,
+        "list_results",
+        env="sandbox",
+        entity_id="ent_abc123",
+        entity_field_id="tsf_sample",
+    )
+    (call_record,) = [
+        call_record for call_record in fake.calls if call_record.path.endswith("/result/items")
+    ]
+    assert call_record.params["schemaFieldLinkValue.linkedItemIds"] == "ent_abc123"
+    assert call_record.params["schemaFieldLinkValue.schemaFieldIds"] == "tsf_sample"
+
+
 async def test_get_result_returns_record_or_not_found(client) -> None:
     assert (await call(client, "get_result", env="sandbox", result_id="result_2"))["data"][
         "id"
@@ -688,6 +703,12 @@ async def test_list_schemas_pages_without_allow_writes(client, fake) -> None:
     assert "runsch_two" in ids
     assert len(ids) == len(set(ids))
     assert second["next_token"] is None
+    assert fake.writes() == []
+
+
+async def test_list_schemas_accepts_an_exact_name(client, fake) -> None:
+    data = (await call(client, "list_schemas", env="sandbox", name="Second result schema"))["data"]
+    assert [item["id"] for item in data["items"]] == ["assaysch_two"]
     assert fake.writes() == []
 
 

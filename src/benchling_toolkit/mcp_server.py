@@ -600,16 +600,20 @@ def _register_result_tools(mcp: MCPServer, pool: RuntimePool) -> None:
             str | None,
             Field(description="entry, result, or run. Omit to list all three, in that order."),
         ] = None,
+        name: Annotated[
+            str | None,
+            Field(description="Exact, case-sensitive schema name."),
+        ] = None,
         limit: Annotated[
             int,
             Field(description="Page size. Defaults to 50 and must be from 1 to 100."),
         ] = 50,
         cursor: _PageCursor = None,
     ) -> Envelope[Any]:
-        """List one page of entry, result, and run schemas. Follow next_token to see the rest."""
+        """List schemas, optionally by exact name. Follow next_token to see the rest."""
         return await safe(
             env,
-            lambda rt: rt.service.list_schemas(kind=kind, limit=limit, cursor=cursor),
+            lambda rt: rt.service.list_schemas(kind=kind, name=name, limit=limit, cursor=cursor),
         )
 
     @mcp.tool(annotations=_annotations(True))
@@ -630,6 +634,14 @@ def _register_result_tools(mcp: MCPServer, pool: RuntimePool) -> None:
             str | None,
             Field(description="Result schema ID. Omit to include every result schema."),
         ] = None,
+        entity_id: Annotated[
+            str | None,
+            Field(description="Linked Benchling entity ID to filter result field values."),
+        ] = None,
+        entity_field_id: Annotated[
+            str | None,
+            Field(description="Optional schema field ID restricting the entity match."),
+        ] = None,
         page_size: Annotated[
             int,
             Field(description="Number of result records to return in this page."),
@@ -640,7 +652,12 @@ def _register_result_tools(mcp: MCPServer, pool: RuntimePool) -> None:
         return await safe(
             env,
             lambda rt: rt.service.list_results(
-                entry=entry, schema_id=schema_id, page_size=page_size, cursor=cursor
+                entry=entry,
+                schema_id=schema_id,
+                entity_id=entity_id,
+                entity_field_id=entity_field_id,
+                page_size=page_size,
+                cursor=cursor,
             ),
         )
 

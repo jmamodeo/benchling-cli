@@ -311,11 +311,29 @@ async def test_schema_list_kind_and_cursor_stay_on_one_collection(runtime, fake)
     assert _params(fake, "/result-schema/items") == []
 
 
+async def test_schema_list_filters_by_exact_name_across_requested_kinds(runtime, fake) -> None:
+    page = await runtime.service.list_schemas(name="Second result schema")
+    assert page["items"] == [
+        {
+            "id": "assaysch_two",
+            "name": "Second result schema",
+            "kind": "result",
+            "modified_at": "2026-02-02T00:00:00Z",
+        }
+    ]
+    assert _params(fake, "/entry-schema/items")[0] == {
+        "pageSize": "50",
+        "name.anyOf.caseSensitive": "Second result schema",
+    }
+
+
 @pytest.mark.parametrize(
     "kwargs",
     [
         {"kind": "sample"},
         {"kind": ""},
+        {"name": ""},
+        {"name": "Result, schema"},
         {"limit": 0},
         {"cursor": "%%%"},
         {"cursor": ""},

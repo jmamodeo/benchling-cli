@@ -294,6 +294,43 @@ def normalize_table_row(row: Any, *, require_text: bool) -> dict[str, Any]:
     """Normalize one table row and its cells."""
     if not isinstance(row, dict) or not isinstance(row.get("cells"), list):
         raise UpstreamError("Table response contained invalid rows")
+    for key in ("id", "rowId"):
+        if key in row and row[key] is not None and (not isinstance(row[key], str) or not row[key]):
+            raise UpstreamError("Table response contained invalid rows")
+    row_index = row.get("rowIndex")
+    if row_index is not None and (
+        isinstance(row_index, bool) or not isinstance(row_index, int) or row_index < 0
+    ):
+        raise UpstreamError("Table response contained invalid rows")
+    for key in ("isArchived", "isSubmittable"):
+        if key in row and row[key] is not None and not isinstance(row[key], bool):
+            raise UpstreamError("Table response contained invalid rows")
+    status = row.get("submissionStatus")
+    if status is not None and (
+        not isinstance(status, str)
+        or status
+        not in {
+            "UNSUBMITTED",
+            "SUBMITTED",
+            "HAS_UNSUBMITTED_CHANGES",
+            "UNEVALUATED",
+        }
+    ):
+        raise UpstreamError("Table response contained invalid rows")
+    result = row.get("result")
+    if result is not None and (
+        not isinstance(result, dict)
+        or not isinstance(result.get("id"), str)
+        or not result["id"]
+        or (
+            result.get("__typename") is not None
+            and (
+                not isinstance(result["__typename"], str)
+                or result["__typename"].split(".")[-1] != "ResultRef"
+            )
+        )
+    ):
+        raise UpstreamError("Table response contained invalid rows")
     normalized: dict[str, Any] = {
         "cells": [normalize_table_cell(cell, require_text=require_text) for cell in row["cells"]]
     }
@@ -599,7 +636,7 @@ class BenchlingService:
                 details={"part_id": table_id},
             )
         columns = detail.get("columnDefinitions") or []
-        if not isinstance(columns, list):
+        if not isinstance(columns, list) or any(not isinstance(column, dict) for column in columns):
             raise UpstreamError(
                 "Results table response contained invalid columns",
                 details={"part_id": table_id},
@@ -620,9 +657,16 @@ class BenchlingService:
             "result_schema_id": schema_id if isinstance(schema_id, str) and schema_id else None,
             "row_count": row_count,
             "submission_status": detail.get("submissionStatus"),
-            "items": [normalize_table_row(row, require_text=False) for row in raw_rows],
+            "items": [self._normalize_results_table_row(row, len(columns)) for row in raw_rows],
             "next_token": token,
         }
+
+    @staticmethod
+    def _normalize_results_table_row(row: Any, column_count: int) -> dict[str, Any]:
+        normalized = normalize_table_row(row, require_text=False)
+        if len(normalized["cells"]) != column_count:
+            raise UpstreamError("Table response contained invalid rows")
+        return normalized
 
     async def _read_part_table(
         self,
@@ -638,8 +682,23 @@ class BenchlingService:
         path = rows_items_path(
             self.api.environment.base_url, part_id, detail.get("rows"), collection=collection
         )
+        columns: list[dict[str, Any]] | None = None
+        if not require_text:
+            raw_columns = detail.get("columnDefinitions") or []
+            if not isinstance(raw_columns, list) or any(
+                not isinstance(column, dict) for column in raw_columns
+            ):
+                raise UpstreamError(
+                    "Results table response contained invalid columns",
+                    details={"part_id": part_id},
+                )
+            columns = raw_columns
         rows = [
-            normalize_table_row(item, require_text=require_text)
+            (
+                self._normalize_results_table_row(item, len(columns))
+                if columns is not None
+                else normalize_table_row(item, require_text=True)
+            )
             async for item in self.api.paginate(path, params={"pageSize": TABLE_ROW_PAGE_SIZE})
         ]
         row_count = detail.get("rowCount")
@@ -843,11 +902,14 @@ class BenchlingService:
         self,
         *,
         kind: object = None,
+        name: object = None,
         limit: object = listing.LIST_LIMIT,
         cursor: object = None,
     ) -> dict[str, Any]:
         """Return one page of entry, result, and run schemas."""
-        return await listing.list_schemas(self.api, kind=kind, limit=limit, cursor=cursor)
+        return await listing.list_schemas(
+            self.api, kind=kind, name=name, limit=limit, cursor=cursor
+        )
 
     async def get_entry_fields(self, reference: str) -> dict[str, Any]:
         """Return an entry's custom fields keyed by raw and system name, with schema, project and result tables."""
@@ -1049,15 +1111,28 @@ class BenchlingService:
         *,
         entry: str | None = None,
         schema_id: str | None = None,
+        entity_id: str | None = None,
+        entity_field_id: str | None = None,
         page_size: int = 100,
         cursor: str | None = None,
     ) -> dict[str, Any]:
-        """Return one page of results, optionally filtered by entry and schema.
+        """Return one page of results, optionally filtered by entry, schema, and linked entity.
 
         page_size must be 1-100 (ValidationError otherwise); next_token is None on the last page.
         """
         if page_size < 1 or page_size > 100:
             raise ValidationError("page_size must be between 1 and 100")
+        entity_filters: dict[str, str] = {}
+        if entity_id is not None:
+            entity_filters["schemaFieldLinkValue.linkedItemIds"] = self._result_filter_text(
+                entity_id, "entity_id"
+            )
+        if entity_field_id is not None:
+            if entity_id is None:
+                raise ValidationError("entity_field_id requires entity_id")
+            entity_filters["schemaFieldLinkValue.schemaFieldIds"] = self._result_filter_text(
+                entity_field_id, "entity_field_id"
+            )
         params: dict[str, Any] = {"pageSize": page_size}
         if cursor:
             params["nextToken"] = cursor
@@ -1065,6 +1140,7 @@ class BenchlingService:
             params["entry.eq"] = (await self.resolve_entry(entry))["entry_id"]
         if schema_id:
             params["schema.eq"] = schema_id
+        params.update(entity_filters)
         payload = await self.api.request("GET", "/result/items", params=params)
         return {
             "items": payload.get("items", []),
@@ -1076,12 +1152,26 @@ class BenchlingService:
         *,
         entry: str | None = None,
         schema_id: str | None = None,
+        entity_id: str | None = None,
+        entity_field_id: str | None = None,
     ) -> dict[str, Any]:
         """Return every assay-result page for these filters.
 
         Pages are followed internally at pageSize 100 until nextToken is absent.
         ``entry`` is resolved once. ``schema_id`` is sent as ``schema.eq`` when given.
+        ``entity_id`` filters linked field values; ``entity_field_id`` narrows that match.
         """
+        entity_filters: dict[str, str] = {}
+        if entity_id is not None:
+            entity_filters["schemaFieldLinkValue.linkedItemIds"] = self._result_filter_text(
+                entity_id, "entity_id"
+            )
+        if entity_field_id is not None:
+            if entity_id is None:
+                raise ValidationError("entity_field_id requires entity_id")
+            entity_filters["schemaFieldLinkValue.schemaFieldIds"] = self._result_filter_text(
+                entity_field_id, "entity_field_id"
+            )
         params: dict[str, Any] = {"pageSize": listing.LIST_LIMIT_MAX}
         resolved: str | None = None
         if entry is not None:
@@ -1089,8 +1179,15 @@ class BenchlingService:
             params["entry.eq"] = resolved
         if schema_id is not None:
             params["schema.eq"] = schema_id
+        params.update(entity_filters)
         items = [item async for item in self.api.paginate("/result/items", params=params)]
         return {"items": items, "entry_id": resolved, "schema_id": schema_id}
+
+    @staticmethod
+    def _result_filter_text(value: object, label: str) -> str:
+        if not isinstance(value, str) or not value.strip() or "," in value:
+            raise ValidationError(f"{label} must be a non-empty ID without commas")
+        return value.strip()
 
     async def get_result(self, result_id: str) -> dict[str, Any]:
         """Fetch a single result by ID."""

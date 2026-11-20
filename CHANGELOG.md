@@ -9,6 +9,7 @@ All notable changes to this project are documented here. The format is based on
 ### Added
 
 - `changes plan --family entry` previews creation from an entry template in a folder. It reads and validates the V3 template and folder, supports optional schema fields, and applies once with V3 `POST /entry`. The create response's entry ID is returned for inspection; the plan is not reusable after any attempt.
+- Schema listing can filter by an exact, case-sensitive name. Result listing can filter by linked entity, optionally narrowed to a schema field. Results-table row reads now reject invalid row metadata, result references, columns, and cell counts.
 
 ### Changed
 
