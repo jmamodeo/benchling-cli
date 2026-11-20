@@ -19,7 +19,7 @@ def parse(value):
 def test_schema_inlines_every_supported_shape() -> None:
     encoded = json.dumps(CHANGE_SPECIFICATION_SCHEMA)
     assert "$ref" not in encoded
-    assert len(CHANGE_SPECIFICATION_SCHEMA["anyOf"]) == 9
+    assert len(CHANGE_SPECIFICATION_SCHEMA["anyOf"]) == 11
     for token in (
         "insert",
         "delete",
@@ -34,6 +34,10 @@ def test_schema_inlines_every_supported_shape() -> None:
         "id_column",
         "column_map",
         "update",
+        "schema_id",
+        "source_container_id",
+        "destination_container_id",
+        "destination_contents",
     ):
         assert token in encoded
 

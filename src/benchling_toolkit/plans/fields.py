@@ -271,7 +271,8 @@ class FieldsPlanning(FieldNormalization):
         )
 
     async def _apply_fields(self, plan: ChangePlan, journal: ChangeJournal) -> dict[str, Any]:
-        current = await self.service.get_entry_fields(plan.entry_id)
+        entry_id = self._entry_id(plan)
+        current = await self.service.get_entry_fields(entry_id)
         current_schema_id = (current.get("schema") or {}).get("id")
         self._expect(
             current_schema_id,
@@ -293,7 +294,7 @@ class FieldsPlanning(FieldNormalization):
         self._expect(observed, plan.preconditions["observed_values"], "entry field values")
         response = await self.api.request(
             "PATCH",
-            f"/entry/{plan.entry_id}",
+            f"/entry/{entry_id}",
             json={"schemaFields": plan.request["schema_fields"]},
         )
         self._event(journal, "update_fields", "succeeded", write_event_details(response))
