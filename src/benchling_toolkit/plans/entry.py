@@ -11,6 +11,7 @@ from ..errors import (
     UpstreamError,
     ValidationError,
 )
+from ..listing import entry_web_url
 from ..models import ChangeJournal, ChangePlan
 from .base import PlanParts, write_event_details
 from .fields import FieldNormalization
@@ -137,7 +138,7 @@ class EntryPlanning(FieldNormalization):
                 "Benchling may have created the entry, but its response did not include an ID",
                 details={"http_status": response.status_code, "response_keys": sorted(response)},
             )
-        result = {"entry_id": entry_id, "entry": created}
+        result = {"entry_id": entry_id, "web_url": entry_web_url(created), "entry": created}
         self._event(
             journal,
             "create_entry",

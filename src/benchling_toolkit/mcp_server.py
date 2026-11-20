@@ -237,7 +237,11 @@ def _register_entry_tools(mcp: MCPServer, pool: RuntimePool) -> None:
 
     @mcp.tool(annotations=_annotations(True))
     async def resolve_entry(env: _Env, reference: _EntryRef) -> Envelope[Any]:
-        """Resolve an entry ID, display ID, or same-tenant URL to its canonical ID."""
+        """Resolve an entry ID, display ID, or same-tenant URL to its canonical ID.
+
+        web_url is the entry's link in the Benchling web app, or null when Benchling
+        returns none.
+        """
         return await safe(env, lambda rt: rt.service.resolve_entry(reference))
 
     @mcp.tool(annotations=_annotations(True))
@@ -278,7 +282,10 @@ def _register_entry_tools(mcp: MCPServer, pool: RuntimePool) -> None:
             Field(description="Maximum number of rows to return from each unstructured table."),
         ] = 250,
     ) -> Envelope[Any]:
-        """Fetch entry metadata or a paged complete snapshot of available structured data."""
+        """Fetch entry metadata or a paged complete snapshot of available structured data.
+
+        web_url is the entry's link in the Benchling web app (V3 webUrl), or null.
+        """
 
         async def call(rt: Runtime) -> dict[str, Any]:
             if (
@@ -351,7 +358,10 @@ def _register_entry_tools(mcp: MCPServer, pool: RuntimePool) -> None:
             ),
         ] = None,
     ) -> Envelope[Any]:
-        """Fetch entries by ID or display ID, chunking requests at 100 identifiers."""
+        """Fetch entries by ID or display ID, chunking requests at 100 identifiers.
+
+        Each item adds web_url, the entry's Benchling web-app link (V2 webURL), or null.
+        """
         return await safe(
             env,
             lambda rt: rt.service.get_entries(entry_ids=entry_ids, display_ids=display_ids),
@@ -441,7 +451,10 @@ def _register_entry_tools(mcp: MCPServer, pool: RuntimePool) -> None:
         ] = 50,
         cursor: _PageCursor = None,
     ) -> Envelope[Any]:
-        """List one page of entries. Folder uses V2; every filter is applied by the server."""
+        """List one page of entries. Folder uses V2; every filter is applied by the server.
+
+        Each row has web_url, the entry's Benchling web-app link, or null.
+        """
         return await safe(
             env,
             lambda rt: rt.service.list_entries(
@@ -1002,9 +1015,10 @@ def _register_change_tools(
         Writes need env in the server's --allow-writes list; a protected env is
         refused with a message saying so, and only a restart can enable it.
 
-        Entry creation returns the new entry ID for later inspection. After a
-        results upload, relay next_step to have the person accept the pending
-        results in the named table. Planned local files are uploaded as blobs
+        Entry creation returns the new entry ID and web_url (its Benchling web-app
+        link, or null) for later inspection. A results upload also returns the entry's
+        web_url; relay next_step, which links the entry, to have the person accept the
+        pending results in the named table. Planned local files are uploaded as blobs
         first, once each with no retry; their blob IDs are in the journal.
         """
 

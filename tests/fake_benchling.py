@@ -23,6 +23,11 @@ TEXT_PART = "docpart_text1"
 TENANT = "https://your-tenant-dev.benchling.com"
 
 
+def entry_web_url(entry_id: str) -> str:
+    """A synthetic Benchling web-app link for an entry on the fake tenant."""
+    return f"{TENANT}/benchling/f/lib_abc123-notebook/{entry_id}-synthetic/edit"
+
+
 @dataclass
 class Call:
     method: str
@@ -300,6 +305,7 @@ class FakeBenchling:
         self.rows_field: Any = None
         self.row_count_override: int | None = None
         self.omit_table_version = False
+        self.omit_entry_web_url = False
         self.corrupt_cells = False
         self.results_parts: dict[str, dict[str, Any]] = {}
         self.results_row_page_size: int | None = None
@@ -665,6 +671,8 @@ class FakeBenchling:
             "name": self.entry_name,
             "versionMetadata": {"versionId": self.version},
         }
+        if not self.omit_entry_web_url:
+            entry["webUrl"] = entry_web_url(ENTRY_ID)
         if self.entry_schema_id:
             entry["schema"] = {"id": self.entry_schema_id}
         return entry
@@ -678,6 +686,7 @@ class FakeBenchling:
                 "id": created["id"],
                 "name": created["name"],
                 "versionMetadata": {"versionId": "ver_created1"},
+                "webUrl": created["webURL"],
             }
             if created.get("schema"):
                 result["schema"] = created["schema"]
@@ -728,11 +737,13 @@ class FakeBenchling:
             "schema": deepcopy(template.get("schema")),
             "days": deepcopy(template.get("days") or []),
             "schemaFields": deepcopy(body.get("schemaFields") or {}),
+            "webURL": entry_web_url(entry_id),
         }
         self.created_entries[entry_id] = entry
         return 201, {
             "id": entry_id,
             "name": entry["name"],
+            "webUrl": entry["webURL"],
             "folder": {"id": folder_id},
             "schema": deepcopy(entry["schema"]),
         }
@@ -848,6 +859,7 @@ class FakeBenchling:
             "modifiedAt": row["modifiedAt"],
             "folder": {"id": row["folderId"]},
             "reviewSource": {"id": row["projectId"]},
+            "webUrl": entry_web_url(row["id"]),
         }
         if row["schemaId"]:
             item["schema"] = {"id": row["schemaId"]}
@@ -870,6 +882,7 @@ class FakeBenchling:
                     "schemaId": row["schemaId"],
                     "projectId": row["projectId"],
                     "folderId": row["folderId"],
+                    "webURL": entry_web_url(row["id"]),
                 }
             )
         return self._page(
@@ -894,6 +907,7 @@ class FakeBenchling:
                     "schemaId": row["schemaId"],
                     "projectId": row["projectId"],
                     "folderId": row["folderId"],
+                    "webURL": entry_web_url(row["id"]),
                 }
                 for row in rows
             ]
@@ -1277,6 +1291,8 @@ class FakeBenchling:
             "fields": dict(self.entry_fields),
             "days": [{"notes": [*result_tables, {"type": "text", "text": "ignored"}]}],
         }
+        if not self.omit_entry_web_url:
+            entry["webURL"] = entry_web_url(ENTRY_ID)
         if self.entry_schema_id:
             entry["schema"] = {"id": self.entry_schema_id}
         return 200, {"entry": entry}

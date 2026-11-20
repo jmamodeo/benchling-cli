@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pytest
-from fake_benchling import ENTRY_ID, TABLE_PART, TEXT_PART
+from fake_benchling import ENTRY_ID, TABLE_PART, TEXT_PART, entry_web_url
 
 from benchling_toolkit.errors import (
     AccessError,
@@ -11,6 +11,7 @@ from benchling_toolkit.errors import (
     UpstreamError,
     ValidationError,
 )
+from benchling_toolkit.listing import entry_web_url as web_url_of
 from benchling_toolkit.services import (
     build_sections,
     entry_version,
@@ -626,3 +627,48 @@ async def test_entry_without_schema_or_folder_has_no_schema_snapshot_or_project(
     assert snapshot["schema"] is None
     assert not any(i["scope"] == "entry_schema" for i in snapshot["issues"])
     assert (await runtime.service.list_result_tables(ENTRY_ID))["project_id"] is None
+
+
+@pytest.mark.parametrize(
+    ("item", "expected"),
+    [
+        ({"webUrl": "https://example.test/v3"}, "https://example.test/v3"),
+        ({"webURL": "https://example.test/v2"}, "https://example.test/v2"),
+        ({"webUrl": "", "webURL": "https://example.test/v2"}, "https://example.test/v2"),
+        ({"webUrl": None}, None),
+        ({}, None),
+        (None, None),
+    ],
+)
+def test_entry_web_url_reads_v3_or_v2_key(item, expected) -> None:
+    assert web_url_of(item) == expected
+
+
+async def test_entry_reads_include_web_url(runtime) -> None:
+    url = entry_web_url(ENTRY_ID)
+    by_id = await runtime.service.resolve_entry(ENTRY_ID)
+    by_display = await runtime.service.resolve_entry("EXP-1")
+    summary = await runtime.service.get_entry(ENTRY_ID)
+    full = await runtime.service.get_entry(ENTRY_ID, full=True)
+    bulk = await runtime.service.get_entries(entry_ids=[ENTRY_ID, "etr_list2"])
+    assert by_id["web_url"] == by_display["web_url"] == url
+    assert summary["web_url"] == summary["resolved"]["web_url"] == url
+    assert full["web_url"] == url
+    assert [item["web_url"] for item in bulk["items"]] == [url, entry_web_url("etr_list2")]
+    assert bulk["items"][0]["webURL"] == url
+
+
+async def test_entry_lists_include_web_url_from_v3_and_v2(runtime) -> None:
+    v3 = await runtime.service.list_entries()
+    v2 = await runtime.service.list_entries(folder="lib_abc123")
+    for page in (v3, v2):
+        assert page["items"]
+        assert all(item["web_url"] == entry_web_url(item["id"]) for item in page["items"])
+
+
+async def test_entry_web_url_is_null_when_benchling_omits_it(runtime, fake) -> None:
+    fake.omit_entry_web_url = True
+    resolved = await runtime.service.resolve_entry(ENTRY_ID)
+    entry = await runtime.service.get_entry(ENTRY_ID)
+    assert resolved["web_url"] is None
+    assert entry["web_url"] is None

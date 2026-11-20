@@ -5,7 +5,7 @@ import os
 
 import pytest
 from conftest import configure_env, plain_stdout, runtime_for
-from fake_benchling import ENTRY_ID, TABLE_PART, TEXT_PART
+from fake_benchling import ENTRY_ID, TABLE_PART, TEXT_PART, entry_web_url
 from typer.testing import CliRunner
 
 from benchling_toolkit import cli
@@ -839,3 +839,18 @@ def test_schema_find_returns_typed_field_definitions(invoke, fake) -> None:
     assert fields["ct"]["is_required"] is True
     assert fields["status"]["dropdown_options"][0]["id"] == "sfso_open"
     assert fake.writes() == []
+
+
+def test_entry_commands_return_web_url(invoke) -> None:
+    url = entry_web_url(ENTRY_ID)
+    outputs = [
+        invoke("entry", "resolve", "EXP-1"),
+        invoke("entry", "get", ENTRY_ID),
+        invoke("entry", "list", "--folder", "lib_abc123"),
+        invoke("entry", "bulk-get", "--display-id", "EXP-1"),
+    ]
+    assert all(code == 0 for code, _, _ in outputs)
+    resolved, entry, listed, bulk = (payload["data"] for _, payload, _ in outputs)
+    assert resolved["web_url"] == entry["web_url"] == url
+    assert listed["items"][0]["web_url"] == url
+    assert bulk["items"][0]["web_url"] == url

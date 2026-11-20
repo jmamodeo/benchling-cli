@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- Entry output has a `web_url` field, the entry's link in the Benchling web app, taken from V3 `webUrl` or V2 `webURL` (`null` when Benchling returns none). It is in `entry resolve`, `entry get` (with or without `--full`), `entry list` and `entry bulk-get`, and in the MCP tools `resolve_entry`, `get_entry`, `list_entries` and `get_entries`. `changes apply` and MCP `apply_changes` return `web_url` for an entry created from a template and for a results upload. The pending-results `next_step` from `changes apply`, `results pending --plan` and `results verify` now includes the link, not only the entry ID.
+
 ## [0.5.0] - 2026-11-20
 
 ### Added

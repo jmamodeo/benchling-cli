@@ -32,7 +32,7 @@ from .entry import EntryPlanning
 from .fields import FieldsPlanning
 from .repository import checksum_for, json_diff
 from .result_update import request_is_result_update
-from .results import ResultsPlanning, pending_results_next_step
+from .results import ResultsPlanning, pending_results_next_step, plan_entry_web_url
 from .table import TablePlanning
 
 
@@ -218,7 +218,11 @@ class ChangePlanner(
             "plan": plan.model_dump(mode="json"),
             "journal": journal.model_dump(mode="json"),
         }
-        next_step = pending_results_next_step(plan)
+        web_url: str | None = None
+        if "web_url" in result:
+            web_url = result["web_url"]
+            response["web_url"] = web_url
+        next_step = pending_results_next_step(plan, web_url=web_url)
         if next_step:
             response["next_step"] = next_step
         return response
@@ -546,7 +550,12 @@ class ChangePlanner(
                     for record in fetched["items"]
                 ]
             response = {
-                "source": {"mode": "plan", "plan_id": plan_id, "entry_id": plan.entry_id},
+                "source": {
+                    "mode": "plan",
+                    "plan_id": plan_id,
+                    "entry_id": plan.entry_id,
+                    "web_url": plan_entry_web_url(plan),
+                },
                 "batches": [
                     {
                         key: batch[key]
@@ -574,6 +583,7 @@ class ChangePlanner(
                 len([item for item in items if item["state"] == readback.PENDING]),
                 entry_id=plan.entry_id,
                 table_names=pending_tables,
+                web_url=plan_entry_web_url(plan),
             )
         ordered = readback.sort_by_state(items)
         counts = readback.state_counts(items)
@@ -672,6 +682,7 @@ class ChangePlanner(
         return {
             "plan_id": plan_id,
             "entry_id": plan.entry_id,
+            "web_url": plan_entry_web_url(plan),
             "ok": ok,
             "summary": (
                 f"{len(totals['matched'])} of {planned_count} planned rows match; "
@@ -695,7 +706,10 @@ class ChangePlanner(
             ][:sample],
             "batches": batch_reports,
             "next_step": readback.pending_next_step(
-                len(pending_rows), entry_id=plan.entry_id, table_names=pending_tables
+                len(pending_rows),
+                entry_id=plan.entry_id,
+                table_names=pending_tables,
+                web_url=plan_entry_web_url(plan),
             ),
         }
 

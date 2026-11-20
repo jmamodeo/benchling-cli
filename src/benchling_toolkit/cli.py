@@ -527,7 +527,7 @@ def doctor(ctx: typer.Context) -> None:
 
 @entry_app.command("resolve")
 def entry_resolve(ctx: typer.Context, reference: str) -> None:
-    """Resolve an entry ID, display ID or URL to its canonical entry."""
+    """Resolve an entry ID, display ID or URL to its canonical entry and web_url."""
     state: State = ctx.obj
     _execute(state.env, lambda runtime: runtime.service.resolve_entry(reference))
 
@@ -553,7 +553,7 @@ def entry_bulk_get(
         None, "--display-id", help="Entry display ID. Repeat to request multiple entries."
     ),
 ) -> None:
-    """Fetch multiple entries by ID or display ID."""
+    """Fetch multiple entries by ID or display ID; each item includes web_url."""
     state: State = ctx.obj
     _execute(
         state.env,

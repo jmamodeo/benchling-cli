@@ -459,6 +459,7 @@ class BenchlingService:
                 "entry_id": entry.get("id", parsed_id),
                 "display_id": entry.get("displayId"),
                 "name": entry.get("name"),
+                "web_url": listing.entry_web_url(entry),
                 "resolved_by": "canonical_id",
             }
 
@@ -488,6 +489,7 @@ class BenchlingService:
             "entry_id": found["id"],
             "display_id": found.get("displayId"),
             "name": found.get("name"),
+            "web_url": listing.entry_web_url(found),
             "resolved_by": "display_id",
         }
 
@@ -501,7 +503,12 @@ class BenchlingService:
         entry_id = resolved["entry_id"]
         if not full:
             entry = await self.api.request("GET", f"/entry/{entry_id}")
-            return {"resolved": resolved, "entry": entry, "version_id": entry_version(entry)}
+            return {
+                "resolved": resolved,
+                "entry": entry,
+                "version_id": entry_version(entry),
+                "web_url": listing.entry_web_url(entry),
+            }
         for attempt in range(2):
             first = await self.api.request("GET", f"/entry/{entry_id}")
             version = entry_version(first)
@@ -512,6 +519,7 @@ class BenchlingService:
                 return {
                     "resolved": resolved,
                     **snapshot.model_dump(mode="json", by_alias=True),
+                    "web_url": listing.entry_web_url(last) or listing.entry_web_url(first),
                 }
             if attempt == 1:
                 raise ConflictError(
@@ -551,7 +559,9 @@ class BenchlingService:
                 not isinstance(item, dict) for item in response_entries
             ):
                 raise UpstreamError("Benchling returned an unexpected bulk entry response")
-            entries.extend(response_entries)
+            entries.extend(
+                {**item, "web_url": listing.entry_web_url(item)} for item in response_entries
+            )
         return {"items": entries, "count": len(entries)}
 
     @staticmethod
@@ -1264,6 +1274,7 @@ class BenchlingService:
         note = matches[0]
         return {
             "entry_id": entry_id,
+            "entry_web_url": listing.entry_web_url(entry),
             "table_id": table_id,
             "name": note.get("name"),
             "schema_id": note.get("assayResultSchemaId"),
