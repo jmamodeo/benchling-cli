@@ -57,5 +57,5 @@ jobs:
           /tmp/wheel-venv/bin/benchlingtk skill show | cmp - SKILL.md
       - name: Check SKILL.md in the built wheel
         env:
-          BENCHLING_TOOLKIT_WHEEL_DIR: dist
+          BENCHLINGTK_WHEEL_DIR: dist
         run: uv run --extra dev pytest -m wheel tests/test_skill_package.py

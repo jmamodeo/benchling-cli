@@ -1,6 +1,6 @@
 """OS keychain storage for client secrets.
 
-The service name is ``benchling-toolkit`` and the username is the environment
+The service name is ``benchlingtk`` and the username is the environment
 name. There is no plaintext file fallback.
 """
 
@@ -22,7 +22,7 @@ from keyring.errors import KeyringError, KeyringLocked, PasswordDeleteError
 from .errors import AuthenticationError
 from .redact import register_secret
 
-SERVICE_NAME = "benchling-toolkit"
+SERVICE_NAME = "benchlingtk"
 _SECRET_SERVICE_NAME = "org.freedesktop.secrets"
 _UNLOCK = "gnome-keyring-daemon --unlock --components=secrets"
 _PLACEHOLDER_ENV = "dev"

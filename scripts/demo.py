@@ -100,7 +100,7 @@ def main() -> None:
 
 def _demo() -> None:
     home = tempfile.mkdtemp(prefix="benchling-demo-")
-    os.environ["BENCHLING_TOOLKIT_HOME"] = home
+    os.environ["BENCHLINGTK_HOME"] = home
     keyring.set_keyring(MemoryKeyring())
     EnvironmentConfigStore().upsert(
         Environment(

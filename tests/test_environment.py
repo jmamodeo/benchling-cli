@@ -258,7 +258,7 @@ def test_cli_status_lists_the_environment_without_a_secret_or_network(monkeypatc
     assert SECRET not in result.stderr
     listed = json.dumps(EnvironmentConfigStore().metadata())
     assert SECRET not in listed
-    assert SERVICE_NAME == "benchling-toolkit"
+    assert SERVICE_NAME == "benchlingtk"
 
 
 @pytest.mark.asyncio

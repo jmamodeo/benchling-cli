@@ -29,7 +29,7 @@ An agent that can only call MCP tools is inside the tool boundary in the diagram
 
 | Asset | Where it lives |
 |---|---|
-| Client secret | OS keychain, service `benchling-toolkit`, username = environment name. Also in process memory after login or after a command loads it |
+| Client secret | OS keychain, service `benchlingtk`, username = environment name. Also in process memory after login or after a command loads it |
 | Access token | `AuthManager` memory only. Renewed before expiry. Not written to the keychain or to `environments.json` |
 | Client ID and tenant URL | `environments.json`, mode `0600`. The client ID is an identifier, not the secret |
 | Plan | `plans/{id}.json`, mode `0600`. Contains the request, the before/after preview, and the preconditions. That is a local copy of the entry data the plan touched |
@@ -81,7 +81,7 @@ A plan is stale when the entry, fields, or results it was previewed against have
 
 - The checksum detects accidental corruption and a hand edit that forgets to recompute the hash. It is not a MAC and not a signature. A process that can write the state directory can change the plan and replace the checksum. The README safety section states the same limit.
 - The journal has no checksum. A process that can write `journals/{id}.json` can set the status back to `pending` and apply again. Single-use holds against the CLI and MCP tools, not against an editor on the file.
-- The lock and the journal are local to one state directory. Copying a `pending` plan to another machine, or to another `BENCHLING_TOOLKIT_HOME`, starts a second pending journal. Document and table applies are likely to conflict on the entry version. Field updates, result uploads, entry creates, and result PATCHes can both succeed: they do not send an idempotency key. Result-upload correlation UUIDs are explicitly not idempotency keys.
+- The lock and the journal are local to one state directory. Copying a `pending` plan to another machine, or to another `BENCHLINGTK_HOME`, starts a second pending journal. Document and table applies are likely to conflict on the entry version. Field updates, result uploads, entry creates, and result PATCHes can both succeed: they do not send an idempotency key. Result-upload correlation UUIDs are explicitly not idempotency keys.
 - Field updates compare values and then PATCH. The body has no version. A write that arrives in that gap can be overwritten.
 - Result updates compare `modifiedAt` and the mapped values, then PATCH. `UpdateResultInput` has no version field, so Benchling does not reject a stale PATCH. The gap is the time after the re-check and before that result's PATCH. Rows are patched sequentially, so a later row's gap is longer.
 - Result upload and entry creation are POSTs. Two copies of a pending plan on different state directories can submit/create twice. A timeout is `unknown`, so the client will not retry on its own, but a person who then creates and applies a new plan can create a duplicate entry or submit records again.

@@ -14,7 +14,7 @@ Please report vulnerabilities privately using GitHub's
 
 - Never commit tokens, client IDs, client secrets, or real tenant data to this repository, issues, or pull requests.
 - Run `benchlingtk auth login` in your own terminal, or non-interactively with `--tenant-url`, `--client-id`, and `--secret-stdin`. The client secret is not accepted as an argument and must not be passed through an agent, a chat, or an MCP client config. The tenant URL and client ID may be arguments; the secret may not.
-- The tenant URL and client ID are written to `environments.json` (mode 0600) under the state directory. The client secret is stored in the OS keychain (service `benchling-toolkit`, username = environment name). Access tokens stay in process memory.
+- The tenant URL and client ID are written to `environments.json` (mode 0600) under the state directory. The client secret is stored in the OS keychain (service `benchlingtk`, username = environment name). Access tokens stay in process memory.
 - There is no plaintext fallback. If the OS keychain is unavailable, login fails and nothing is saved. On Linux the keychain is the Secret Service on the session bus. Later shells and `benchlingtk mcp serve` must inherit the same `DBUS_SESSION_BUS_ADDRESS`. The MCP SDK passes only `HOME`, `LOGNAME`, `PATH`, `SHELL`, `TERM` and `USER` unless the client config sets `env`. Do not capture `gnome-keyring-daemon --unlock` with `$(...)`; that hangs because the daemon does not exit.
 - Error envelopes and execution journals are scrubbed of client secrets and access tokens.
 - If a secret is exposed, rotate it in Benchling and run `benchlingtk auth login` again for that environment.

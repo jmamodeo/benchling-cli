@@ -186,7 +186,7 @@ printf '%s' "$BENCHLING_CLIENT_SECRET" | benchlingtk auth login --env dev \
 
 `--tenant-url` accepts `https://host`, a bare host, or the same URL with a trailing `/api/v2` or `/api/v3` (those suffixes and a trailing slash are removed). `http://` is rejected. If a flag is missing and there is no terminal, login exits with one error that names `--tenant-url`, `--client-id`, and `--secret-stdin`. It does not fall back to `getpass` on a pipe, so you will not see echo warnings.
 
-Login requests an OAuth `client_credentials` token before it saves anything. On success it writes the tenant URL and client ID to `environments.json` (mode 0600) under the state directory, and stores the client secret in the OS keychain under the service name `benchling-toolkit`. The username in the keychain is the environment name. Access tokens stay in process memory and are renewed before expiry in a long-running MCP process. If no usable keychain is available, login fails with the cause, one fix command, and a pointer to Headless Linux. There is no plaintext file fallback. A 401 says `Benchling at https://<tenant> rejected the client ID or secret.`
+Login requests an OAuth `client_credentials` token before it saves anything. On success it writes the tenant URL and client ID to `environments.json` (mode 0600) under the state directory, and stores the client secret in the OS keychain under the service name `benchlingtk`. The username in the keychain is the environment name. Access tokens stay in process memory and are renewed before expiry in a long-running MCP process. If no usable keychain is available, login fails with the cause, one fix command, and a pointer to Headless Linux. There is no plaintext file fallback. A 401 says `Benchling at https://<tenant> rejected the client ID or secret.`
 
 The toolkit acts as the **app**, with the app's permissions and audit identity, not the signed-in browser user. Profiles saved by previous versions are never read.
 
@@ -259,7 +259,7 @@ If `systemctl --user status` works, a user bus is often already listening at `un
 
 If the collection is locked, or the session bus has no `org.freedesktop.secrets` name, the error is the cause, one `dbus-run-session` command that unlocks the keyring and logs in inside that shell, and a pointer here. During `auth login` that command uses the environment name, the normalized tenant URL, and the client ID you passed, or the ones already saved for that environment. A value you did not supply stays a placeholder (`--env dev`, `https://your-tenant.benchling.com`, `CLIENT`). `$KEYRING_PASSWORD` and `$BENCHLING_CLIENT_SECRET` stay shell variables. `auth status`, `mcp serve`, and other commands keep the placeholders. If no provider is installed, the command is `sudo apt-get install -y gnome-keyring dbus`. The note about the MCP client `env` block and cron is included only when `benchlingtk mcp serve` raises the error. macOS and Windows use the system keychain and do not need this session.
 
-`BENCHLING_TOOLKIT_HOME` overrides the state directory (the platform config directory plus `benchling-toolkit` otherwise). It does not hold secrets. HTTPS uses the operating system's certificate trust store, with certificate-chain and hostname verification enabled. No insecure TLS fallback is available.
+`BENCHLINGTK_HOME` overrides the state directory (the platform config directory plus `benchlingtk` otherwise). It does not hold secrets. HTTPS uses the operating system's certificate trust store, with certificate-chain and hostname verification enabled. No insecure TLS fallback is available.
 
 ## Least privilege
 
@@ -585,7 +585,7 @@ flowchart TD
 - **App identity, not user identity.** OAuth client credentials give the toolkit its own permissions and audit identity, separate from any person's. The app must be granted access to each project it touches.
 - **One service layer, two interfaces.** The CLI and MCP server call the same typed services and return the same envelope, so behavior is specified and tested once. The cost is a more verbose, JSON-first CLI.
 - **Honest handling of API limits.** Unstructured table cells are edited one cell at a time, and new rows are inserted at the end of the table; evaluation is reset until Benchling recalculates it. Replacing text is an insert followed by a delete and can end in a reported partial completion.
-- **Local, single-machine state.** Plans, journals, locks, and `environments.json` are plain files under the application directory (`BENCHLING_TOOLKIT_HOME` overrides it). Client secrets are in the OS keychain for that user. Concurrency control does not extend across machines.
+- **Local, single-machine state.** Plans, journals, locks, and `environments.json` are plain files under the application directory (`BENCHLINGTK_HOME` overrides it). Client secrets are in the OS keychain for that user. Concurrency control does not extend across machines.
 - **Offline tests against a stateful fake.** The suite runs the real client, services and planner against an in-process fake Benchling API instead of stubbing each call. This tests behavior end to end; the cost is that the fake can drift from the real API, which is why the opt-in sandbox exercise exists.
 
 ## JSON envelope and exit codes

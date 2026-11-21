@@ -89,8 +89,8 @@ async def test_mcp_serves_skill_md_as_a_resource(pool) -> None:
 
 
 def _wheel(tmp_path: Path) -> Path:
-    """The wheel in BENCHLING_TOOLKIT_WHEEL_DIR (CI build job), else one built here."""
-    configured = os.environ.get("BENCHLING_TOOLKIT_WHEEL_DIR")
+    """The wheel in BENCHLINGTK_WHEEL_DIR (CI build job), else one built here."""
+    configured = os.environ.get("BENCHLINGTK_WHEEL_DIR")
     if configured:
         out = Path(configured)
     else:

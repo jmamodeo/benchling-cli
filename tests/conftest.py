@@ -38,7 +38,7 @@ def plain_stdout(args: list[str]) -> str:
 
 @pytest.fixture(autouse=True)
 def isolated_home(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("BENCHLING_TOOLKIT_HOME", str(tmp_path / "app"))
+    monkeypatch.setenv("BENCHLINGTK_HOME", str(tmp_path / "app"))
 
 
 @pytest.fixture(autouse=True)
@@ -107,7 +107,7 @@ def token_client() -> httpx.Client:
 @pytest.fixture
 def benchling_env(monkeypatch) -> None:
     for name in list(os.environ):
-        if name.startswith("BENCHLING_") and name != "BENCHLING_TOOLKIT_HOME":
+        if name.startswith("BENCHLING_"):
             monkeypatch.delenv(name)
     configure_env("sandbox", TENANT, "client", SANDBOX_SECRET)
 

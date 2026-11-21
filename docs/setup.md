@@ -78,8 +78,8 @@ The prompt asks for three values:
 
 Login requests a client-credentials token before it saves anything. A rejected id or secret is not written. On success:
 
-- The tenant URL and client ID go in `environments.json`, mode 0600, under the state directory. That file holds no secret. The directory is `$XDG_CONFIG_HOME/benchling-toolkit`, or `~/.config/benchling-toolkit` when `XDG_CONFIG_HOME` is unset. On macOS it is `~/Library/Application Support/benchling-toolkit`. On Windows it is `%APPDATA%\benchling-toolkit`. `BENCHLING_TOOLKIT_HOME` overrides the directory and still holds no secrets.
-- The client secret goes in the OS keychain. The service name is `benchling-toolkit`. The keychain username is the environment name.
+- The tenant URL and client ID go in `environments.json`, mode 0600, under the state directory. That file holds no secret. The directory is `$XDG_CONFIG_HOME/benchlingtk`, or `~/.config/benchlingtk` when `XDG_CONFIG_HOME` is unset. On macOS it is `~/Library/Application Support/benchlingtk`. On Windows it is `%APPDATA%\benchlingtk`. `BENCHLINGTK_HOME` overrides the directory and still holds no secrets.
+- The client secret goes in the OS keychain. The service name is `benchlingtk`. The keychain username is the environment name.
 - Access tokens stay in process memory and are renewed before they expire. They are not written to the keychain or to `environments.json`.
 
 macOS and Windows use the system keychain. Linux uses the Secret Service (`org.freedesktop.secrets`) on the session bus. There is no plaintext file fallback. If the keychain cannot store the secret, login fails and nothing is saved. The error is the cause, one fix command, and a pointer to the README section Headless Linux.

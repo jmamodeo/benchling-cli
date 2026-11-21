@@ -468,7 +468,7 @@ def test_auth_status_lists_environments_without_secrets_or_a_trailing_slash(invo
 
 def test_auth_status_is_an_empty_envelope_when_nothing_is_configured(monkeypatch) -> None:
     for name in list(os.environ):
-        if name.startswith("BENCHLING_") and name != "BENCHLING_TOOLKIT_HOME":
+        if name.startswith("BENCHLING_"):
             monkeypatch.delenv(name)
     result = CliRunner().invoke(cli.app, ["auth", "status"])
     assert result.exit_code == 0

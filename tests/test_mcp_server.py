@@ -898,7 +898,7 @@ app(["mcp", "serve"])
     # The child is the server. The parent sends the session and closes stdin.
     env = os.environ.copy()
     env["PYTHONPATH"] = "tests" + os.pathsep + env.get("PYTHONPATH", "")
-    env["BENCHLING_TOOLKIT_HOME"] = str(tmp_path)
+    env["BENCHLINGTK_HOME"] = str(tmp_path)
     proc = subprocess.Popen(
         [sys.executable, "-c", script],
         stdin=subprocess.PIPE,

@@ -56,7 +56,7 @@ The person saves an environment in their own terminal:
 benchlingtk auth login --env NAME
 ```
 
-The client secret is read from a hidden prompt, or from stdin when they pass `--secret-stdin`. It is never a command argument. Login saves nothing until a client-credentials token request succeeds. The tenant URL and client ID go in `environments.json`. The client secret goes in the OS keychain under the service name `benchling-toolkit`, with the environment name as the keychain username.
+The client secret is read from a hidden prompt, or from stdin when they pass `--secret-stdin`. It is never a command argument. Login saves nothing until a client-credentials token request succeeds. The tenant URL and client ID go in `environments.json`. The client secret goes in the OS keychain under the service name `benchlingtk`, with the environment name as the keychain username.
 
 Run `auth login` only when the person has given you the credentials for that environment and asked you to save them; pass the secret with `--secret-stdin`, never as an argument. Otherwise do not run it, and never invent a tenant URL, client ID, or secret. Do not ask for the client secret, read it from the environment, or print it. If a command fails because the environment is missing or the keychain has no secret, stop and tell the person to run `benchlingtk auth login --env NAME` in their own terminal.
 
