@@ -27,7 +27,7 @@ def _doctor_hint(exc: Exception, env: str) -> str:
     """One remediation line for a failed doctor check."""
     code = getattr(exc, "code", "")
     message = _error_text(exc).lower()
-    login = f"benchling auth login --env {env}"
+    login = f"benchlingtk auth login --env {env}"
     if (
         "not in the keychain" in message
         or "credentials are missing" in message
@@ -45,7 +45,7 @@ def _doctor_hint(exc: Exception, env: str) -> str:
         return "Check that this Benchling app is allowed to read the tenant."
     if code in {"upstream_error", "not_found"}:
         return "Check the tenant URL and that this machine can reach it over HTTPS."
-    return f"Run benchling --env {env} doctor again after fixing this check."
+    return f"Run benchlingtk --env {env} doctor again after fixing this check."
 
 
 ENTRY_ID = re.compile(r"^etr_[A-Za-z0-9]+$")

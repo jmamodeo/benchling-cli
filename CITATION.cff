@@ -1,8 +1,8 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite it as below."
 type: software
-title: "benchling-toolkit"
-version: 0.5.3
+title: "benchlingtk"
+version: 0.6.0
 date-released: "2026-11-20"
 abstract: >-
   Safe, auditable tools for AI agents working in Benchling: a JSON-first CLI
@@ -13,8 +13,8 @@ abstract: >-
 authors:
   - family-names: Amodeo
     given-names: John
-url: "https://github.com/jmamodeo/benchling-toolkit"
-repository-code: "https://github.com/jmamodeo/benchling-toolkit"
+url: "https://github.com/jmamodeo/benchlingtk"
+repository-code: "https://github.com/jmamodeo/benchlingtk"
 license: Apache-2.0
 keywords:
   - benchling

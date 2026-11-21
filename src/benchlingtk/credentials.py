@@ -221,7 +221,7 @@ def _token_check(
             "ok": False,
             "message": (
                 "Client secret is not in the keychain; "
-                f"run benchling auth login --env {environment.name}"
+                f"run benchlingtk auth login --env {environment.name}"
             ),
         }
     try:
@@ -259,6 +259,6 @@ def _rollback(
     except Exception as exc:
         raise AuthenticationError(
             "Saving the environment failed, and the previous credentials could not be restored. "
-            "Run `benchling auth login --env NAME` again.",
+            "Run `benchlingtk auth login --env NAME` again.",
             details={"env": name, "reason": type(exc).__name__},
         ) from exc

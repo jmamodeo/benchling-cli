@@ -9,9 +9,9 @@ from conftest import runtime_for
 from fake_benchling import ENTRY_ID, TABLE_PART, TEXT_PART, entry_web_url
 from mcp import Client
 
-from benchling_toolkit.errors import AuthenticationError, ValidationError
-from benchling_toolkit.mcp_server import build_mcp_server, run_mcp_server
-from benchling_toolkit.runtime import RuntimePool
+from benchlingtk.errors import AuthenticationError, ValidationError
+from benchlingtk.mcp_server import build_mcp_server, run_mcp_server
+from benchlingtk.runtime import RuntimePool
 
 READ_TOOLS = {
     "list_environments",
@@ -834,7 +834,7 @@ def test_serve_runs_stdio_transport_with_validated_writable_envs(
 def test_closed_loop_on_shutdown_is_not_a_startup_failure(benchling_env, monkeypatch) -> None:
     from mcp.server.mcpserver import MCPServer
 
-    from benchling_toolkit.mcp_server import _close_pool, _closed_event_loop
+    from benchlingtk.mcp_server import _close_pool, _closed_event_loop
 
     monkeypatch.setattr(
         MCPServer,
@@ -850,7 +850,7 @@ def test_closed_loop_on_shutdown_is_not_a_startup_failure(benchling_env, monkeyp
         raise RuntimeError("Event loop is closed")
 
     monkeypatch.setattr(MCPServer, "run", lambda self, transport: None)
-    monkeypatch.setattr("benchling_toolkit.mcp_server.asyncio.run", close_raises)
+    monkeypatch.setattr("benchlingtk.mcp_server.asyncio.run", close_raises)
     run_mcp_server()
 
     grouped = BaseExceptionGroup("shutdown", [RuntimeError("Event loop is closed")])
@@ -870,10 +870,10 @@ import keyring
 from memory_keyring import MemoryKeyring
 
 keyring.set_keyring(MemoryKeyring())
-from benchling_toolkit.environment import EnvironmentConfigStore
-from benchling_toolkit.keychain import Keychain
-from benchling_toolkit.models import AuthMethod, Environment
-from benchling_toolkit.services import BenchlingService
+from benchlingtk.environment import EnvironmentConfigStore
+from benchlingtk.keychain import Keychain
+from benchlingtk.models import AuthMethod, Environment
+from benchlingtk.services import BenchlingService
 
 async def fake_resolve(self, reference):
     try:
@@ -892,13 +892,13 @@ EnvironmentConfigStore().upsert(
     )
 )
 Keychain().set("sandbox", "sandbox-client-secret")
-from benchling_toolkit.cli import app
+from benchlingtk.cli import app
 app(["mcp", "serve"])
 """
     # The child is the server. The parent sends the session and closes stdin.
     env = os.environ.copy()
     env["PYTHONPATH"] = "tests" + os.pathsep + env.get("PYTHONPATH", "")
-    env["BENCHLING_TOOLKIT_HOME"] = str(tmp_path)
+    env["BENCHLINGTK_HOME"] = str(tmp_path)
     proc = subprocess.Popen(
         [sys.executable, "-c", script],
         stdin=subprocess.PIPE,

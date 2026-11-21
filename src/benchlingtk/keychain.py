@@ -1,6 +1,6 @@
 """OS keychain storage for client secrets.
 
-The service name is ``benchling-toolkit`` and the username is the environment
+The service name is ``benchlingtk`` and the username is the environment
 name. There is no plaintext file fallback.
 """
 
@@ -22,7 +22,7 @@ from keyring.errors import KeyringError, KeyringLocked, PasswordDeleteError
 from .errors import AuthenticationError
 from .redact import register_secret
 
-SERVICE_NAME = "benchling-toolkit"
+SERVICE_NAME = "benchlingtk"
 _SECRET_SERVICE_NAME = "org.freedesktop.secrets"
 _UNLOCK = "gnome-keyring-daemon --unlock --components=secrets"
 _PLACEHOLDER_ENV = "dev"
@@ -30,7 +30,7 @@ _PLACEHOLDER_URL = "https://your-tenant.benchling.com"
 _PLACEHOLDER_CLIENT = "CLIENT"
 _INSTALL = "sudo apt-get install -y gnome-keyring dbus"
 _README = "See the README section Headless Linux."
-# Shown only for `benchling mcp serve`. CLI login already has a terminal session.
+# Shown only for `benchlingtk mcp serve`. CLI login already has a terminal session.
 _MCP_ENV = (
     "The standard MCP SDK launches stdio servers with only HOME, LOGNAME, PATH, "
     "SHELL, TERM and USER, so DBUS_SESSION_BUS_ADDRESS is missing. "
@@ -49,7 +49,7 @@ class _LoginFix:
     client_id: str | None = None
 
 
-# Set only around `benchling auth login`. Other commands keep the placeholders.
+# Set only around `benchlingtk auth login`. Other commands keep the placeholders.
 _login_fix: ContextVar[_LoginFix | None] = ContextVar("benchling_login_fix", default=None)
 NO_KEYRING_MESSAGE = (
     "No usable OS keychain is available because no Secret Service backend is installed.\n"
@@ -202,7 +202,7 @@ def dbus_login_command(
     stay variable references; this command never contains a secret value.
     """
     login = (
-        'printf "%s" "$BENCHLING_CLIENT_SECRET" | benchling auth login '
+        'printf "%s" "$BENCHLING_CLIENT_SECRET" | benchlingtk auth login '
         f"--env {_shell_value(env, _PLACEHOLDER_ENV)} "
         f"--tenant-url {_shell_value(tenant_url, _PLACEHOLDER_URL)} "
         f"--client-id {_shell_value(client_id, _PLACEHOLDER_CLIENT)} "

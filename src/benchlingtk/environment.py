@@ -72,7 +72,7 @@ def check_apply_allowed(
     if confirm_env is None:
         raise ValidationError(
             f"Environment {name} is protected; nothing was applied. To write, rerun "
-            f"`benchling --env {name} changes apply PLAN_ID --confirm-env {name}`",
+            f"`benchlingtk --env {name} changes apply PLAN_ID --confirm-env {name}`",
             details=details,
         )
 
@@ -138,7 +138,7 @@ class EnvironmentConfigStore(ConfigStore):
         records = self._records()
         if name not in records:
             raise ValidationError(
-                f"Unknown environment {name!r}; run `benchling auth login --env {name}`",
+                f"Unknown environment {name!r}; run `benchlingtk auth login --env {name}`",
                 details={"env": name, "available_envs": names},
             )
         return self._environment(name, records[name])

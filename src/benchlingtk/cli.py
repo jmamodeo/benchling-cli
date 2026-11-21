@@ -39,7 +39,7 @@ from .runtime import Runtime
 from .skill import find_skill_md
 
 app = typer.Typer(
-    name="benchling",
+    name="benchlingtk",
     help="Safe, auditable tools for structured Benchling entry data.",
     no_args_is_help=True,
     pretty_exceptions_enable=False,
@@ -97,7 +97,7 @@ class State:
 
 def _show_version(value: bool) -> None:
     if value:
-        typer.echo(f"benchling-toolkit {__version__}")
+        typer.echo(f"benchlingtk {__version__}")
         raise typer.Exit()
 
 
@@ -1169,7 +1169,7 @@ def issue_draft(
     actual: str | None = typer.Option(None, "--actual", help="What the toolkit did instead."),
     interface: str | None = typer.Option(None, "--interface", help="cli or mcp."),
     command_or_tool: str | None = typer.Option(
-        None, "--command", help="The benchling command or MCP tool that was used."
+        None, "--command", help="The benchlingtk command or MCP tool that was used."
     ),
     description: str | None = typer.Option(
         None, "--description", help="Detailed description of the limitation."
@@ -1232,7 +1232,7 @@ def _skill_path() -> Path:
 def skill_path() -> None:
     """Print the absolute path of the installed SKILL.md as plain text.
 
-    Looks in share/benchling-toolkit under the install prefixes, then in the source
+    Looks in share/benchlingtk under the install prefixes, then in the source
     checkout. A missing file prints a not_found envelope. Read-only and offline.
     """
     typer.echo(str(_skill_path()))

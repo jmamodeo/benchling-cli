@@ -1,21 +1,21 @@
-# benchling-toolkit
+# benchlingtk
 
 Safe, auditable tools for AI agents working in Benchling.
 
-[![CI](https://github.com/jmamodeo/benchling-toolkit/actions/workflows/ci.yml/badge.svg)](https://github.com/jmamodeo/benchling-toolkit/actions/workflows/ci.yml)
+[![CI](https://github.com/jmamodeo/benchlingtk/actions/workflows/ci.yml/badge.svg)](https://github.com/jmamodeo/benchlingtk/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
-[![Coverage](https://img.shields.io/badge/coverage-96%25-brightgreen)](https://github.com/jmamodeo/benchling-toolkit/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/badge/coverage-96%25-brightgreen)](https://github.com/jmamodeo/benchlingtk/actions/workflows/ci.yml)
 
 > **Unofficial; not affiliated with or endorsed by Benchling, Inc.** Benchling is a trademark of Benchling, Inc.
 
 ## Why this exists
 
-An electronic lab notebook is a scientific record, so letting an AI agent write to one directly is hard to trust. `benchling-toolkit` is a toolkit of safe, auditable tools that AI agents use to work with a [Benchling](https://www.benchling.com) tenant: a JSON-first CLI and a local [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server that is read-only by default. Every change is first previewed as an immutable, checksummed plan that records what will change and the version preconditions it depends on. A separate, explicit step applies it: that step re-checks the preconditions, refuses stale or already-used plans, and records each stage in a local execution journal. The MCP server cannot apply writes unless an operator opts a specific environment in with `--allow-writes`.
+An electronic lab notebook is a scientific record, so letting an AI agent write to one directly is hard to trust. `benchlingtk` is a toolkit of safe, auditable tools that AI agents use to work with a [Benchling](https://www.benchling.com) tenant: a JSON-first CLI and a local [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server that is read-only by default. Every change is first previewed as an immutable, checksummed plan that records what will change and the version preconditions it depends on. A separate, explicit step applies it: that step re-checks the preconditions, refuses stale or already-used plans, and records each stage in a local execution journal. The MCP server cannot apply writes unless an operator opts a specific environment in with `--allow-writes`.
 
 - Public Benchling API only; it never automates the browser.
 - Six change families: template-based entry creation, document text, unstructured tables, entry fields, assay results, and containers.
-- Several environments at once. Each one is saved with `benchling auth login`; the client secret stays in the OS keychain.
+- Several environments at once. Each one is saved with `benchlingtk auth login`; the client secret stays in the OS keychain.
 - One versioned JSON envelope and stable exit codes for both interfaces.
 
 ## Demo
@@ -28,7 +28,7 @@ The picture and the [asciinema cast](docs/demo.cast) are a scripted playback of 
 ```console
 # 1. Read an entry (envelope trimmed for readability)
 
-$ benchling --env demo entry inspect etr_abc123
+$ benchlingtk --env demo entry inspect etr_abc123
 {
   "ok": true,
   "data": {
@@ -40,11 +40,11 @@ $ benchling --env demo entry inspect etr_abc123
 
 # 2. Preview: reads Benchling, writes nothing remotely
 
-$ benchling --env demo changes plan --entry etr_abc123 --family table --spec set-cell-b2.json
+$ benchlingtk --env demo changes plan --entry etr_abc123 --family table --spec set-cell-b2.json
 {
   "ok": true,
   "data": {
-    "id": "9268199dd92c49a3b0df5be26ebb3dc8",
+    "id": "b7a812bc920d407e9df9b23ef6ef749e",
     "family": "table",
     "env": "demo",
     "preconditions": {
@@ -65,7 +65,7 @@ remote writes so far: 0
 
 # 3. Apply the first plan
 
-$ benchling --env demo changes apply 9268199dd92c49a3b0df5be26ebb3dc8
+$ benchlingtk --env demo changes apply b7a812bc920d407e9df9b23ef6ef749e
 {
   "ok": true,
   "data": {
@@ -92,7 +92,7 @@ $ benchling --env demo changes apply 9268199dd92c49a3b0df5be26ebb3dc8
 
 # 4. The second plan was previewed against the old entry version: apply is refused
 
-$ benchling --env demo changes apply f76d9ec52ca7410a91955867a495b3f5
+$ benchlingtk --env demo changes apply c2eac4de90534faeabea68cac9cf2a05
 {
   "ok": false,
   "error": {
@@ -109,7 +109,7 @@ $ benchling --env demo changes apply f76d9ec52ca7410a91955867a495b3f5
 
 # 5. A plan cannot be applied twice
 
-$ benchling --env demo changes apply 9268199dd92c49a3b0df5be26ebb3dc8
+$ benchlingtk --env demo changes apply b7a812bc920d407e9df9b23ef6ef749e
 {
   "ok": false,
   "error": {
@@ -117,7 +117,7 @@ $ benchling --env demo changes apply 9268199dd92c49a3b0df5be26ebb3dc8
     "message": "Plan has already been applied or attempted",
     "retryable": false,
     "details": {
-      "plan_id": "9268199dd92c49a3b0df5be26ebb3dc8",
+      "plan_id": "b7a812bc920d407e9df9b23ef6ef749e",
       "status": "succeeded"
     }
   }
@@ -131,7 +131,7 @@ remote writes in total: 1
 apply_changes(env="demo", plan_id=...) ->
 {
   "code": "unsupported_capability",
-  "message": "MCP writes are disabled for demo; restart with `benchling mcp serve --allow-writes demo`",
+  "message": "MCP writes are disabled for demo; restart with `benchlingtk mcp serve --allow-writes demo`",
   "retryable": false,
   "details": {}
 }
@@ -140,36 +140,36 @@ apply_changes(env="demo", plan_id=...) ->
 
 ## Install
 
-The distribution name is `benchling-toolkit` and the import package is `benchling_toolkit`. Python 3.11 or newer and [`uv`](https://docs.astral.sh/uv/) are required.
+The distribution, the import package, and the command are all named `benchlingtk`. Python 3.11 or newer and [`uv`](https://docs.astral.sh/uv/) are required.
 
-`benchling-toolkit` is on [PyPI](https://pypi.org/project/benchling-toolkit/). Install the CLI and start the MCP server with:
+`benchlingtk` is on [PyPI](https://pypi.org/project/benchlingtk/). Install the CLI and start the MCP server with:
 
 ```console
-uv tool install benchling-toolkit
-benchling --help
+uv tool install benchlingtk
+benchlingtk --help
 
-uvx --from benchling-toolkit benchling mcp serve
+uvx benchlingtk mcp serve
 ```
 
-`pip install benchling-toolkit` works too. `uv tool install benchling-toolkit` puts `benchling` on PATH. `uvx --from benchling-toolkit benchling mcp serve` runs the server from that package without a separate install; the MCP client config below is that same command.
+`pip install benchlingtk` works too. `uv tool install benchlingtk` puts `benchlingtk` on PATH. `uvx benchlingtk mcp serve` runs the server from that package without a separate install; the MCP client config below is that same command.
 
 To work on the toolkit itself, run the same commands against a checkout of this repository:
 
 ```console
 uv tool install .
-uvx --from . benchling mcp serve
+uvx --from . benchlingtk mcp serve
 ```
 
-`uv sync` in a git checkout installs the package into that project's virtualenv only. It does not put `benchling` on PATH. From a checkout, run `uv run benchling`, or activate `.venv`. Add `--extra dev` to `uv sync` when you need the test and lint tools. Creating the Benchling app, granting it project access, and saving it with `benchling auth login --env NAME` are in the [setup guide](docs/setup.md).
+`uv sync` in a git checkout installs the package into that project's virtualenv only. It does not put `benchlingtk` on PATH. From a checkout, run `uv run benchlingtk`, or activate `.venv`. Add `--extra dev` to `uv sync` when you need the test and lint tools. Creating the Benchling app, granting it project access, and saving it with `benchlingtk auth login --env NAME` are in the [setup guide](docs/setup.md).
 
 ## Configuration
 
 Create the Benchling app and grant it project access first. Those steps, including separate read and write environments, are in the [setup guide](docs/setup.md).
 
-Run `benchling auth login` in your own terminal. The client secret is read from a hidden prompt, or from stdin with `--secret-stdin`, and is never accepted as an argument, so it does not pass through an agent, a shell history entry, or an MCP client config.
+Run `benchlingtk auth login` in your own terminal. The client secret is read from a hidden prompt, or from stdin with `--secret-stdin`, and is never accepted as an argument, so it does not pass through an agent, a shell history entry, or an MCP client config.
 
 ```console
-benchling auth login --env dev
+benchlingtk auth login --env dev
 # Tenant URL: https://your-tenant.benchling.com
 # Client ID: your-app-client-id
 # Client secret (not echoed):
@@ -178,7 +178,7 @@ benchling auth login --env dev
 Agents and CI can log in with no terminal. Pass the tenant and client ID as flags, and the secret on stdin:
 
 ```console
-printf '%s' "$BENCHLING_CLIENT_SECRET" | benchling auth login --env dev \
+printf '%s' "$BENCHLING_CLIENT_SECRET" | benchlingtk auth login --env dev \
   --tenant-url https://your-tenant.benchling.com \
   --client-id your-app-client-id \
   --secret-stdin
@@ -186,46 +186,46 @@ printf '%s' "$BENCHLING_CLIENT_SECRET" | benchling auth login --env dev \
 
 `--tenant-url` accepts `https://host`, a bare host, or the same URL with a trailing `/api/v2` or `/api/v3` (those suffixes and a trailing slash are removed). `http://` is rejected. If a flag is missing and there is no terminal, login exits with one error that names `--tenant-url`, `--client-id`, and `--secret-stdin`. It does not fall back to `getpass` on a pipe, so you will not see echo warnings.
 
-Login requests an OAuth `client_credentials` token before it saves anything. On success it writes the tenant URL and client ID to `environments.json` (mode 0600) under the state directory, and stores the client secret in the OS keychain under the service name `benchling-toolkit`. The username in the keychain is the environment name. Access tokens stay in process memory and are renewed before expiry in a long-running MCP process. If no usable keychain is available, login fails with the cause, one fix command, and a pointer to Headless Linux. There is no plaintext file fallback. A 401 says `Benchling at https://<tenant> rejected the client ID or secret.`
+Login requests an OAuth `client_credentials` token before it saves anything. On success it writes the tenant URL and client ID to `environments.json` (mode 0600) under the state directory, and stores the client secret in the OS keychain under the service name `benchlingtk`. The username in the keychain is the environment name. Access tokens stay in process memory and are renewed before expiry in a long-running MCP process. If no usable keychain is available, login fails with the cause, one fix command, and a pointer to Headless Linux. There is no plaintext file fallback. A 401 says `Benchling at https://<tenant> rejected the client ID or secret.`
 
 The toolkit acts as the **app**, with the app's permissions and audit identity, not the signed-in browser user. Profiles saved by previous versions are never read.
 
 Environment names use lowercase letters and digits, start with a letter, and are at most 32 characters. The environment is required on every API command; there is no default. `-e` is short for `--env`.
 
 ```console
-benchling auth login --env test
-benchling auth status
-benchling --env dev auth status --check
-benchling --env test doctor
-benchling auth logout --env dev
+benchlingtk auth login --env test
+benchlingtk auth status
+benchlingtk --env dev auth status --check
+benchlingtk --env test doctor
+benchlingtk auth logout --env dev
 ```
 
-`auth status` is the only way to list saved environments. It shows each tenant URL without a trailing slash and whether a keychain secret is present. It never prints the secret. `--check` requests a token and puts the specific failure in the top-level message (for example `Client secret is not in the keychain; run benchling auth login --env dev`). `doctor` makes read-only API checks. When a check fails, the envelope is `ok: false`, the process exits 3, and each failed check includes a hint. `auth logout` removes the `environments.json` record and the keychain secret; it does not revoke the app in Benchling. Logging out an environment that was never configured says that it is not configured.
+`auth status` is the only way to list saved environments. It shows each tenant URL without a trailing slash and whether a keychain secret is present. It never prints the secret. `--check` requests a token and puts the specific failure in the top-level message (for example `Client secret is not in the keychain; run benchlingtk auth login --env dev`). `doctor` makes read-only API checks. When a check fails, the envelope is `ok: false`, the process exits 3, and each failed check includes a hint. `auth logout` removes the `environments.json` record and the keychain secret; it does not revoke the app in Benchling. Logging out an environment that was never configured says that it is not configured.
 
 ### Protected environments
 
 Mark a production environment protected so a write needs its name typed twice. Pass `--protected` at login, or set it later. Protection is stored as `protected` in that environment's `environments.json` record. A later login without `--protected` or `--unprotected` keeps the saved setting:
 
 ```console
-benchling auth login --env prod --protected
-benchling auth protect --env prod
-benchling auth unprotect --env prod
+benchlingtk auth login --env prod --protected
+benchlingtk auth protect --env prod
+benchlingtk auth unprotect --env prod
 ```
 
 On a protected environment, `changes apply` is refused (exit 2) unless `--env` names it on the command line and `--confirm-env` repeats the same name. There is no default environment and no environment-variable override for either flag. A `--confirm-env` that names a different environment is refused for any environment. Reads, `changes plan` and `changes status` are unaffected. The MCP tool `apply_changes` needs a protected environment in `--allow-writes`, and its refusal says the environment is protected. `doctor`, `auth status` and the MCP tool `list_environments` report `protected`. `doctor` also prints a `protection` line naming the flags a write needs.
 
 ```console
-benchling --env prod changes apply PLAN_ID --confirm-env prod
+benchlingtk --env prod changes apply PLAN_ID --confirm-env prod
 ```
 
 ## Headless Linux
 
-Linux servers and agent machines often have no Secret Service on the session bus. `benchling` will not write the client secret to a plaintext file. Install a provider if it is missing (`gnome-keyring` and `dbus` on Debian/Ubuntu), then unlock a keyring and run the login in that same session. Pipe the keyring password on stdin so it is not a shell argument:
+Linux servers and agent machines often have no Secret Service on the session bus. `benchlingtk` will not write the client secret to a plaintext file. Install a provider if it is missing (`gnome-keyring` and `dbus` on Debian/Ubuntu), then unlock a keyring and run the login in that same session. Pipe the keyring password on stdin so it is not a shell argument:
 
 ```console
 dbus-run-session -- sh -c '
   printf "%s\n" "$KEYRING_PASSWORD" | gnome-keyring-daemon --unlock --components=secrets
-  printf "%s" "$BENCHLING_CLIENT_SECRET" | benchling auth login --env dev \
+  printf "%s" "$BENCHLING_CLIENT_SECRET" | benchlingtk auth login --env dev \
     --tenant-url https://your-tenant.benchling.com \
     --client-id your-app-client-id \
     --secret-stdin
@@ -257,30 +257,30 @@ Put that same `DBUS_SESSION_BUS_ADDRESS` in the environment of later shells, cro
 
 If `systemctl --user status` works, a user bus is often already listening at `unix:path=$XDG_RUNTIME_DIR/bus`. Export `DBUS_SESSION_BUS_ADDRESS` to that socket, then unlock the keyring. SSH and cron do not receive the user session's environment on their own. `loginctl enable-linger "$USER"` keeps the systemd user session after logout so that bus can stay up.
 
-If the collection is locked, or the session bus has no `org.freedesktop.secrets` name, the error is the cause, one `dbus-run-session` command that unlocks the keyring and logs in inside that shell, and a pointer here. During `auth login` that command uses the environment name, the normalized tenant URL, and the client ID you passed, or the ones already saved for that environment. A value you did not supply stays a placeholder (`--env dev`, `https://your-tenant.benchling.com`, `CLIENT`). `$KEYRING_PASSWORD` and `$BENCHLING_CLIENT_SECRET` stay shell variables. `auth status`, `mcp serve`, and other commands keep the placeholders. If no provider is installed, the command is `sudo apt-get install -y gnome-keyring dbus`. The note about the MCP client `env` block and cron is included only when `benchling mcp serve` raises the error. macOS and Windows use the system keychain and do not need this session.
+If the collection is locked, or the session bus has no `org.freedesktop.secrets` name, the error is the cause, one `dbus-run-session` command that unlocks the keyring and logs in inside that shell, and a pointer here. During `auth login` that command uses the environment name, the normalized tenant URL, and the client ID you passed, or the ones already saved for that environment. A value you did not supply stays a placeholder (`--env dev`, `https://your-tenant.benchling.com`, `CLIENT`). `$KEYRING_PASSWORD` and `$BENCHLING_CLIENT_SECRET` stay shell variables. `auth status`, `mcp serve`, and other commands keep the placeholders. If no provider is installed, the command is `sudo apt-get install -y gnome-keyring dbus`. The note about the MCP client `env` block and cron is included only when `benchlingtk mcp serve` raises the error. macOS and Windows use the system keychain and do not need this session.
 
-`BENCHLING_TOOLKIT_HOME` overrides the state directory (the platform config directory plus `benchling-toolkit` otherwise). It does not hold secrets. HTTPS uses the operating system's certificate trust store, with certificate-chain and hostname verification enabled. No insecure TLS fallback is available.
+`BENCHLINGTK_HOME` overrides the state directory (the platform config directory plus `benchlingtk` otherwise). It does not hold secrets. HTTPS uses the operating system's certificate trust store, with certificate-chain and hostname verification enabled. No insecure TLS fallback is available.
 
 ## Least privilege
 
-Create two Benchling apps and save them as two environments. The [setup guide](docs/setup.md) covers creating each app, granting it project access, and saving it with `benchling auth login --env NAME`.
+Create two Benchling apps and save them as two environments. The [setup guide](docs/setup.md) covers creating each app, granting it project access, and saving it with `benchlingtk auth login --env NAME`.
 
-- A read-only app, via `benchling auth login --env read`. Use this for agents and everyday MCP sessions. Do not pass `--allow-writes read`.
-- A write app, via `benchling auth login --env write`. Start a server that may apply changes with `benchling mcp serve --allow-writes write` only.
+- A read-only app, via `benchlingtk auth login --env read`. Use this for agents and everyday MCP sessions. Do not pass `--allow-writes read`.
+- A write app, via `benchlingtk auth login --env write`. Start a server that may apply changes with `benchlingtk mcp serve --allow-writes write` only.
 
 In Benchling, grant each app access only to the specific projects it should see. Give the read app the Read access policy. Give the write app Write, or Append when it should create records and leave existing ones unchanged. `--allow-writes` is a local switch on the MCP server. It cannot widen the access the Benchling app was given.
 
 ## Quickstart
 
 ```console
-uv tool install benchling-toolkit
-benchling auth login --env dev
-benchling auth status
-benchling --env dev doctor
-benchling --env dev entry resolve EXP-0001
+uv tool install benchlingtk
+benchlingtk auth login --env dev
+benchlingtk auth status
+benchlingtk --env dev doctor
+benchlingtk --env dev entry resolve EXP-0001
 ```
 
-`uv tool install benchling-toolkit` installs it from PyPI. From a checkout, use `uv tool install .`. `auth login` prompts for `https://your-tenant.benchling.com`, the client ID, and the client secret. Run it in your own terminal. App setup is in the [setup guide](docs/setup.md).
+`uv tool install benchlingtk` installs it from PyPI. From a checkout, use `uv tool install .`. `auth login` prompts for `https://your-tenant.benchling.com`, the client ID, and the client secret. Run it in your own terminal. App setup is in the [setup guide](docs/setup.md).
 
 ## CLI examples
 
@@ -289,37 +289,37 @@ benchling --env dev entry resolve EXP-0001
 Every command prints a versioned JSON envelope. Diagnostics go to stderr.
 
 ```console
-benchling --env dev entry resolve EXP-0001
-benchling --env dev entry get etr_abc123 --full
-benchling --env dev entry bulk-get --id etr_abc123 --id etr_other
-benchling --env dev entry inspect etr_abc123
-benchling --env dev template get etpl_example
-benchling --env dev template list --name "Example template"
-benchling --env dev folder get lib_example
-benchling --env dev section get etr_abc123 docpart_section1
-benchling --env dev part get etr_abc123 docpart_text1
-benchling --env dev table get docpart_table1
-benchling --env dev schema get entsch_example
-benchling --env dev schema list
-benchling --env dev schema list --kind run --limit 50
-benchling --env dev schema find "qPCR assay"
-benchling --env dev entry fields get etr_abc123
-benchling --env dev entry list --project src_example --modified-after 2026-01-01
-benchling --env dev entry list --folder lib_example --name "Example entry"
-benchling --env dev results list --entry etr_abc123
-benchling --env dev results tables etr_abc123
-benchling --env dev results rows docpart_example --limit 50
-benchling --env dev results pending --plan PLAN_ID
-benchling --env dev results pending --schema assaysch_example --created-after 2026-11-19T00:00:00Z
-benchling --env dev results verify PLAN_ID --sample 20
-benchling --env dev container get con_example
-benchling --env dev container find --barcode VIAL-001
-benchling --env dev container find --name "Sample vial"
-benchling --env dev container schema list --limit 50
-benchling --env dev export --kind table --part docpart_table1 --format csv --output measurements.csv
-benchling --env dev export --kind results-table --part docpart_rt1 --format json --output results-table.json
-benchling --env dev export --kind results-table --part strtbl_example --entry etr_abc123 --format csv --output listed-table.csv
-benchling --env dev export --kind assay-results --entry etr_abc123 --schema assaysch_example --format csv --output assay.csv
+benchlingtk --env dev entry resolve EXP-0001
+benchlingtk --env dev entry get etr_abc123 --full
+benchlingtk --env dev entry bulk-get --id etr_abc123 --id etr_other
+benchlingtk --env dev entry inspect etr_abc123
+benchlingtk --env dev template get etpl_example
+benchlingtk --env dev template list --name "Example template"
+benchlingtk --env dev folder get lib_example
+benchlingtk --env dev section get etr_abc123 docpart_section1
+benchlingtk --env dev part get etr_abc123 docpart_text1
+benchlingtk --env dev table get docpart_table1
+benchlingtk --env dev schema get entsch_example
+benchlingtk --env dev schema list
+benchlingtk --env dev schema list --kind run --limit 50
+benchlingtk --env dev schema find "qPCR assay"
+benchlingtk --env dev entry fields get etr_abc123
+benchlingtk --env dev entry list --project src_example --modified-after 2026-01-01
+benchlingtk --env dev entry list --folder lib_example --name "Example entry"
+benchlingtk --env dev results list --entry etr_abc123
+benchlingtk --env dev results tables etr_abc123
+benchlingtk --env dev results rows docpart_example --limit 50
+benchlingtk --env dev results pending --plan PLAN_ID
+benchlingtk --env dev results pending --schema assaysch_example --created-after 2026-11-19T00:00:00Z
+benchlingtk --env dev results verify PLAN_ID --sample 20
+benchlingtk --env dev container get con_example
+benchlingtk --env dev container find --barcode VIAL-001
+benchlingtk --env dev container find --name "Sample vial"
+benchlingtk --env dev container schema list --limit 50
+benchlingtk --env dev export --kind table --part docpart_table1 --format csv --output measurements.csv
+benchlingtk --env dev export --kind results-table --part docpart_rt1 --format json --output results-table.json
+benchlingtk --env dev export --kind results-table --part strtbl_example --entry etr_abc123 --format csv --output listed-table.csv
+benchlingtk --env dev export --kind assay-results --entry etr_abc123 --schema assaysch_example --format csv --output assay.csv
 ```
 
 Entry references may be canonical IDs, display IDs, or URLs for the selected tenant. Duplicate section titles must be addressed by part ID.
@@ -345,7 +345,7 @@ Every `entry list` filter is applied by Benchling. `routing.client_side` is alwa
 
 `results rows PART_ID` reads one page of a results table. It is read-only. The page size defaults to 50 and stops at 100. Pass `next_token` back with `--cursor`. The call is `GET /document-part-results-table/{id}/rows/items` with `pageSize` and `nextToken`. The part is read first, and its `rows` URL must be that path on this tenant. Cells use the same shape as `entry get --full`. `row_count` is the count on the part. `entry get --full` still reads every row of the part.
 
-`benchling export` writes an unstructured table (`--kind table`), a results table (`--kind results-table`), or assay results (`--kind assay-results`) to a JSON or CSV file. `--format` is `json` or `csv`. `table` and `results-table` require `--part`. `assay-results` accepts `--entry` and `--schema`. The command reads every page itself: unstructured-table and results-table rows at `pageSize` 100, and assay results from `GET /result/items` at `pageSize` 100. The printed envelope is a summary only: `row_count`, `columns`, `path`, and `checksum` (SHA-256 of the file bytes). The rows stay in the file, so a large table does not enter an agent's context. A cell is the evaluation when Benchling returned one, otherwise the input. Duplicate column names get a `__2` suffix. An existing file is left unchanged unless `--overwrite` is set. Nothing is written to Benchling. The MCP tool `export` uses the same summary.
+`benchlingtk export` writes an unstructured table (`--kind table`), a results table (`--kind results-table`), or assay results (`--kind assay-results`) to a JSON or CSV file. `--format` is `json` or `csv`. `table` and `results-table` require `--part`. `assay-results` accepts `--entry` and `--schema`. The command reads every page itself: unstructured-table and results-table rows at `pageSize` 100, and assay results from `GET /result/items` at `pageSize` 100. The printed envelope is a summary only: `row_count`, `columns`, `path`, and `checksum` (SHA-256 of the file bytes). The rows stay in the file, so a large table does not enter an agent's context. A cell is the evaluation when Benchling returned one, otherwise the input. Duplicate column names get a `__2` suffix. An existing file is left unchanged unless `--overwrite` is set. Nothing is written to Benchling. The MCP tool `export` uses the same summary.
 
 `--part` takes a `v3_document_part` id (`docpart_…`) from `entry inspect` (the `tables` part ids). `results tables ENTRY` returns a different id: `table_id` is a `v2_structured_table` id (`strtbl_…`, `id_namespace` `v2_structured_table`). Pass that id with `--kind results-table --entry ENTRY` (the same entry). The export reads the entry's document parts and uses the matching results-table part. When no part matches, it reads assay results for that entry and the table's result schema. `--kind table` does not accept a `strtbl_…` id. That is a validation error naming `v3_document_part`. A `strtbl_…` id with no `--entry` is the same kind of error.
 
@@ -358,12 +358,12 @@ A results-table or unstructured-table cell is flattened the same way. A link or 
 A change specification covers one existing-entry mutation, one new-entry creation, or one container mutation. Previewing only reads Benchling and creates a local immutable plan:
 
 ```console
-benchling --env dev changes plan \
+benchlingtk --env dev changes plan \
   --entry etr_abc123 \
   --family table \
   --spec examples/table-set-cells.json
 
-benchling --env dev changes plan \
+benchlingtk --env dev changes plan \
   --entry etr_abc123 \
   --family results \
   --csv assay.csv \
@@ -371,7 +371,7 @@ benchling --env dev changes plan \
   --map Ct=Ct \
   --map Note=Note
 
-benchling --env dev changes plan \
+benchlingtk --env dev changes plan \
   --family entry \
   --spec - <<'JSON'
 {
@@ -384,10 +384,10 @@ benchling --env dev changes plan \
 }
 JSON
 
-benchling --env dev changes apply PLAN_ID
-benchling --env prod changes apply PLAN_ID --confirm-env prod
-benchling --env dev changes status PLAN_ID
-benchling --env dev changes status PLAN_ID --wait --timeout 300
+benchlingtk --env dev changes apply PLAN_ID
+benchlingtk --env prod changes apply PLAN_ID --confirm-env prod
+benchlingtk --env dev changes status PLAN_ID
+benchlingtk --env dev changes status PLAN_ID --wait --timeout 300
 ```
 
 `--confirm-env` is required only for a [protected environment](#protected-environments).
@@ -396,9 +396,9 @@ An entry specification uses `entry_template_id`, `folder_id`, and `name`, and ma
 Container creation and transfer use the same local preview and explicit apply lifecycle. Container plans do not take `--entry`:
 
 ```console
-benchling --env dev changes plan --family containers --spec create-container.json
-benchling --env dev changes plan --family containers --spec transfer-container.json
-benchling --env dev changes apply PLAN_ID
+benchlingtk --env dev changes plan --family containers --spec create-container.json
+benchlingtk --env dev changes plan --family containers --spec transfer-container.json
+benchlingtk --env dev changes apply PLAN_ID
 ```
 
 Container create specifications use `operation: "create"` and `schema_id`; transfer specifications use `operation: "transfer"`, `source_container_id`, `destination_container_id`, and `destination_contents` (each item has an `entity_id`). Transfer previews read both containers and apply re-checks their modification timestamps before the one-time transfer. Create previews read the schema and apply re-checks its field definitions. As with other families, an uncertain write is never retried. MCP apply remains disabled unless the server was started with `--allow-writes ENV`.
@@ -439,7 +439,7 @@ Field inputs must use a schema field's V3 `systemName` or its field-definition I
 
 A result update reads a CSV file instead of inline records. `--id-column` is the column that holds the result id (`id` in an assay-result export). Each `--map CSV_COLUMN=FIELD` is required; columns are not guessed from the header. `FIELD` is the export display name, the system name, or the field-definition id. The preview resolves every mapped column to a field-definition id and shows only the values that would change. Unmapped columns, including `createdAt` and `modifiedAt`, are not written. A blank cell clears a value that is present. A blank cell on an empty field is not a change, so an unmodified export round-trips: export writes both null and an empty string as a blank cell. Unknown columns, ambiguous names, and bad rows are one error and nothing is written. Apply re-reads each result and sends `PATCH /result/{id}` with `schemaFields` keyed by field-definition id, and only when `modifiedAt` and the mapped values still match the plan. The CSV is not read again at apply time. The limit is 500 rows. The same specification (`operation`, `csv_path`, `id_column`, `column_map`) is what `plan_changes` accepts.
 
-A result attachment field (a V3 `AttachmentLinkFieldDefinition`) can take a local file. In a results upload, give the field the value `{"file": "plots/run-01.png"}`, optionally with `"blob_type": "VISUALIZATION"` (default `RAW_FILE`) and `"mime_type"` (default guessed from the file name). A relative path is resolved against the current directory. A multi-value attachment field takes a list that may mix file references and existing blob IDs. In a CSV update, an attachment cell `file:plots/run-01.png` does the same, relative to the CSV's folder, and any other text is a blob ID. The preview lists each file under `after.uploads` with its base name, size, SHA-256, MD5, MIME type and blob type; the path and contents are never in the plan or its output. Apply reads each file again and refuses the plan with a conflict if its size or SHA-256 changed. It then uploads it as a V2 blob: one `POST /blobs` up to 10,000,000 bytes, otherwise `POST /blobs:start-multipart-upload`, 10 MiB parts, and `:complete-upload`, with `:abort-upload` if a step fails. The blob ID is journaled before the result write that links it. Uploads are never retried; if the result write then fails, the blob stays in Benchling unlinked. Files over 100 MiB, more than 1 GiB in one plan, empty files, and files inside the toolkit state directory are refused. `benchling blob get BLOB_ID` (MCP `get_blob`) reads a blob's metadata, not its contents.
+A result attachment field (a V3 `AttachmentLinkFieldDefinition`) can take a local file. In a results upload, give the field the value `{"file": "plots/run-01.png"}`, optionally with `"blob_type": "VISUALIZATION"` (default `RAW_FILE`) and `"mime_type"` (default guessed from the file name). A relative path is resolved against the current directory. A multi-value attachment field takes a list that may mix file references and existing blob IDs. In a CSV update, an attachment cell `file:plots/run-01.png` does the same, relative to the CSV's folder, and any other text is a blob ID. The preview lists each file under `after.uploads` with its base name, size, SHA-256, MD5, MIME type and blob type; the path and contents are never in the plan or its output. Apply reads each file again and refuses the plan with a conflict if its size or SHA-256 changed. It then uploads it as a V2 blob: one `POST /blobs` up to 10,000,000 bytes, otherwise `POST /blobs:start-multipart-upload`, 10 MiB parts, and `:complete-upload`, with `:abort-upload` if a step fails. The blob ID is journaled before the result write that links it. Uploads are never retried; if the result write then fails, the blob stays in Benchling unlinked. Files over 100 MiB, more than 1 GiB in one plan, empty files, and files inside the toolkit state directory are refused. `benchlingtk blob get BLOB_ID` (MCP `get_blob`) reads a blob's metadata, not its contents.
 
 Results land as pending: they do not appear in the notebook results table, and have no entry, until a person clicks the plug (integrate) icon in that table's toolbar in Benchling. After a results upload, `changes apply` returns `web_url` and a `next_step` naming the entry, its link, and the result table(s). Creating an entry from a template also returns the new entry's `web_url`. The accept control may insert every pending result that matches the table's schema, not only the ones just pushed. See [docs/api-limitations.md](docs/api-limitations.md). A table write updates the named cells or appends rows, checked against the entry version, and resets table evaluation until Benchling's browser evaluates it again.
 Table upload plans use local correlation UUIDs; the tenant assigns the actual result IDs. Local UUIDs are not idempotency keys. Caller-supplied result IDs are rejected by the CLI because the tested tenant rejects them on this endpoint despite the public OpenAPI declaration. Each notebook table batch is limited to 500 records. The immediate apply result is `submission_pending`; task success is reported separately as `pending_integration`.
@@ -465,14 +465,14 @@ Entry creation is also single-use. A plan with a successful or uncertain create 
 
 ## MCP server
 
-One server serves every environment saved with `auth login`. The client config carries no secrets; the server reads the same `environments.json` file and OS keychain as the CLI. Log in in your own terminal before starting the server. The shell form of the config below is `uvx --from benchling-toolkit benchling mcp serve`. That command installs the package from PyPI. From a checkout, run `uvx --from . benchling mcp serve`.
+One server serves every environment saved with `auth login`. The client config carries no secrets; the server reads the same `environments.json` file and OS keychain as the CLI. Log in in your own terminal before starting the server. The shell form of the config below is `uvx benchlingtk mcp serve`. That command installs the package from PyPI. From a checkout, run `uvx --from . benchlingtk mcp serve`.
 
 ```json
 {
   "mcpServers": {
-    "benchling": {
+    "benchlingtk": {
       "command": "uvx",
-      "args": ["--from", "benchling-toolkit", "benchling", "mcp", "serve"]
+      "args": ["benchlingtk", "mcp", "serve"]
     }
   }
 }
@@ -483,9 +483,9 @@ On Linux the standard MCP SDK starts the stdio server with only `HOME`, `LOGNAME
 ```json
 {
   "mcpServers": {
-    "benchling": {
+    "benchlingtk": {
       "command": "uvx",
-      "args": ["--from", "benchling-toolkit", "benchling", "mcp", "serve"],
+      "args": ["benchlingtk", "mcp", "serve"],
       "env": {
         "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus"
       }
@@ -504,11 +504,11 @@ The CLI and MCP tools share the same versioned envelope. Static schemas for the 
 
 Agents that use this toolkit follow one rule, written into [SKILL.md](SKILL.md) and the MCP server instructions: when the person asks for something the toolkit cannot do, the agent always explains the limitation and asks whether to log it as a bug or a feature request on this repository. Only after an explicit yes does it draft the issue, show it, and file it once the person confirms.
 
-`benchling issue draft` and the MCP tool `issue_draft` build that issue from structured fields: kind (`bug` or `feature`), summary, what was attempted, expected and actual behaviour, the interface and command or tool, a detailed description, a proposed solution, and at least one citation. The toolkit version, Python version, and OS are filled in. Each citation is a URL on [docs.benchling.com](https://docs.benchling.com), [help.benchling.com](https://help.benchling.com), or the API reference under `benchling.com/api/`, plus the quoted line that shows the solution is possible. A draft is refused when a field looks like a tenant URL, a Benchling record or display ID, a token or secret, or an email address.
+`benchlingtk issue draft` and the MCP tool `issue_draft` build that issue from structured fields: kind (`bug` or `feature`), summary, what was attempted, expected and actual behaviour, the interface and command or tool, a detailed description, a proposed solution, and at least one citation. The toolkit version, Python version, and OS are filled in. Each citation is a URL on [docs.benchling.com](https://docs.benchling.com), [help.benchling.com](https://help.benchling.com), or the API reference under `benchling.com/api/`, plus the quoted line that shows the solution is possible. A draft is refused when a field looks like a tenant URL, a Benchling record or display ID, a token or secret, or an email address.
 
 ```console
-benchling issue draft --spec issue.json          # prints title, body, labels, and a prefilled new-issue URL
-benchling issue draft --spec issue.json --file   # runs gh issue create; only after the user confirmed the draft
+benchlingtk issue draft --spec issue.json          # prints title, body, labels, and a prefilled new-issue URL
+benchlingtk issue draft --spec issue.json --file   # runs gh issue create; only after the user confirmed the draft
 ```
 
 Drafting does not contact Benchling or GitHub. The MCP tool is draft-only: the person opens `new_issue_url` to file it. The repository's issue forms ask for the same fields and require the Benchling documentation citation.
@@ -517,11 +517,11 @@ Drafting does not contact Benchling or GitHub. The MCP tool is draft-only: the p
 
 [ARCHITECTURE.md](ARCHITECTURE.md) is the plan, apply, and journal sequence. The [threat model](docs/threat-model.md) covers credentials, stale or replayed plans, write scoping, and agent misuse, including the limits of those controls.
 
-[`SKILL.md`](SKILL.md) is the Agent Skills file for this repository. Its frontmatter keeps `name`, `description`, `license`, `compatibility`, and a `metadata` map of strings (`summary`, `version`, `docs_url`). Tags, keywords, and use cases are lists in [`agensi/listing.yaml`](agensi/listing.yaml). The pip package installs it as `share/benchling-toolkit/SKILL.md` under the environment prefix (`sys.prefix`), next to the JSON schemas and contracts. Use `benchling skill path` to print the installed file's absolute path and `benchling skill show` to print its contents. Both look under `sys.prefix`, `sys.base_prefix`, and the user install scheme, then fall back to the repository's `SKILL.md` for editable and development installs. If the file is not found, they print a `not_found` envelope. They never contact Benchling. The MCP server also serves the file as the read-only resource `skill://benchling-toolkit/SKILL.md`.
+[`SKILL.md`](SKILL.md) is the Agent Skills file for this repository. Its frontmatter keeps `name`, `description`, `license`, `compatibility`, and a `metadata` map of strings (`summary`, `version`, `docs_url`). Tags, keywords, and use cases are lists in [`agensi/listing.yaml`](agensi/listing.yaml). The pip package installs it as `share/benchlingtk/SKILL.md` under the environment prefix (`sys.prefix`), next to the JSON schemas and contracts. Use `benchlingtk skill path` to print the installed file's absolute path and `benchlingtk skill show` to print its contents. Both look under `sys.prefix`, `sys.base_prefix`, and the user install scheme, then fall back to the repository's `SKILL.md` for editable and development installs. If the file is not found, they print a `not_found` envelope. They never contact Benchling. The MCP server also serves the file as the read-only resource `skill://benchlingtk/SKILL.md`.
 
 ```console
-benchling skill path
-benchling skill show
+benchlingtk skill path
+benchlingtk skill show
 ```
 
 ```mermaid
@@ -542,7 +542,7 @@ flowchart TD
     AUTH --> BENCHLING
 ```
 
-| Module (`src/benchling_toolkit`) | Role |
+| Module (`src/benchlingtk`) | Role |
 |---|---|
 | `cli.py` | Typer command-line interface |
 | `mcp_server.py` | MCP tools, read-only default, write allow-list |
@@ -585,7 +585,7 @@ flowchart TD
 - **App identity, not user identity.** OAuth client credentials give the toolkit its own permissions and audit identity, separate from any person's. The app must be granted access to each project it touches.
 - **One service layer, two interfaces.** The CLI and MCP server call the same typed services and return the same envelope, so behavior is specified and tested once. The cost is a more verbose, JSON-first CLI.
 - **Honest handling of API limits.** Unstructured table cells are edited one cell at a time, and new rows are inserted at the end of the table; evaluation is reset until Benchling recalculates it. Replacing text is an insert followed by a delete and can end in a reported partial completion.
-- **Local, single-machine state.** Plans, journals, locks, and `environments.json` are plain files under the application directory (`BENCHLING_TOOLKIT_HOME` overrides it). Client secrets are in the OS keychain for that user. Concurrency control does not extend across machines.
+- **Local, single-machine state.** Plans, journals, locks, and `environments.json` are plain files under the application directory (`BENCHLINGTK_HOME` overrides it). Client secrets are in the OS keychain for that user. Concurrency control does not extend across machines.
 - **Offline tests against a stateful fake.** The suite runs the real client, services and planner against an in-process fake Benchling API instead of stubbing each call. This tests behavior end to end; the cost is that the fake can drift from the real API, which is why the opt-in sandbox exercise exists.
 
 ## JSON envelope and exit codes
@@ -629,7 +629,7 @@ uv run python scripts/check_openapi_drift.py
 
 ### Opt-in sandbox exercise
 
-Offline tests never require credentials. For a live sandbox, run `benchling auth login --env dev` in your own terminal first. The exercise below then creates a plan, pauses for a browser edit to invalidate it, verifies the conflict, and applies and verifies one selected-cell update. Add `--restore` to preview and explicitly restore the original input afterward.
+Offline tests never require credentials. For a live sandbox, run `benchlingtk auth login --env dev` in your own terminal first. The exercise below then creates a plan, pauses for a browser edit to invalidate it, verifies the conflict, and applies and verifies one selected-cell update. Add `--restore` to preview and explicitly restore the original input afterward.
 
 ```console
 uv run python scripts/sandbox_exercise.py \
@@ -657,7 +657,7 @@ See the [setup guide](docs/setup.md) before the first login, and [API limitation
 
 ## Citation
 
-If you use this software, please cite it. GitHub's "Cite this repository" button uses [`CITATION.cff`](CITATION.cff) for [jmamodeo/benchling-toolkit](https://github.com/jmamodeo/benchling-toolkit).
+If you use this software, please cite it. GitHub's "Cite this repository" button uses [`CITATION.cff`](CITATION.cff) for [jmamodeo/benchlingtk](https://github.com/jmamodeo/benchlingtk).
 
 ## Contributing, security, license
 
