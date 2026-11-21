@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 from fake_benchling import TENANT
 
+from benchling_toolkit import services
 from benchling_toolkit.errors import NotFoundError, UpstreamError, ValidationError
 
 PART = "docpart_rt1"
@@ -28,7 +29,7 @@ async def test_results_table_rows_return_one_page_and_a_cursor(runtime, fake) ->
     assert page["submission_status"] == "HAS_UNSUBMITTED_CHANGES"
     assert page["next_token"] == "2"
     assert page["items"][0]["cells"][0]["inputValue"] == {"type": "integer_value", "value": 12}
-    assert page["items"][0]["result"] == {"__typename": "ResultRef", "id": "result_1"}
+    assert page["items"][0]["result"] == {"__typename": "Result", "id": "result_1"}
     assert page["items"][0]["submissionStatus"] == "SUBMITTED"
     assert page["items"][0]["rowId"] == "row_1"
     assert [row["id"] for row in page["items"]] == ["strow_1", "strow_2"]
@@ -203,3 +204,65 @@ async def test_full_results_table_read_rejects_a_mismatched_cell_count(runtime, 
     )
     with pytest.raises(UpstreamError, match="invalid rows"):
         await runtime.service.get_results_table_part(PART)
+
+
+_OK_CELLS = [{"inputValue": {"__typename": "TextValue", "value": "ok"}}]
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        {"__typename": "Result", "id": "res_x"},
+        {"__typename": "ResultRef", "id": "res_x"},
+        {"__typename": "AssayResult", "id": "res_x"},
+        {"__typename": "benchling.Result", "id": "res_x"},
+        {"id": "res_x"},
+        {"__typename": None, "id": "res_x"},
+    ],
+)
+def test_a_row_result_is_read_whatever_its_typename(result) -> None:
+    row = {"rowIndex": 0, "submissionStatus": "HAS_UNSUBMITTED_CHANGES", "result": result}
+    normalized = services.normalize_table_row(
+        {**row, "cells": _OK_CELLS}, require_text=False, part_id="docpart_x", position=0
+    )
+    assert normalized["result"] == result
+    assert normalized["result"]["id"] == "res_x"
+
+
+async def test_results_rows_read_accepted_rows_with_a_concrete_result_typename(
+    runtime, fake
+) -> None:
+    fake.add_evaluated_results_table()
+    page = await runtime.service.list_results_table_rows(PART)
+    assert page["items"][0]["result"] == {"__typename": "Result", "id": "result_e1"}
+    assert page["items"][1]["result"] == {"id": "result_e2"}
+    table = await runtime.service.get_results_table_part(PART)
+    assert table["pagination"] == {"rows": 2, "complete": True}
+
+
+@pytest.mark.parametrize(
+    ("row", "check"),
+    [
+        ("bad", "row"),
+        ({"rowIndex": 0}, "cells"),
+        ({"rowIndex": 0, "cells": "bad"}, "cells"),
+        ({"rowIndex": 0, "id": 5, "cells": _OK_CELLS}, "id"),
+        ({"rowIndex": 0, "id": "", "cells": _OK_CELLS}, "id"),
+        ({"rowIndex": 0, "rowId": 5, "cells": _OK_CELLS}, "rowId"),
+        ({"rowIndex": -1, "cells": _OK_CELLS}, "rowIndex"),
+        ({"rowIndex": True, "cells": _OK_CELLS}, "rowIndex"),
+        ({"rowIndex": 0, "isArchived": "no", "cells": _OK_CELLS}, "isArchived"),
+        ({"rowIndex": 0, "isSubmittable": "yes", "cells": _OK_CELLS}, "isSubmittable"),
+        ({"rowIndex": 0, "submissionStatus": 1, "cells": _OK_CELLS}, "submissionStatus"),
+        ({"rowIndex": 0, "submissionStatus": "UNKNOWN", "cells": _OK_CELLS}, "submissionStatus"),
+        ({"rowIndex": 0, "result": "res_x", "cells": _OK_CELLS}, "result"),
+        ({"rowIndex": 0, "result": {"__typename": "Result"}, "cells": _OK_CELLS}, "result"),
+        ({"rowIndex": 0, "result": {"id": 5}, "cells": _OK_CELLS}, "result"),
+        ({"rowIndex": 0, "result": {"id": ""}, "cells": _OK_CELLS}, "result"),
+        ({"rowIndex": 0, "result": {"id": "res_x", "__typename": 5}, "cells": _OK_CELLS}, "result"),
+    ],
+)
+def test_a_rejected_row_names_the_failing_check_part_and_row(row, check) -> None:
+    with pytest.raises(UpstreamError, match="invalid rows") as caught:
+        services.normalize_table_row(row, require_text=False, part_id="docpart_x", position=0)
+    assert caught.value.details == {"part_id": "docpart_x", "row_index": 0, "check": check}

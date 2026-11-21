@@ -72,7 +72,7 @@ def default_results_rows() -> list[dict[str, Any]]:
             "rowId": "row_1",
             "submissionStatus": "SUBMITTED",
             "isSubmittable": False,
-            "result": {"__typename": "ResultRef", "id": "result_1"},
+            "result": {"__typename": "Result", "id": "result_1"},
             "cells": [{"inputValue": {"__typename": "IntegerValue", "value": 12}}],
         },
         {
@@ -102,7 +102,7 @@ def evaluated_results_rows() -> list[dict[str, Any]]:
             "id": "strow_e1",
             "rowId": "row_e1",
             "submissionStatus": "SUBMITTED",
-            "result": {"__typename": "ResultRef", "id": "result_e1"},
+            "result": {"__typename": "Result", "id": "result_e1"},
             "cells": [
                 {
                     "inputValue": {"__typename": "ObjectLinkValue", "value": "seq_example1"},
@@ -127,7 +127,7 @@ def evaluated_results_rows() -> list[dict[str, Any]]:
             "id": "strow_e2",
             "rowId": "row_e2",
             "submissionStatus": "SUBMITTED",
-            "result": {"__typename": "ResultRef", "id": "result_e2"},
+            "result": {"id": "result_e2"},
             "cells": [
                 {
                     "inputValue": {"__typename": "ObjectLinkValue", "value": "seq_example2"},

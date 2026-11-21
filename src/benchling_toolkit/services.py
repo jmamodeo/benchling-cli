@@ -381,16 +381,18 @@ def normalize_table_row(
         "part_id": part_id,
         "row_index": raw_index if valid_index else position,
     }
-    if not isinstance(row, dict) or not isinstance(row.get("cells"), list):
-        raise _invalid_rows(**location)
+    if not isinstance(row, dict):
+        raise _invalid_rows(**location, check="row")
+    if not isinstance(row.get("cells"), list):
+        raise _invalid_rows(**location, check="cells")
     for key in ("id", "rowId"):
         if key in row and row[key] is not None and (not isinstance(row[key], str) or not row[key]):
-            raise _invalid_rows(**location)
+            raise _invalid_rows(**location, check=key)
     if raw_index is not None and not valid_index:
-        raise _invalid_rows(**location)
+        raise _invalid_rows(**location, check="rowIndex")
     for key in ("isArchived", "isSubmittable"):
         if key in row and row[key] is not None and not isinstance(row[key], bool):
-            raise _invalid_rows(**location)
+            raise _invalid_rows(**location, check=key)
     status = row.get("submissionStatus")
     if status is not None and (
         not isinstance(status, str)
@@ -402,21 +404,17 @@ def normalize_table_row(
             "UNEVALUATED",
         }
     ):
-        raise _invalid_rows(**location)
+        raise _invalid_rows(**location, check="submissionStatus")
+    # The schema type is ResultRef, but Benchling sends the concrete typename
+    # (for example "Result"), so `__typename` is informational.
     result = row.get("result")
     if result is not None and (
         not isinstance(result, dict)
         or not isinstance(result.get("id"), str)
         or not result["id"]
-        or (
-            result.get("__typename") is not None
-            and (
-                not isinstance(result["__typename"], str)
-                or result["__typename"].split(".")[-1] != "ResultRef"
-            )
-        )
+        or (result.get("__typename") is not None and not isinstance(result["__typename"], str))
     ):
-        raise _invalid_rows(**location)
+        raise _invalid_rows(**location, check="result")
     normalized: dict[str, Any] = {
         "cells": [
             normalize_table_cell(cell, require_text=require_text, cell_index=index, **location)

@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+
+- Results tables whose rows have been accepted no longer fail `entry get --full`, `entry inspect`, `results rows` and `export --kind results-table` with `Table response contained invalid rows`. The API reference types a row's `result` as `ResultRef`, but Benchling sends the concrete `__typename` (for example `Result`). A row's `result` is now any object with a non-empty string `id`; its `__typename` (`Result`, `ResultRef`, any other string, or absent) is informational and kept in the normalized row. A `result` that is not an object, has no string `id`, or has a non-string `__typename` is still rejected, as is every other row problem. A rejected row now names the failing check in the error `details` (`check`: `row`, `cells`, `id`, `rowId`, `rowIndex`, `isArchived`, `isSubmittable`, `submissionStatus` or `result`) alongside `part_id` and `row_index`, never values.
+
 ## [0.5.2] - 2026-11-20
 
 ### Added
