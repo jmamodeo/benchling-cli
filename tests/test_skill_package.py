@@ -1,4 +1,4 @@
-"""The packaged SKILL.md: locating it, the `benchling skill` commands, the MCP resource,
+"""The packaged SKILL.md: locating it, the `benchlingtk skill` commands, the MCP resource,
 and the built wheel."""
 
 from __future__ import annotations
@@ -15,16 +15,16 @@ import pytest
 from mcp import Client
 from typer.testing import CliRunner
 
-from benchling_toolkit import __version__, cli, skill
-from benchling_toolkit.mcp_server import SKILL_RESOURCE_URI, build_mcp_server
+from benchlingtk import __version__, cli, skill
+from benchlingtk.mcp_server import SKILL_RESOURCE_URI, build_mcp_server
 
 ROOT = Path(__file__).resolve().parents[1]
 SKILL_BYTES = (ROOT / "SKILL.md").read_bytes()
-WHEEL_MEMBER = f"benchling_toolkit-{__version__}.data/data/share/benchling-toolkit/SKILL.md"
+WHEEL_MEMBER = f"benchlingtk-{__version__}.data/data/share/benchlingtk/SKILL.md"
 
 
 def test_installed_data_file_is_preferred(tmp_path, monkeypatch) -> None:
-    installed = tmp_path / "share" / "benchling-toolkit" / "SKILL.md"
+    installed = tmp_path / "share" / "benchlingtk" / "SKILL.md"
     installed.parent.mkdir(parents=True)
     installed.write_text("installed\n", encoding="utf-8")
     monkeypatch.setattr(skill, "_data_roots", lambda: [tmp_path])
@@ -103,7 +103,7 @@ def _wheel(tmp_path: Path) -> Path:
             check=True,
             capture_output=True,
         )
-    wheels = sorted(out.glob(f"benchling_toolkit-{__version__}-*.whl"))
+    wheels = sorted(out.glob(f"benchlingtk-{__version__}-*.whl"))
     assert len(wheels) == 1, wheels
     return wheels[0]
 

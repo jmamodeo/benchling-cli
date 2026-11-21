@@ -50,11 +50,11 @@ jobs:
         run: |
           uv venv --python 3.12 /tmp/wheel-venv
           uv pip install --python /tmp/wheel-venv/bin/python dist/*.whl
-          /tmp/wheel-venv/bin/benchling --version
-          test -s /tmp/wheel-venv/share/benchling-toolkit/SKILL.md
-          cmp /tmp/wheel-venv/share/benchling-toolkit/SKILL.md SKILL.md
-          test "$(/tmp/wheel-venv/bin/benchling skill path)" = /tmp/wheel-venv/share/benchling-toolkit/SKILL.md
-          /tmp/wheel-venv/bin/benchling skill show | cmp - SKILL.md
+          /tmp/wheel-venv/bin/benchlingtk --version
+          test -s /tmp/wheel-venv/share/benchlingtk/SKILL.md
+          cmp /tmp/wheel-venv/share/benchlingtk/SKILL.md SKILL.md
+          test "$(/tmp/wheel-venv/bin/benchlingtk skill path)" = /tmp/wheel-venv/share/benchlingtk/SKILL.md
+          /tmp/wheel-venv/bin/benchlingtk skill show | cmp - SKILL.md
       - name: Check SKILL.md in the built wheel
         env:
           BENCHLING_TOOLKIT_WHEEL_DIR: dist

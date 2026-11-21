@@ -1031,13 +1031,13 @@ def _register_change_tools(
                 raise UnsupportedError(
                     f"Environment {name} is protected and MCP writes to it are disabled; "
                     f"it must be listed in --allow-writes. A person can restart with "
-                    f"`benchling mcp serve --allow-writes {name}`",
+                    f"`benchlingtk mcp serve --allow-writes {name}`",
                     details={"env": name, "protected": True},
                 )
             if name not in writable_envs:
                 raise UnsupportedError(
                     f"MCP writes are disabled for {rt.environment.name}; restart with "
-                    f"`benchling mcp serve --allow-writes {rt.environment.name}`"
+                    f"`benchlingtk mcp serve --allow-writes {rt.environment.name}`"
                 )
             return await rt.planner.apply(plan_id)
 
@@ -1075,7 +1075,7 @@ class _CitationInput(BaseModel):
     quote: str = Field(description="The exact line on that page that shows the fix is possible.")
 
 
-SKILL_RESOURCE_URI = "skill://benchling-toolkit/SKILL.md"
+SKILL_RESOURCE_URI = "skill://benchlingtk/SKILL.md"
 
 
 def _register_skill_resource(mcp: MCPServer) -> None:
@@ -1083,8 +1083,8 @@ def _register_skill_resource(mcp: MCPServer) -> None:
 
     @mcp.resource(
         SKILL_RESOURCE_URI,
-        name="benchling-toolkit-skill",
-        description="The SKILL.md installed with benchling-toolkit: when and how to use it.",
+        name="benchlingtk-skill",
+        description="The SKILL.md installed with benchlingtk: when and how to use it.",
         mime_type="text/markdown",
     )
     def skill_md() -> str:
@@ -1106,7 +1106,7 @@ def _register_issue_tool(mcp: MCPServer) -> None:
         actual: Annotated[str, Field(description="What the toolkit did or returned instead.")],
         interface: Annotated[Interface, Field(description="cli or mcp.")],
         command_or_tool: Annotated[
-            str, Field(description="The benchling command or MCP tool that was used.")
+            str, Field(description="The benchlingtk command or MCP tool that was used.")
         ],
         description: Annotated[
             str, Field(description="Detailed description of the limitation and its impact.")
@@ -1179,14 +1179,14 @@ def _serve(*, pool_writable: set[str] | frozenset[str], verbose: bool) -> None:
     configured = pool.config.configured_names()
     if not configured:
         raise AuthenticationError(
-            "No environments configured; run `benchling auth login --env NAME` in your terminal"
+            "No environments configured; run `benchlingtk auth login --env NAME` in your terminal"
         )
     keychain = Keychain()
     keychain.require()
     if not any(keychain.get(name) for name in configured):
         raise AuthenticationError(
             "No client secret is stored for the configured environments; "
-            "run `benchling auth login --env NAME` in your terminal"
+            "run `benchlingtk auth login --env NAME` in your terminal"
         )
     available = pool.available()
     unknown = sorted(set(writable_envs) - set(available))

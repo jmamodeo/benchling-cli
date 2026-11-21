@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-21
+
+### Changed
+
+- **Breaking:** the distribution is renamed from `benchling-toolkit` to `benchlingtk`, the import package from `benchling_toolkit` to `benchlingtk`, and the command from `benchling` to `benchlingtk`. Install with `uv tool install benchlingtk` (or `pip install benchlingtk`), import `benchlingtk`, and run `benchlingtk` and `benchlingtk mcp serve`; update MCP client configs to `uvx benchlingtk mcp serve`. The old install name, import path and `benchling` command are not provided. `benchlingtk --version` prints `benchlingtk 0.6.0`.
+- **Breaking:** the installed data files are under `share/benchlingtk/` (`SKILL.md`, `schemas/`, `contracts/`), the MCP skill resource is `skill://benchlingtk/SKILL.md`, the `SKILL.md` skill name is `benchlingtk`, and schema `$id` values use the new name.
+- Repository links point at `https://github.com/jmamodeo/benchlingtk`, and `benchlingtk issue draft` and MCP `issue_draft` file issues there. Older changelog text is unchanged.
+- Saved state is unchanged, so existing logins and plans keep working: the client secret stays in the OS keychain under the service name `benchling-toolkit`, the state directory is still the platform config directory plus `benchling-toolkit`, and `BENCHLING_TOOLKIT_HOME` still overrides it.
+
 ## [0.5.3] - 2026-11-20
 
 ### Fixed
@@ -248,7 +257,8 @@ All notable changes to this project are documented here. The format is based on
 - Versioned JSON envelope, stable exit codes, and published JSON schemas.
 - Operating-system trust-store TLS verification.
 
-[Unreleased]: https://github.com/jmamodeo/benchling-toolkit/compare/v0.5.3...HEAD
+[Unreleased]: https://github.com/jmamodeo/benchlingtk/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/jmamodeo/benchlingtk/compare/v0.5.3...v0.6.0
 [0.5.3]: https://github.com/jmamodeo/benchling-toolkit/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/jmamodeo/benchling-toolkit/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/jmamodeo/benchling-toolkit/compare/v0.5.0...v0.5.1

@@ -59,7 +59,7 @@ def badge_line(percent: int) -> str:
     """Render the README markdown for the coverage badge."""
     return (
         f"[![Coverage](https://img.shields.io/badge/coverage-{percent}%25-{color_for(percent)})]"
-        "(https://github.com/jmamodeo/benchling-toolkit/actions/workflows/ci.yml)"
+        "(https://github.com/jmamodeo/benchlingtk/actions/workflows/ci.yml)"
     )
 
 

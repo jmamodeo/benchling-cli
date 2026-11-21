@@ -5,8 +5,8 @@ from __future__ import annotations
 import pytest
 from fake_benchling import TENANT
 
-from benchling_toolkit import services
-from benchling_toolkit.errors import NotFoundError, UpstreamError, ValidationError
+from benchlingtk import services
+from benchlingtk.errors import NotFoundError, UpstreamError, ValidationError
 
 PART = "docpart_rt1"
 ROWS_PATH = f"/document-part-results-table/{PART}/rows/items"

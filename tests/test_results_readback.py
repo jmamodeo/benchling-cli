@@ -9,9 +9,9 @@ from conftest import runtime_for
 from fake_benchling import ENTRY_ID, entry_web_url
 from typer.testing import CliRunner
 
-from benchling_toolkit import cli
-from benchling_toolkit.errors import ValidationError
-from benchling_toolkit.plans import readback
+from benchlingtk import cli
+from benchlingtk.errors import ValidationError
+from benchlingtk.plans import readback
 
 TABLE = "strtbl_example"
 

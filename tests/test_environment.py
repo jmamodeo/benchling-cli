@@ -14,15 +14,15 @@ from conftest import configure_env
 from mcp import Client
 from typer.testing import CliRunner
 
-from benchling_toolkit.auth import AuthManager
-from benchling_toolkit.cli import app
-from benchling_toolkit.environment import ENV_NAME, EnvironmentConfigStore, write_private
-from benchling_toolkit.errors import AuthenticationError, ValidationError
-from benchling_toolkit.keychain import SERVICE_NAME, Keychain
-from benchling_toolkit.mcp_server import build_mcp_server
-from benchling_toolkit.models import AuthMethod, Environment
-from benchling_toolkit.runtime import Runtime, RuntimePool
-from benchling_toolkit.tls import verified_context
+from benchlingtk.auth import AuthManager
+from benchlingtk.cli import app
+from benchlingtk.environment import ENV_NAME, EnvironmentConfigStore, write_private
+from benchlingtk.errors import AuthenticationError, ValidationError
+from benchlingtk.keychain import SERVICE_NAME, Keychain
+from benchlingtk.mcp_server import build_mcp_server
+from benchlingtk.models import AuthMethod, Environment
+from benchlingtk.runtime import Runtime, RuntimePool
+from benchlingtk.tls import verified_context
 
 SECRET = "sensitive-test-secret"
 

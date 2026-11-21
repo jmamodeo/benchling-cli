@@ -10,13 +10,13 @@ import pytest_asyncio
 from fake_benchling import TENANT, FakeBenchling
 from memory_keyring import MemoryKeyring
 
-from benchling_toolkit.api import BenchlingAPI
-from benchling_toolkit.auth import AuthManager
-from benchling_toolkit.environment import EnvironmentConfigStore
-from benchling_toolkit.keychain import Keychain
-from benchling_toolkit.models import AuthMethod, Environment
-from benchling_toolkit.redact import clear_registered_secrets
-from benchling_toolkit.runtime import Runtime, RuntimePool
+from benchlingtk.api import BenchlingAPI
+from benchlingtk.auth import AuthManager
+from benchlingtk.environment import EnvironmentConfigStore
+from benchlingtk.keychain import Keychain
+from benchlingtk.models import AuthMethod, Environment
+from benchlingtk.redact import clear_registered_secrets
+from benchlingtk.runtime import Runtime, RuntimePool
 
 SANDBOX_SECRET = "sandbox-client-secret"
 _ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
@@ -30,7 +30,7 @@ def plain_stdout(args: list[str]) -> str:
     """Run the CLI and return stdout with ANSI escapes removed."""
     from typer.testing import CliRunner
 
-    from benchling_toolkit import cli
+    from benchlingtk import cli
 
     result = CliRunner().invoke(cli.app, args, env=_PLAIN_TERMINAL)
     return _ANSI.sub("", result.stdout)

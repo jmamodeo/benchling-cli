@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from benchling_toolkit.errors import ConflictError, ValidationError
-from benchling_toolkit.models import PlanStatus
+from benchlingtk.errors import ConflictError, ValidationError
+from benchlingtk.models import PlanStatus
 
 
 async def test_container_read_and_find_operations(runtime, fake) -> None:
@@ -73,7 +73,7 @@ async def test_container_transfer_rechecks_both_containers(runtime, fake) -> Non
 
 
 def test_container_change_specifications_are_strict() -> None:
-    from benchling_toolkit.change_spec import parse_change_specification
+    from benchlingtk.change_spec import parse_change_specification
 
     parsed = parse_change_specification(
         {

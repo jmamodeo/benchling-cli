@@ -8,8 +8,8 @@ import json
 import pytest
 from fake_benchling import ENTRY_ID, Call
 
-from benchling_toolkit.errors import UpstreamError, ValidationError
-from benchling_toolkit.listing import (
+from benchlingtk.errors import UpstreamError, ValidationError
+from benchlingtk.listing import (
     _decode_cursor,
     dropdown_id_of,
     entry_summary,
@@ -379,7 +379,7 @@ async def test_find_schema_returns_field_types_required_flags_and_dropdown_optio
 
 
 async def test_find_schema_not_found_and_ambiguous_candidates(runtime, fake) -> None:
-    from benchling_toolkit.errors import NotFoundError
+    from benchlingtk.errors import NotFoundError
 
     with pytest.raises(NotFoundError, match="No schema named"):
         await runtime.service.find_schema("No such schema")

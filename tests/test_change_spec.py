@@ -6,8 +6,8 @@ import json
 
 import pytest
 
-from benchling_toolkit.change_spec import CHANGE_SPECIFICATION_SCHEMA, parse_change_specification
-from benchling_toolkit.errors import ValidationError
+from benchlingtk.change_spec import CHANGE_SPECIFICATION_SCHEMA, parse_change_specification
+from benchlingtk.errors import ValidationError
 
 TEXT = "docpart_text1"
 

@@ -23,7 +23,7 @@ flowchart TD
     auth --> keychain["OS keychain: client secret"]
 ```
 
-`plan_changes` does not pass through the write gate. It is allowed on a read-only MCP server because the remote calls it makes are reads. The plan file is local. `apply_changes` checks `writable_envs` before `ChangePlanner.apply`. The CLI has no equivalent flag: `benchling changes apply` is the operator's command.
+`plan_changes` does not pass through the write gate. It is allowed on a read-only MCP server because the remote calls it makes are reads. The plan file is local. `apply_changes` checks `writable_envs` before `ChangePlanner.apply`. The CLI has no equivalent flag: `benchlingtk changes apply` is the operator's command.
 
 MCP `plan_changes` validates the specification with `parse_change_specification` before any remote read. A shape that does not match the typed union returns `validation_error` and does not create a plan. The CLI accepts the same JSON, or a CSV result update, and the family planner validates it.
 

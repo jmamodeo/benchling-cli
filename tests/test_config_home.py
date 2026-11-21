@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from benchling_toolkit import config
-from benchling_toolkit.config import ConfigStore, application_home
+from benchlingtk import config
+from benchlingtk.config import ConfigStore, application_home
 
 
 @pytest.fixture

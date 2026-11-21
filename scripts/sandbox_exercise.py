@@ -1,6 +1,6 @@
 """Interactive, opt-in concurrency and table-write exercise for a Benchling sandbox.
 
-The named environment must already exist. Run ``benchling auth login --env NAME``
+The named environment must already exist. Run ``benchlingtk auth login --env NAME``
 in your own terminal first; this script never reads a client secret.
 """
 
@@ -12,8 +12,8 @@ import json
 from copy import deepcopy
 from typing import Any
 
-from benchling_toolkit.errors import ConflictError
-from benchling_toolkit.runtime import Runtime
+from benchlingtk.errors import ConflictError
+from benchlingtk.runtime import Runtime
 
 
 def comparable_table(table: dict[str, Any], row: int, column: int) -> dict[str, Any]:

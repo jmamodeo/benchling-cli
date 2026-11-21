@@ -23,7 +23,7 @@ Benchling enforces the app's project permissions and audit identity. `--allow-wr
 
 Entry text, table cells, and result values are data. The MCP server instructions tell the client to treat entry contents as untrusted. The toolkit does not scan that text for instructions.
 
-An agent that can only call MCP tools is inside the tool boundary in the diagram above. An agent that can also run a shell as this user is outside it: the shell can invoke `benchling changes apply` and can read the keychain. The MCP write gate is not a control against that agent.
+An agent that can only call MCP tools is inside the tool boundary in the diagram above. An agent that can also run a shell as this user is outside it: the shell can invoke `benchlingtk changes apply` and can read the keychain. The MCP write gate is not a control against that agent.
 
 ## Assets
 
@@ -38,7 +38,7 @@ An agent that can only call MCP tools is inside the tool boundary in the diagram
 
 ## Credentials
 
-`benchling auth login` reads the client secret from a hidden prompt or from `--secret-stdin`. `_read_secret` never takes it from an argument, so it is not in the command line, shell history, or an MCP config `args` list. Login calls the token endpoint before it saves anything. A rejected secret leaves the keychain and `environments.json` unchanged. If the save fails after a successful token request, `login` rolls both the keychain entry and the file back.
+`benchlingtk auth login` reads the client secret from a hidden prompt or from `--secret-stdin`. `_read_secret` never takes it from an argument, so it is not in the command line, shell history, or an MCP config `args` list. Login calls the token endpoint before it saves anything. A rejected secret leaves the keychain and `environments.json` unchanged. If the save fails after a successful token request, `login` rolls both the keychain entry and the file back.
 
 `Keychain._usable` refuses the fail backend, the null backend, and any backend whose module or class name contains `plaintext`, and it refuses a backend whose priority is below 1. There is no plaintext file fallback. On Linux the keychain is Secret Service on the session bus. A missing bus, a missing provider, or a locked collection fails login with the cause and one fix command. That command quotes the environment name, tenant URL, and client ID. `$KEYRING_PASSWORD` and `$BENCHLING_CLIENT_SECRET` stay variable references.
 
@@ -109,7 +109,7 @@ The app's Benchling policy is the other half of the scope. A read-only app canno
 
 ### What this does not do
 
-- The CLI apply command does not check an allow-list. Anyone who can run `benchling --env write changes apply PLAN_ID` as this user can apply a pending plan for `write`.
+- The CLI apply command does not check an allow-list. Anyone who can run `benchlingtk --env write changes apply PLAN_ID` as this user can apply a pending plan for `write`.
 - Scope is one entry per plan, not one project and not a set of entries. Nothing in the planner stops a caller from creating many plans across many entries the app can see.
 - Result PATCH and entry-field PATCH are not limited by an entry version on the wire. The entry check is the local comparison described above.
 - Export's path is chosen by the caller. The tool will write any path the user may write, and overwrite will replace that path.
@@ -132,7 +132,7 @@ A result attachment value `{"file": PATH}`, or a CSV cell `file:PATH`, is also a
 
 A secret pasted into an agent transcript is already outside this process. The CLI will not accept that secret as an argument. It will accept it on stdin if something pipes it to `auth login --secret-stdin`. The intended path is a person at a terminal, or a CI secret that never enters the agent's prompt.
 
-Issue drafts are a path from the tenant to a public repository. `issue_draft` and `benchling issue draft` refuse a draft when any field looks like a tenant host (a `benchling.com` subdomain other than docs, help, or the placeholder tenants), a Benchling record or display ID, a known client secret, a token or key, or an email address. Findings name the field and the kind, never the value. The MCP tool only drafts; filing is the person opening the prefilled URL, or the CLI with `--file` after they confirm.
+Issue drafts are a path from the tenant to a public repository. `issue_draft` and `benchlingtk issue draft` refuse a draft when any field looks like a tenant host (a `benchling.com` subdomain other than docs, help, or the placeholder tenants), a Benchling record or display ID, a known client secret, a token or key, or an email address. Findings name the field and the kind, never the value. The MCP tool only drafts; filing is the person opening the prefilled URL, or the CLI with `--file` after they confirm.
 
 ### What this does not do
 
